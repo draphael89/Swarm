@@ -1,5 +1,7 @@
 export type AgentRole = "manager" | "worker";
 
+export type AgentArchetypeId = string;
+
 export type AgentStatus = "idle" | "streaming" | "terminated" | "stopped_on_restart";
 
 export interface AgentModelDescriptor {
@@ -12,6 +14,7 @@ export interface AgentDescriptor {
   agentId: string;
   displayName: string;
   role: AgentRole;
+  archetypeId?: AgentArchetypeId;
   status: AgentStatus;
   createdAt: string;
   updatedAt: string;
@@ -36,6 +39,7 @@ export interface SendMessageReceipt {
 
 export interface SpawnAgentInput {
   agentId: string;
+  archetypeId?: AgentArchetypeId;
   systemPrompt?: string;
   model?: {
     provider: string;
@@ -55,6 +59,7 @@ export interface SwarmPaths {
   authFile: string;
   agentDir: string;
   managerAgentDir: string;
+  repoArchetypesDir: string;
   agentsStoreFile: string;
 }
 

@@ -31,6 +31,7 @@ export function createConfig(): SwarmConfig {
     (existsSync(defaultPiAuthFile) ? defaultPiAuthFile : resolve(authDir, "auth.json"));
   const agentDir = resolve(dataDir, "agent");
   const managerAgentDir = resolve(agentDir, "manager");
+  const repoArchetypesDir = resolve(rootDir, ".swarm", "archetypes");
 
   return {
     host: process.env.SWARM_HOST ?? "127.0.0.1",
@@ -54,6 +55,7 @@ export function createConfig(): SwarmConfig {
       authFile,
       agentDir,
       managerAgentDir,
+      repoArchetypesDir,
       agentsStoreFile: resolve(swarmDir, "agents.json")
     }
   };

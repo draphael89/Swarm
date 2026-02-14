@@ -12,7 +12,11 @@ import {
   type AgentSessionEvent
 } from "@mariozechner/pi-coding-agent";
 import type { ServerEvent } from "../protocol/ws-types.js";
-import { MANAGER_SYSTEM_PROMPT } from "./prompts/manager-system-prompt.js";
+import {
+  loadArchetypePromptRegistry,
+  normalizeArchetypeId,
+  type ArchetypePromptRegistry
+} from "./archetypes/archetype-prompt-registry.js";
 import { AgentRuntime } from "./agent-runtime.js";
 import { buildSwarmTools, type SwarmToolHost } from "./swarm-tools.js";
 import type {
@@ -40,6 +44,8 @@ const DEFAULT_WORKER_SYSTEM_PROMPT = `You are a worker agent in a swarm.
 - End users only see messages they send and manager speak_to_user outputs.
 - Your plain assistant text is not directly visible to end users.
 - Incoming messages prefixed with "SYSTEM:" are internal control/context updates, not direct end-user chat.`;
+const MANAGER_ARCHETYPE_ID = "manager";
+const MERGER_ARCHETYPE_ID = "merger";
 const INTERNAL_MODEL_MESSAGE_PREFIX = "SYSTEM: ";
 const MAX_CONVERSATION_HISTORY = 2000;
 const CONVERSATION_ENTRY_TYPE = "swarm_conversation_entry";
@@ -47,6 +53,13 @@ const LEGACY_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+function createEmptyArchetypePromptRegistry(): ArchetypePromptRegistry {
+  return {
+    resolvePrompt: () => undefined,
+    listArchetypeIds: () => []
+  };
 }
 
 export class SwarmManager extends EventEmitter implements SwarmToolHost {
@@ -57,6 +70,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private readonly runtimes = new Map<string, AgentRuntime>();
   private readonly conversationEntriesByAgentId = new Map<string, ConversationEntryEvent[]>();
 
+  private archetypePromptRegistry: ArchetypePromptRegistry = createEmptyArchetypePromptRegistry();
   private managerPendingUserReplies = 0;
 
   constructor(config: SwarmConfig, options?: { now?: () => string }) {
@@ -74,6 +88,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
 
     await this.ensureDirectories();
+
+    this.archetypePromptRegistry = await loadArchetypePromptRegistry({
+      repoOverridesDir: this.config.paths.repoArchetypesDir
+    });
 
     const loaded = await this.loadStore();
     for (const descriptor of loaded.agents) {
@@ -94,7 +112,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       model: managerDescriptor.model,
       cwd: managerDescriptor.cwd,
       managerAgentDir: this.config.paths.managerAgentDir,
-      managerSystemPromptSource: "typescript",
+      managerSystemPromptSource: `archetype:${MANAGER_ARCHETYPE_ID}`,
+      loadedArchetypeIds: this.archetypePromptRegistry.listArchetypeIds(),
       restoredAgentIds: Array.from(this.runtimes.keys())
     });
   }
@@ -122,10 +141,13 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     const model = this.resolveSpawnModel(input.model, manager.model);
 
+    const archetypeId = this.resolveSpawnWorkerArchetypeId(input, agentId);
+
     const descriptor: AgentDescriptor = {
       agentId,
       displayName: agentId,
       role: "worker",
+      archetypeId,
       status: "idle",
       createdAt,
       updatedAt: createdAt,
@@ -141,14 +163,18 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       callerAgentId,
       agentId,
       displayName: descriptor.displayName,
+      archetypeId: descriptor.archetypeId,
       model: descriptor.model,
       cwd: descriptor.cwd
     });
 
-    const runtime = await this.createRuntimeForDescriptor(
-      descriptor,
-      input.systemPrompt && input.systemPrompt.trim().length > 0 ? input.systemPrompt : DEFAULT_WORKER_SYSTEM_PROMPT
-    );
+    const explicitSystemPrompt = input.systemPrompt?.trim();
+    const runtimeSystemPrompt =
+      explicitSystemPrompt && explicitSystemPrompt.length > 0
+        ? explicitSystemPrompt
+        : this.resolveSystemPromptForDescriptor(descriptor);
+
+    const runtime = await this.createRuntimeForDescriptor(descriptor, runtimeSystemPrompt);
     this.runtimes.set(agentId, runtime);
 
     this.emitStatus(agentId, descriptor.status, runtime.getPendingCount());
@@ -355,7 +381,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.descriptors.set(managerId, managerDescriptor);
     await this.saveStore();
 
-    const managerRuntime = await this.createRuntimeForDescriptor(managerDescriptor, MANAGER_SYSTEM_PROMPT);
+    const managerRuntime = await this.createRuntimeForDescriptor(
+      managerDescriptor,
+      this.resolveSystemPromptForDescriptor(managerDescriptor)
+    );
     this.runtimes.set(managerId, managerRuntime);
 
     this.emitConversationReset(managerId, reason);
@@ -443,8 +472,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         continue;
       }
 
-      const systemPrompt =
-        descriptor.role === "manager" ? MANAGER_SYSTEM_PROMPT : DEFAULT_WORKER_SYSTEM_PROMPT;
+      const systemPrompt = this.resolveSystemPromptForDescriptor(descriptor);
 
       try {
         const runtime = await this.createRuntimeForDescriptor(descriptor, systemPrompt);
@@ -501,6 +529,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         agentId: this.config.managerId,
         displayName: this.config.managerDisplayName,
         role: "manager",
+        archetypeId: MANAGER_ARCHETYPE_ID,
         status: "idle",
         createdAt: now,
         updatedAt: now,
@@ -513,6 +542,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     existingManager.status = "idle";
+    existingManager.archetypeId = MANAGER_ARCHETYPE_ID;
     existingManager.updatedAt = now;
     existingManager.sessionFile = join(this.config.paths.sessionsDir, `${this.config.managerId}.jsonl`);
     if (!existingManager.cwd) {
@@ -564,6 +594,54 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     };
   }
 
+  private resolveSpawnWorkerArchetypeId(
+    input: SpawnAgentInput,
+    normalizedAgentId: string
+  ): string | undefined {
+    if (input.archetypeId !== undefined) {
+      const explicit = normalizeArchetypeId(input.archetypeId);
+      if (!explicit) {
+        throw new Error("spawn_agent archetypeId must include at least one letter or number");
+      }
+      if (!this.archetypePromptRegistry.resolvePrompt(explicit)) {
+        throw new Error(`Unknown archetypeId: ${explicit}`);
+      }
+      return explicit;
+    }
+
+    if (
+      normalizedAgentId === MERGER_ARCHETYPE_ID ||
+      normalizedAgentId.startsWith(`${MERGER_ARCHETYPE_ID}-`)
+    ) {
+      return MERGER_ARCHETYPE_ID;
+    }
+
+    return undefined;
+  }
+
+  private resolveSystemPromptForDescriptor(descriptor: AgentDescriptor): string {
+    if (descriptor.role === "manager") {
+      return this.resolveRequiredArchetypePrompt(MANAGER_ARCHETYPE_ID);
+    }
+
+    if (descriptor.archetypeId) {
+      const archetypePrompt = this.archetypePromptRegistry.resolvePrompt(descriptor.archetypeId);
+      if (archetypePrompt) {
+        return archetypePrompt;
+      }
+    }
+
+    return DEFAULT_WORKER_SYSTEM_PROMPT;
+  }
+
+  private resolveRequiredArchetypePrompt(archetypeId: string): string {
+    const prompt = this.archetypePromptRegistry.resolvePrompt(archetypeId);
+    if (!prompt) {
+      throw new Error(`Missing archetype prompt: ${archetypeId}`);
+    }
+    return prompt;
+  }
+
   private normalizeCwd(cwd: string): string {
     if (cwd.startsWith("/")) return cwd;
     return join(this.config.paths.rootDir, cwd);
@@ -612,10 +690,12 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       agentId: descriptor.agentId,
       role: descriptor.role,
       model: descriptor.model,
+      archetypeId: descriptor.archetypeId,
       cwd: descriptor.cwd,
       authFile: this.config.paths.authFile,
       agentDir: runtimeAgentDir,
-      managerSystemPromptSource: descriptor.role === "manager" ? "typescript" : undefined
+      managerSystemPromptSource:
+        descriptor.role === "manager" ? `archetype:${MANAGER_ARCHETYPE_ID}` : undefined
     });
 
     const authStorage = new AuthStorage(this.config.paths.authFile);
@@ -625,7 +705,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         ? new DefaultResourceLoader({
             cwd: descriptor.cwd,
             agentDir: runtimeAgentDir,
-            // Keep manager prompt canonical and checked in via TypeScript source.
+            // Manager prompt comes from the archetype prompt registry.
             systemPrompt,
             appendSystemPromptOverride: () => []
           })

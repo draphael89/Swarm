@@ -57,6 +57,7 @@ describe('createConfig', () => {
       expect(config.paths.sessionsDir).toBe(resolve(homedir(), '.swarm-dev', 'sessions'))
       expect(config.paths.authDir).toBe(resolve(homedir(), '.swarm-dev', 'auth'))
       expect(config.paths.managerAgentDir).toBe(resolve(homedir(), '.swarm-dev', 'agent', 'manager'))
+      expect(config.paths.repoArchetypesDir).toBe(resolve(config.paths.rootDir, '.swarm', 'archetypes'))
     })
   })
 
@@ -66,6 +67,7 @@ describe('createConfig', () => {
 
       expect(config.paths.dataDir).toBe(resolve(homedir(), '.swarm'))
       expect(config.paths.managerAgentDir).toBe(resolve(homedir(), '.swarm', 'agent', 'manager'))
+      expect(config.paths.repoArchetypesDir).toBe(resolve(config.paths.rootDir, '.swarm', 'archetypes'))
       expect(config.paths.agentsStoreFile).toBe(resolve(homedir(), '.swarm', 'swarm', 'agents.json'))
     })
   })

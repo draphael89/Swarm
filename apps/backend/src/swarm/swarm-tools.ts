@@ -92,12 +92,15 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
       name: "spawn_agent",
       label: "Spawn Agent",
       description:
-        "Create and start a new worker agent. agentId is required and normalized to lowercase kebab-case; if taken, a numeric suffix (-2, -3, …) is appended. systemPrompt, model, cwd, and initialMessage are optional.",
+        "Create and start a new worker agent. agentId is required and normalized to lowercase kebab-case; if taken, a numeric suffix (-2, -3, …) is appended. archetypeId, systemPrompt, model, cwd, and initialMessage are optional.",
       parameters: Type.Object({
         agentId: Type.String({
           description:
             "Required agent identifier. Normalized to lowercase kebab-case; collisions are suffixed numerically."
         }),
+        archetypeId: Type.Optional(
+          Type.String({ description: "Optional archetype id (for example: merger)." })
+        ),
         systemPrompt: Type.Optional(Type.String({ description: "Optional system prompt override." })),
         model: Type.Optional(
           Type.Object({
@@ -112,6 +115,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
       async execute(_toolCallId, params) {
         const parsed = params as {
           agentId: string;
+          archetypeId?: string;
           systemPrompt?: string;
           model?: { provider: string; modelId: string; thinkingLevel?: string };
           cwd?: string;
@@ -120,6 +124,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
 
         const spawned = await host.spawnAgent(descriptor.agentId, {
           agentId: parsed.agentId,
+          archetypeId: parsed.archetypeId,
           systemPrompt: parsed.systemPrompt,
           model: parsed.model,
           cwd: parsed.cwd,

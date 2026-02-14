@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { SessionManager } from '@mariozechner/pi-coding-agent'
-import { MANAGER_SYSTEM_PROMPT } from '../swarm/prompts/manager-system-prompt.js'
 import { SwarmManager } from '../swarm/swarm-manager.js'
 import type { AgentDescriptor, RequestedDeliveryMode, SendMessageReceipt, SwarmConfig } from '../swarm/types.js'
 import type { AgentRuntime } from '../swarm/agent-runtime.js'
@@ -82,12 +81,14 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
   const authDir = join(dataDir, 'auth')
   const agentDir = join(dataDir, 'agent')
   const managerAgentDir = join(agentDir, 'manager')
+  const repoArchetypesDir = join(root, '.swarm', 'archetypes')
 
   await mkdir(swarmDir, { recursive: true })
   await mkdir(sessionsDir, { recursive: true })
   await mkdir(authDir, { recursive: true })
   await mkdir(agentDir, { recursive: true })
   await mkdir(managerAgentDir, { recursive: true })
+  await mkdir(repoArchetypesDir, { recursive: true })
 
   return {
     host: '127.0.0.1',
@@ -111,6 +112,7 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
       authFile: join(authDir, 'auth.json'),
       agentDir,
       managerAgentDir,
+      repoArchetypesDir,
       agentsStoreFile: join(swarmDir, 'agents.json'),
     },
   }
@@ -147,7 +149,7 @@ describe('SwarmManager', () => {
     await manager.boot()
 
     const managerPrompt = manager.systemPromptByAgentId.get('manager')
-    expect(managerPrompt).toBe(MANAGER_SYSTEM_PROMPT)
+    expect(managerPrompt).toContain('You are the manager agent in a multi-agent swarm.')
     expect(managerPrompt).toContain('End users only see two things')
     expect(managerPrompt).toContain('prefixed with "SYSTEM:"')
 
@@ -157,6 +159,63 @@ describe('SwarmManager', () => {
     expect(workerPrompt).toBeDefined()
     expect(workerPrompt).toContain('End users only see messages they send and manager speak_to_user outputs.')
     expect(workerPrompt).toContain('Incoming messages prefixed with "SYSTEM:"')
+  })
+
+  it('uses repo manager archetype overrides on boot', async () => {
+    const config = await makeTempConfig()
+    const managerOverride = 'You are the repo manager override.'
+    await writeFile(join(config.paths.repoArchetypesDir, 'manager.md'), `${managerOverride}\n`, 'utf8')
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    expect(manager.systemPromptByAgentId.get('manager')).toBe(managerOverride)
+  })
+
+  it('uses merger archetype prompt for merger workers', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const merger = await manager.spawnAgent('manager', {
+      agentId: 'Release Merger',
+      archetypeId: 'merger',
+    })
+
+    const mergerPrompt = manager.systemPromptByAgentId.get(merger.agentId)
+    expect(mergerPrompt).toContain('You are the merger agent in a multi-agent swarm.')
+    expect(mergerPrompt).toContain('Own branch integration and merge execution tasks.')
+  })
+
+  it('applies deterministic merger archetype mapping for merger-* worker ids', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const merger = await manager.spawnAgent('manager', { agentId: 'Merger Agent' })
+
+    const mergerPrompt = manager.systemPromptByAgentId.get(merger.agentId)
+    expect(merger.agentId).toBe('merger-agent')
+    expect(mergerPrompt).toContain('You are the merger agent in a multi-agent swarm.')
+  })
+
+  it('restores merger archetype workers with merger prompts on restart', async () => {
+    const config = await makeTempConfig()
+
+    const firstBoot = new TestSwarmManager(config)
+    await firstBoot.boot()
+
+    const merger = await firstBoot.spawnAgent('manager', {
+      agentId: 'Merger',
+      archetypeId: 'merger',
+    })
+
+    const secondBoot = new TestSwarmManager(config)
+    await secondBoot.boot()
+
+    expect(secondBoot.systemPromptByAgentId.get(merger.agentId)).toContain(
+      'You are the merger agent in a multi-agent swarm.',
+    )
   })
 
   it('spawns unique normalized agent ids on collisions', async () => {
