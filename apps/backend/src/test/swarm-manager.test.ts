@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { SessionManager } from '@mariozechner/pi-coding-agent'
+import { MANAGER_SYSTEM_PROMPT } from '../swarm/prompts/manager-system-prompt.js'
 import { SwarmManager } from '../swarm/swarm-manager.js'
 import type { AgentDescriptor, RequestedDeliveryMode, SendMessageReceipt, SwarmConfig } from '../swarm/types.js'
 import type { AgentRuntime } from '../swarm/agent-runtime.js'
@@ -35,7 +36,7 @@ class FakeRuntime {
     return {
       targetAgentId: this.descriptor.agentId,
       deliveryId: `delivery-${this.nextDeliveryId}`,
-      acceptedMode: this.busy ? (delivery === 'steer' ? 'steer' : 'followUp') : 'prompt',
+      acceptedMode: this.busy ? 'steer' : 'prompt',
     }
   }
 
@@ -59,11 +60,16 @@ class FakeRuntime {
 class TestSwarmManager extends SwarmManager {
   readonly runtimeByAgentId = new Map<string, FakeRuntime>()
   readonly createdRuntimeIds: string[] = []
+  readonly systemPromptByAgentId = new Map<string, string>()
 
-  protected override async createRuntimeForDescriptor(descriptor: AgentDescriptor): Promise<AgentRuntime> {
+  protected override async createRuntimeForDescriptor(
+    descriptor: AgentDescriptor,
+    systemPrompt: string,
+  ): Promise<AgentRuntime> {
     const runtime = new FakeRuntime(descriptor)
     this.createdRuntimeIds.push(descriptor.agentId)
     this.runtimeByAgentId.set(descriptor.agentId, runtime)
+    this.systemPromptByAgentId.set(descriptor.agentId, systemPrompt)
     return runtime as unknown as AgentRuntime
   }
 }
@@ -105,6 +111,7 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
       authFile: join(authDir, 'auth.json'),
       agentDir,
       managerAgentDir,
+      managerSystemPromptFile: join(managerAgentDir, 'SYSTEM.md'),
       managerAppendSystemPromptFile: join(managerAgentDir, 'APPEND_SYSTEM.md'),
       agentsStoreFile: join(swarmDir, 'agents.json'),
     },
@@ -125,6 +132,35 @@ describe('SwarmManager', () => {
     expect(manager.createdRuntimeIds).toEqual(['manager'])
   })
 
+  it('creates manager SYSTEM.md when missing', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+
+    await manager.boot()
+
+    const systemPromptOnDisk = await readFile(config.paths.managerSystemPromptFile, 'utf8')
+    expect(systemPromptOnDisk).toContain('Operating stance (delegation-first):')
+    expect(systemPromptOnDisk).toContain('User-facing output MUST go through speak_to_user.')
+  })
+
+  it('uses manager and default worker prompts with explicit visibility guidance', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const managerPrompt = manager.systemPromptByAgentId.get('manager')
+    expect(managerPrompt).toBe(MANAGER_SYSTEM_PROMPT)
+    expect(managerPrompt).toContain('End users only see two things')
+    expect(managerPrompt).toContain('prefixed with "SYSTEM:"')
+
+    const worker = await manager.spawnAgent('manager', { name: 'Prompt Worker' })
+    const workerPrompt = manager.systemPromptByAgentId.get(worker.agentId)
+
+    expect(workerPrompt).toBeDefined()
+    expect(workerPrompt).toContain('End users only see messages they send and manager speak_to_user outputs.')
+    expect(workerPrompt).toContain('Incoming messages prefixed with "SYSTEM:"')
+  })
+
   it('spawns unique semantic agent ids on collisions', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
@@ -135,6 +171,21 @@ describe('SwarmManager', () => {
 
     expect(first.agentId).toBe('code-scout')
     expect(second.agentId).toBe('code-scout-2')
+  })
+
+  it('SYSTEM-prefixes worker initial messages (internal manager->worker input)', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', {
+      name: 'Kickoff Worker',
+      initialMessage: 'start implementation',
+    })
+
+    const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
+    expect(workerRuntime).toBeDefined()
+    expect(workerRuntime?.sendCalls[0]?.message).toBe('SYSTEM: start implementation')
   })
 
   it('enforces manager-only spawn and kill permissions', async () => {
@@ -148,7 +199,7 @@ describe('SwarmManager', () => {
     await expect(manager.killAgent(worker.agentId, worker.agentId)).rejects.toThrow('Only manager can kill agents')
   })
 
-  it('returns fire-and-forget delivery receipt for sendMessage', async () => {
+  it('returns fire-and-forget receipt and prefixes internal inter-agent deliveries', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
@@ -160,9 +211,12 @@ describe('SwarmManager', () => {
     expect(receipt.targetAgentId).toBe(worker.agentId)
     expect(receipt.deliveryId).toBe('delivery-1')
     expect(receipt.acceptedMode).toBe('prompt')
+
+    const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
+    expect(workerRuntime?.sendCalls.at(-1)?.message).toBe('SYSTEM: hi worker')
   })
 
-  it('sends manager user input as steer delivery', async () => {
+  it('sends manager user input as steer delivery without SYSTEM prefixing', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
@@ -172,9 +226,38 @@ describe('SwarmManager', () => {
     const managerRuntime = manager.runtimeByAgentId.get('manager')
     expect(managerRuntime).toBeDefined()
     expect(managerRuntime?.sendCalls.at(-1)?.delivery).toBe('steer')
+    expect(managerRuntime?.sendCalls.at(-1)?.message).toBe('interrupt current plan')
   })
 
-  it('uses followUp by default and steer when requested for busy runtime', async () => {
+  it('does not SYSTEM-prefix direct user messages routed to a worker', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', { name: 'User Routed Worker' })
+
+    await manager.handleUserMessage('hello worker', { targetAgentId: worker.agentId })
+
+    const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
+    expect(workerRuntime).toBeDefined()
+    expect(workerRuntime?.sendCalls.at(-1)?.message).toBe('hello worker')
+  })
+
+  it('does not double-prefix internal messages that already start with SYSTEM:', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', { name: 'Already Tagged Worker' })
+
+    await manager.sendMessage('manager', worker.agentId, 'SYSTEM: pre-tagged', 'auto')
+
+    const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
+    expect(workerRuntime).toBeDefined()
+    expect(workerRuntime?.sendCalls.at(-1)?.message).toBe('SYSTEM: pre-tagged')
+  })
+
+  it('accepts busy-runtime messages as steer regardless of requested delivery', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
@@ -184,10 +267,12 @@ describe('SwarmManager', () => {
     expect(runtime).toBeDefined()
     runtime!.busy = true
 
-    const followUpReceipt = await manager.sendMessage('manager', worker.agentId, 'queued auto', 'auto')
+    const autoReceipt = await manager.sendMessage('manager', worker.agentId, 'queued auto', 'auto')
+    const followUpReceipt = await manager.sendMessage('manager', worker.agentId, 'queued followup', 'followUp')
     const steerReceipt = await manager.sendMessage('manager', worker.agentId, 'queued steer', 'steer')
 
-    expect(followUpReceipt.acceptedMode).toBe('followUp')
+    expect(autoReceipt.acceptedMode).toBe('steer')
+    expect(followUpReceipt.acceptedMode).toBe('steer')
     expect(steerReceipt.acceptedMode).toBe('steer')
   })
 

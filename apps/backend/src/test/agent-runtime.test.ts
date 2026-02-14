@@ -61,8 +61,17 @@ function makeDescriptor(): AgentDescriptor {
   }
 }
 
+function createDeferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = () => {}
+  const promise = new Promise<void>((nextResolve) => {
+    resolve = nextResolve
+  })
+
+  return { promise, resolve }
+}
+
 describe('AgentRuntime', () => {
-  it('queues followUp by default when busy and steer when requested', async () => {
+  it('queues steer for all messages when runtime is busy', async () => {
     const session = new FakeSession()
 
     const runtime = new AgentRuntime({
@@ -75,13 +84,47 @@ describe('AgentRuntime', () => {
 
     session.isStreaming = true
 
-    const followUpReceipt = await runtime.sendMessage('auto message')
+    const autoReceipt = await runtime.sendMessage('auto message')
+    const followUpReceipt = await runtime.sendMessage('explicit followup', 'followUp')
     const steerReceipt = await runtime.sendMessage('steer message', 'steer')
 
-    expect(followUpReceipt.acceptedMode).toBe('followUp')
+    expect(autoReceipt.acceptedMode).toBe('steer')
+    expect(followUpReceipt.acceptedMode).toBe('steer')
     expect(steerReceipt.acceptedMode).toBe('steer')
-    expect(session.followUpCalls).toEqual(['auto message'])
-    expect(session.steerCalls).toEqual(['steer message'])
+    expect(session.followUpCalls).toEqual([])
+    expect(session.steerCalls).toEqual(['auto message', 'explicit followup', 'steer message'])
+  })
+
+  it('queues steer while prompt dispatch is in progress', async () => {
+    const session = new FakeSession()
+    const deferred = createDeferred()
+
+    session.prompt = async (message: string): Promise<void> => {
+      session.promptCalls.push(message)
+      await deferred.promise
+    }
+
+    const runtime = new AgentRuntime({
+      descriptor: makeDescriptor(),
+      session: session as any,
+      callbacks: {
+        onStatusChange: () => {},
+      },
+    })
+
+    const first = await runtime.sendMessage('first prompt')
+    const second = await runtime.sendMessage('queued auto')
+    const third = await runtime.sendMessage('queued followup', 'followUp')
+
+    expect(first.acceptedMode).toBe('prompt')
+    expect(second.acceptedMode).toBe('steer')
+    expect(third.acceptedMode).toBe('steer')
+    expect(session.promptCalls).toEqual(['first prompt'])
+    expect(session.followUpCalls).toEqual([])
+    expect(session.steerCalls).toEqual(['queued auto', 'queued followup'])
+
+    deferred.resolve()
+    await Promise.resolve()
   })
 
   it('consumes pending queue when queued user message starts', async () => {

@@ -1,3 +1,4 @@
+import { CircleDashed } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { AgentDescriptor, AgentStatus } from '@/lib/ws-types'
 
@@ -9,8 +10,8 @@ interface AgentSidebarProps {
   onSelectAgent: (agentId: string) => void
 }
 
-function statusLabel(status: AgentStatus): string {
-  return status === 'streaming' ? 'active' : 'idle'
+function isWorkingStatus(status: AgentStatus): boolean {
+  return status === 'streaming'
 }
 
 export function AgentSidebar({ connected, agents, statuses, selectedAgentId, onSelectAgent }: AgentSidebarProps) {
@@ -23,7 +24,7 @@ export function AgentSidebar({ connected, agents, statuses, selectedAgentId, onS
     })
 
   return (
-    <aside className="w-72 shrink-0 border-r border-border/70 bg-muted/20">
+    <aside className="w-48 shrink-0 border-r border-border/70 bg-muted/20 sm:w-56 md:w-64 lg:w-72">
       <div className="border-b border-border/70 px-3 py-3">
         <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Agents</p>
         <h2 className="mt-1 text-sm font-semibold">Active swarm members</h2>
@@ -39,6 +40,7 @@ export function AgentSidebar({ connected, agents, statuses, selectedAgentId, onS
           <ul className="space-y-1">
             {activeAgents.map((agent) => {
               const liveStatus = statuses[agent.agentId]?.status ?? agent.status
+              const isWorking = isWorkingStatus(liveStatus)
               const isSelected = selectedAgentId === agent.agentId
               const isWorker = agent.role === 'worker'
 
@@ -55,7 +57,10 @@ export function AgentSidebar({ connected, agents, statuses, selectedAgentId, onS
                     )}
                   >
                     <div className="flex items-center gap-2 text-xs">
-                      <span className="shrink-0 text-muted-foreground">{statusLabel(liveStatus)}</span>
+                      <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+                        {isWorking ? <CircleDashed aria-hidden="true" className="size-3 animate-spin" /> : <span aria-hidden="true" className="size-3" />}
+                        <span className="sr-only">{isWorking ? 'Working' : 'Idle'}</span>
+                      </span>
                       <span className="truncate font-mono text-[11px]">{agent.agentId}</span>
                     </div>
                   </button>

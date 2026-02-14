@@ -55,6 +55,8 @@ export function createConfig(): SwarmConfig {
       authFile,
       agentDir,
       managerAgentDir,
+      managerSystemPromptFile: resolve(managerAgentDir, "SYSTEM.md"),
+      // Keep legacy append path populated for compatibility/migration.
       managerAppendSystemPromptFile: resolve(managerAgentDir, "APPEND_SYSTEM.md"),
       agentsStoreFile: resolve(swarmDir, "agents.json")
     }

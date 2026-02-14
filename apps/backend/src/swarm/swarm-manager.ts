@@ -36,7 +36,11 @@ const DEFAULT_WORKER_SYSTEM_PROMPT = `You are a worker agent in a swarm.
 - You can list agents and send messages to other agents.
 - Use coding tools (read/bash/edit/write) to execute implementation tasks.
 - Report progress and outcomes back to the manager using send_message_to_agent.
-- You are not user-facing. Do not assume direct user communication.`;
+- You are not user-facing.
+- End users only see messages they send and manager speak_to_user outputs.
+- Your plain assistant text is not directly visible to end users.
+- Incoming messages prefixed with "SYSTEM:" are internal control/context updates, not direct end-user chat.`;
+const INTERNAL_MODEL_MESSAGE_PREFIX = "SYSTEM: ";
 const MAX_CONVERSATION_HISTORY = 2000;
 const CONVERSATION_ENTRY_TYPE = "swarm_conversation_entry";
 const LEGACY_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
@@ -70,7 +74,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
 
     await this.ensureDirectories();
-    await this.ensureManagerPromptFile();
+    await this.ensureManagerSystemPromptFile();
 
     const loaded = await this.loadStore();
     for (const descriptor of loaded.agents) {
@@ -94,7 +98,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       model: managerDescriptor.model,
       cwd: managerDescriptor.cwd,
       managerAgentDir: this.config.paths.managerAgentDir,
-      managerAppendSystemPromptFile: this.config.paths.managerAppendSystemPromptFile
+      managerSystemPromptFile: this.config.paths.managerSystemPromptFile
     });
   }
 
@@ -154,7 +158,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.emitAgentsSnapshot();
 
     if (input.initialMessage && input.initialMessage.trim().length > 0) {
-      await runtime.sendMessage(input.initialMessage, "auto");
+      await this.sendMessage(callerAgentId, agentId, input.initialMessage, "auto", { origin: "internal" });
     }
 
     return { ...descriptor, model: { ...descriptor.model } };
@@ -195,7 +199,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     fromAgentId: string,
     targetAgentId: string,
     message: string,
-    delivery: RequestedDeliveryMode = "auto"
+    delivery: RequestedDeliveryMode = "auto",
+    options?: { origin?: "user" | "internal" }
   ): Promise<SendMessageReceipt> {
     const sender = this.descriptors.get(fromAgentId);
     if (!sender || sender.status === "terminated") {
@@ -215,16 +220,37 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error(`Target runtime is not available: ${targetAgentId}`);
     }
 
-    const receipt = await runtime.sendMessage(message, delivery);
+    const origin = options?.origin ?? "internal";
+    const modelMessage = this.prepareModelInboundMessage(message, origin);
+    const receipt = await runtime.sendMessage(modelMessage, delivery);
+
     this.logDebug("agent:send_message", {
       fromAgentId,
       targetAgentId,
+      origin,
       requestedDelivery: delivery,
       acceptedMode: receipt.acceptedMode,
-      textPreview: previewForLog(message)
+      textPreview: previewForLog(message),
+      modelTextPreview: previewForLog(modelMessage)
     });
 
     return receipt;
+  }
+
+  private prepareModelInboundMessage(message: string, origin: "user" | "internal"): string {
+    if (origin === "user") {
+      return message;
+    }
+
+    if (message.trim().length === 0) {
+      return message;
+    }
+
+    if (/^system:/i.test(message.trimStart())) {
+      return message;
+    }
+
+    return `${INTERNAL_MODEL_MESSAGE_PREFIX}${message}`;
   }
 
   async publishToUser(agentId: string, text: string, source: "speak_to_user" | "system" = "speak_to_user"): Promise<void> {
@@ -288,7 +314,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.emitConversationMessage(userEvent);
 
     if (targetAgentId !== this.config.managerId) {
-      await this.sendMessage(this.config.managerId, targetAgentId, trimmed, options?.delivery ?? "auto");
+      await this.sendMessage(this.config.managerId, targetAgentId, trimmed, options?.delivery ?? "auto", {
+        origin: "user"
+      });
       return;
     }
 
@@ -531,8 +559,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       cwd: descriptor.cwd,
       authFile: this.config.paths.authFile,
       agentDir: runtimeAgentDir,
-      appendSystemPromptFile:
-        descriptor.role === "manager" ? this.config.paths.managerAppendSystemPromptFile : undefined
+      systemPromptFile:
+        descriptor.role === "manager" ? this.config.paths.managerSystemPromptFile : undefined
     });
 
     const authStorage = new AuthStorage(this.config.paths.authFile);
@@ -542,7 +570,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         ? new DefaultResourceLoader({
             cwd: descriptor.cwd,
             agentDir: runtimeAgentDir,
-            appendSystemPrompt: this.config.paths.managerAppendSystemPromptFile
+            // Manager uses a full custom SYSTEM.md, not append-only behavior.
+            systemPrompt: this.config.paths.managerSystemPromptFile,
+            appendSystemPromptOverride: () => []
           })
         : new DefaultResourceLoader({
             cwd: descriptor.cwd,
@@ -857,8 +887,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
   }
 
-  private async ensureManagerPromptFile(): Promise<void> {
-    const target = this.config.paths.managerAppendSystemPromptFile;
+  private async ensureManagerSystemPromptFile(): Promise<void> {
+    const target = this.config.paths.managerSystemPromptFile;
     try {
       await readFile(target, "utf8");
       return;
@@ -873,8 +903,28 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       }
     }
 
+    let seedPrompt = MANAGER_SYSTEM_PROMPT.trim();
+    const legacyAppendPath = this.config.paths.managerAppendSystemPromptFile;
+    if (legacyAppendPath) {
+      try {
+        const legacyAppendPrompt = await readFile(legacyAppendPath, "utf8");
+        if (legacyAppendPrompt.trim().length > 0) {
+          seedPrompt = legacyAppendPrompt.trim();
+        }
+      } catch (error) {
+        if (
+          typeof error !== "object" ||
+          !error ||
+          !("code" in error) ||
+          (error as { code?: string }).code !== "ENOENT"
+        ) {
+          throw error;
+        }
+      }
+    }
+
     await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, `${MANAGER_SYSTEM_PROMPT.trim()}\n`, "utf8");
+    await writeFile(target, `${seedPrompt}\n`, "utf8");
   }
 
   private async deleteManagerSessionFile(sessionFile: string): Promise<void> {

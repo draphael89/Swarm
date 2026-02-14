@@ -10,7 +10,7 @@ import type {
 interface PendingDelivery {
   deliveryId: string;
   message: string;
-  mode: "followUp" | "steer";
+  mode: "steer";
 }
 
 export interface AgentRuntimeCallbacks {
@@ -29,6 +29,7 @@ export class AgentRuntime {
   private status: AgentStatus;
   private unsubscribe: (() => void) | undefined;
   private readonly inFlightPrompts = new Set<Promise<void>>();
+  private promptDispatchPending = false;
 
   constructor(options: {
     descriptor: AgentDescriptor;
@@ -61,15 +62,15 @@ export class AgentRuntime {
 
   async sendMessage(
     message: string,
-    requestedMode: RequestedDeliveryMode = "auto"
+    _requestedMode: RequestedDeliveryMode = "auto"
   ): Promise<SendMessageReceipt> {
     this.ensureNotTerminated();
 
     const deliveryId = randomUUID();
 
-    if (this.session.isStreaming) {
-      const resolvedQueueMode = requestedMode === "steer" ? "steer" : "followUp";
-      await this.enqueueMessage(deliveryId, message, resolvedQueueMode);
+    if (this.session.isStreaming || this.promptDispatchPending) {
+      const resolvedQueueMode = "steer";
+      await this.enqueueMessage(deliveryId, message);
       await this.emitStatus();
       return {
         targetAgentId: this.descriptor.agentId,
@@ -99,6 +100,7 @@ export class AgentRuntime {
     this.unsubscribe = undefined;
     this.session.dispose();
     this.pendingDeliveries = [];
+    this.promptDispatchPending = false;
     this.inFlightPrompts.clear();
     this.status = "terminated";
     this.descriptor.status = "terminated";
@@ -124,6 +126,8 @@ export class AgentRuntime {
   }
 
   private dispatchPrompt(message: string): void {
+    this.promptDispatchPending = true;
+
     const run = this.session
       .prompt(message)
       .catch((error) => {
@@ -135,27 +139,20 @@ export class AgentRuntime {
         );
       })
       .finally(() => {
+        this.promptDispatchPending = false;
         this.inFlightPrompts.delete(run);
       });
 
     this.inFlightPrompts.add(run);
   }
 
-  private async enqueueMessage(
-    deliveryId: string,
-    message: string,
-    mode: "followUp" | "steer"
-  ): Promise<void> {
-    if (mode === "steer") {
-      await this.session.steer(message);
-    } else {
-      await this.session.followUp(message);
-    }
+  private async enqueueMessage(deliveryId: string, message: string): Promise<void> {
+    await this.session.steer(message);
 
     this.pendingDeliveries.push({
       deliveryId,
       message,
-      mode
+      mode: "steer"
     });
   }
 
@@ -165,6 +162,7 @@ export class AgentRuntime {
     }
 
     if (event.type === "agent_start") {
+      this.promptDispatchPending = false;
       await this.updateStatus("streaming");
       return;
     }

@@ -64,7 +64,7 @@ function IndexPage() {
   const handleSend = (text: string) => {
     clientRef.current?.sendUserMessage(text, {
       agentId: activeAgentId,
-      delivery: activeAgentId === 'manager' ? 'steer' : isLoading ? 'followUp' : 'auto',
+      delivery: activeAgentId === 'manager' ? 'steer' : isLoading ? 'steer' : 'auto',
     })
   }
 
@@ -82,7 +82,7 @@ function IndexPage() {
 
   return (
     <main className="h-screen bg-background text-foreground">
-      <div className="mx-auto flex h-screen w-full max-w-[1400px] border-x border-border/60 bg-background shadow-sm">
+      <div className="flex h-screen w-full min-w-0 overflow-hidden border-x border-border/60 bg-background shadow-sm">
         <AgentSidebar
           connected={state.connected}
           agents={state.agents}
@@ -118,7 +118,7 @@ function IndexPage() {
             onSend={handleSend}
             isLoading={isLoading}
             disabled={!state.connected}
-            allowWhileLoading={activeAgentId !== 'manager'}
+            allowWhileLoading
             agentLabel={activeAgentLabel}
           />
         </div>

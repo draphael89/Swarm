@@ -92,7 +92,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   const placeholder = disabled
     ? 'Waiting for connection...'
     : allowWhileLoading && isLoading
-      ? `Queue follow-up for ${agentLabel}...`
+      ? `Send another message to ${agentLabel}...`
       : `Message ${agentLabel}...`
 
   return (
