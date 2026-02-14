@@ -1,0 +1,20 @@
+{
+  "name": "swarm",
+  "private": true,
+  "packageManager": "pnpm@10.8.0",
+  "type": "module",
+  "workspaces": [
+    "apps/backend",
+    "apps/ui"
+  ],
+  "scripts": {
+    "dev": "concurrently --kill-others-on-fail --names backend,ui \"pnpm --filter @swarm/backend dev\" \"pnpm --filter @swarm/ui dev\"",
+    "dev:backend": "pnpm --filter @swarm/backend dev",
+    "dev:ui": "pnpm --filter @swarm/ui dev",
+    "build": "pnpm --filter @swarm/backend build && pnpm --filter @swarm/ui build",
+    "test": "pnpm --filter @swarm/backend test && pnpm --filter @swarm/ui test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

@@ -1,0 +1,6 @@
+reference/
+node_modules/
+**/node_modules/
+**/dist/
+**/.tanstack/
+.DS_Store

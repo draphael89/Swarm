@@ -1,0 +1,876 @@
+import { EventEmitter } from "node:events";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { getModel, type Model } from "@mariozechner/pi-ai";
+import {
+  AuthStorage,
+  DefaultResourceLoader,
+  createAgentSession,
+  ModelRegistry,
+  SessionManager,
+  type AgentSession,
+  type AgentSessionEvent
+} from "@mariozechner/pi-coding-agent";
+import type { ServerEvent } from "../protocol/ws-types.js";
+import { MANAGER_SYSTEM_PROMPT } from "./prompts/manager-system-prompt.js";
+import { AgentRuntime } from "./agent-runtime.js";
+import { buildSwarmTools, type SwarmToolHost } from "./swarm-tools.js";
+import type {
+  AcceptedDeliveryMode,
+  AgentDescriptor,
+  AgentModelDescriptor,
+  AgentStatus,
+  AgentStatusEvent,
+  AgentsSnapshotEvent,
+  AgentsStoreFile,
+  ConversationMessageEvent,
+  RequestedDeliveryMode,
+  SendMessageReceipt,
+  SpawnAgentInput,
+  SwarmConfig
+} from "./types.js";
+
+const DEFAULT_WORKER_SYSTEM_PROMPT = `You are a worker agent in a swarm.
+- You can list agents and send messages to other agents.
+- Use coding tools (read/bash/edit/write) to execute implementation tasks.
+- Report progress and outcomes back to the manager using send_message_to_agent.
+- You are not user-facing. Do not assume direct user communication.`;
+const MAX_CONVERSATION_HISTORY = 2000;
+const MANAGER_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+export class SwarmManager extends EventEmitter implements SwarmToolHost {
+  private readonly config: SwarmConfig;
+  private readonly now: () => string;
+
+  private readonly descriptors = new Map<string, AgentDescriptor>();
+  private readonly runtimes = new Map<string, AgentRuntime>();
+  private readonly conversationHistory: ConversationMessageEvent[] = [];
+
+  private managerPendingUserReplies = 0;
+
+  constructor(config: SwarmConfig, options?: { now?: () => string }) {
+    super();
+    this.config = config;
+    this.now = options?.now ?? nowIso;
+  }
+
+  async boot(): Promise<void> {
+    this.logDebug("boot:start", {
+      host: this.config.host,
+      port: this.config.port,
+      authFile: this.config.paths.authFile,
+      managerId: this.config.managerId
+    });
+
+    await this.ensureDirectories();
+    await this.ensureManagerPromptFile();
+
+    const loaded = await this.loadStore();
+    for (const descriptor of loaded.agents) {
+      this.descriptors.set(descriptor.agentId, descriptor);
+    }
+
+    this.prepareDescriptorsForBoot();
+    await this.saveStore();
+
+    const managerDescriptor = this.getManagerDescriptor();
+    const managerRuntime = await this.createRuntimeForDescriptor(managerDescriptor, MANAGER_SYSTEM_PROMPT);
+    this.runtimes.set(managerDescriptor.agentId, managerRuntime);
+    this.loadConversationHistoryFromRuntime(managerRuntime);
+
+    this.emitStatus(managerDescriptor.agentId, managerDescriptor.status, managerRuntime.getPendingCount());
+    this.emitAgentsSnapshot();
+
+    this.logDebug("boot:ready", {
+      managerStatus: managerDescriptor.status,
+      model: managerDescriptor.model,
+      cwd: managerDescriptor.cwd,
+      managerAgentDir: this.config.paths.managerAgentDir,
+      managerAppendSystemPromptFile: this.config.paths.managerAppendSystemPromptFile
+    });
+  }
+
+  listAgents(): AgentDescriptor[] {
+    return this.sortedDescriptors().map((descriptor) => ({ ...descriptor, model: { ...descriptor.model } }));
+  }
+
+  getConversationHistory(agentId: string = this.config.managerId): ConversationMessageEvent[] {
+    if (agentId !== this.config.managerId) {
+      return [];
+    }
+
+    return this.conversationHistory.map((message) => ({ ...message }));
+  }
+
+  async spawnAgent(callerAgentId: string, input: SpawnAgentInput): Promise<AgentDescriptor> {
+    this.assertManager(callerAgentId, "spawn agents");
+
+    const name = input.name?.trim();
+    if (!name) {
+      throw new Error("spawn_agent requires a non-empty name");
+    }
+
+    const manager = this.getManagerDescriptor();
+    const agentId = this.generateUniqueAgentId(name);
+    const createdAt = this.now();
+
+    const model = this.resolveSpawnModel(input.model, manager.model);
+
+    const descriptor: AgentDescriptor = {
+      agentId,
+      displayName: name,
+      role: "worker",
+      status: "idle",
+      createdAt,
+      updatedAt: createdAt,
+      cwd: input.cwd ? this.normalizeCwd(input.cwd) : manager.cwd,
+      model,
+      sessionFile: join(this.config.paths.sessionsDir, `${agentId}.jsonl`)
+    };
+
+    this.descriptors.set(agentId, descriptor);
+    await this.saveStore();
+
+    this.logDebug("agent:spawn", {
+      callerAgentId,
+      agentId,
+      displayName: descriptor.displayName,
+      model: descriptor.model,
+      cwd: descriptor.cwd
+    });
+
+    const runtime = await this.createRuntimeForDescriptor(
+      descriptor,
+      input.systemPrompt && input.systemPrompt.trim().length > 0 ? input.systemPrompt : DEFAULT_WORKER_SYSTEM_PROMPT
+    );
+    this.runtimes.set(agentId, runtime);
+
+    this.emitStatus(agentId, descriptor.status, runtime.getPendingCount());
+    this.emitAgentsSnapshot();
+
+    if (input.initialMessage && input.initialMessage.trim().length > 0) {
+      await runtime.sendMessage(input.initialMessage, "auto");
+    }
+
+    return { ...descriptor, model: { ...descriptor.model } };
+  }
+
+  async killAgent(callerAgentId: string, targetAgentId: string): Promise<void> {
+    this.assertManager(callerAgentId, "kill agents");
+
+    const target = this.descriptors.get(targetAgentId);
+    if (!target) {
+      throw new Error(`Unknown agent: ${targetAgentId}`);
+    }
+    if (target.role === "manager") {
+      throw new Error("Manager cannot be killed");
+    }
+
+    const runtime = this.runtimes.get(targetAgentId);
+    if (runtime) {
+      await runtime.terminate({ abort: true });
+      this.runtimes.delete(targetAgentId);
+    }
+
+    target.status = "terminated";
+    target.updatedAt = this.now();
+    this.descriptors.set(targetAgentId, target);
+    await this.saveStore();
+
+    this.logDebug("agent:kill", {
+      callerAgentId,
+      targetAgentId
+    });
+
+    this.emitStatus(targetAgentId, target.status, 0);
+    this.emitAgentsSnapshot();
+  }
+
+  async sendMessage(
+    fromAgentId: string,
+    targetAgentId: string,
+    message: string,
+    delivery: RequestedDeliveryMode = "auto"
+  ): Promise<SendMessageReceipt> {
+    const sender = this.descriptors.get(fromAgentId);
+    if (!sender || sender.status === "terminated") {
+      throw new Error(`Unknown or terminated sender agent: ${fromAgentId}`);
+    }
+
+    const target = this.descriptors.get(targetAgentId);
+    if (!target) {
+      throw new Error(`Unknown target agent: ${targetAgentId}`);
+    }
+    if (target.status === "terminated" || target.status === "stopped_on_restart") {
+      throw new Error(`Target agent is not running: ${targetAgentId}`);
+    }
+
+    const runtime = this.runtimes.get(targetAgentId);
+    if (!runtime) {
+      throw new Error(`Target runtime is not available: ${targetAgentId}`);
+    }
+
+    const receipt = await runtime.sendMessage(message, delivery);
+    this.logDebug("agent:send_message", {
+      fromAgentId,
+      targetAgentId,
+      requestedDelivery: delivery,
+      acceptedMode: receipt.acceptedMode,
+      textPreview: previewForLog(message)
+    });
+
+    return receipt;
+  }
+
+  async publishToUser(agentId: string, text: string, source: "speak_to_user" | "system" = "speak_to_user"): Promise<void> {
+    const pendingBefore = this.managerPendingUserReplies;
+    if (source === "speak_to_user") {
+      this.assertManager(agentId, "speak to user");
+      if (this.managerPendingUserReplies > 0) {
+        this.managerPendingUserReplies -= 1;
+      }
+    }
+
+    const payload: ConversationMessageEvent = {
+      type: "conversation_message",
+      agentId,
+      role: source === "system" ? "system" : "assistant",
+      text,
+      timestamp: this.now(),
+      source
+    };
+
+    this.emitConversationMessage(payload);
+    this.logDebug("manager:publish_to_user", {
+      source,
+      agentId,
+      pendingBefore,
+      pendingAfter: this.managerPendingUserReplies,
+      textPreview: previewForLog(text)
+    });
+  }
+
+  async handleUserMessage(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    this.logDebug("manager:user_message_received", {
+      textPreview: previewForLog(trimmed),
+      pendingBefore: this.managerPendingUserReplies
+    });
+
+    const userEvent: ConversationMessageEvent = {
+      type: "conversation_message",
+      agentId: this.config.managerId,
+      role: "user",
+      text: trimmed,
+      timestamp: this.now(),
+      source: "user_input"
+    };
+    this.emitConversationMessage(userEvent);
+
+    this.managerPendingUserReplies += 1;
+    this.logDebug("manager:user_message_dispatched", {
+      pendingAfter: this.managerPendingUserReplies
+    });
+
+    const managerRuntime = this.runtimes.get(this.config.managerId);
+    if (!managerRuntime) {
+      throw new Error("Manager runtime is not initialized");
+    }
+
+    await managerRuntime.sendMessage(trimmed, "auto");
+  }
+
+  async resetManagerSession(reason: "user_new_command" | "api_reset" = "api_reset"): Promise<void> {
+    const managerId = this.config.managerId;
+    const managerDescriptor = this.getManagerDescriptor();
+
+    this.logDebug("manager:reset:start", {
+      reason,
+      sessionFile: managerDescriptor.sessionFile
+    });
+
+    const existingRuntime = this.runtimes.get(managerId);
+    if (existingRuntime) {
+      await existingRuntime.terminate({ abort: true });
+      this.runtimes.delete(managerId);
+    }
+
+    this.managerPendingUserReplies = 0;
+    this.conversationHistory.length = 0;
+    await this.deleteManagerSessionFile(managerDescriptor.sessionFile);
+
+    managerDescriptor.status = "idle";
+    managerDescriptor.updatedAt = this.now();
+    this.descriptors.set(managerId, managerDescriptor);
+    await this.saveStore();
+
+    const managerRuntime = await this.createRuntimeForDescriptor(managerDescriptor, MANAGER_SYSTEM_PROMPT);
+    this.runtimes.set(managerId, managerRuntime);
+    this.loadConversationHistoryFromRuntime(managerRuntime);
+
+    this.emitConversationReset(managerId, reason);
+    this.emitStatus(managerId, managerDescriptor.status, managerRuntime.getPendingCount());
+    this.emitAgentsSnapshot();
+
+    this.logDebug("manager:reset:ready", {
+      reason,
+      sessionFile: managerDescriptor.sessionFile
+    });
+  }
+
+  getConfig(): SwarmConfig {
+    return this.config;
+  }
+
+  private emitConversationMessage(event: ConversationMessageEvent): void {
+    this.conversationHistory.push(event);
+    if (this.conversationHistory.length > MAX_CONVERSATION_HISTORY) {
+      this.conversationHistory.splice(0, this.conversationHistory.length - MAX_CONVERSATION_HISTORY);
+    }
+    this.emit("conversation_message", event satisfies ServerEvent);
+
+    const managerRuntime = this.runtimes.get(this.config.managerId);
+    if (!managerRuntime) {
+      return;
+    }
+
+    try {
+      managerRuntime.appendCustomEntry(MANAGER_CONVERSATION_ENTRY_TYPE, event);
+    } catch (error) {
+      this.logDebug("history:save:error", {
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  private emitConversationReset(agentId: string, reason: "user_new_command" | "api_reset"): void {
+    this.emit(
+      "conversation_reset",
+      {
+        type: "conversation_reset",
+        agentId,
+        timestamp: this.now(),
+        reason
+      } satisfies ServerEvent
+    );
+  }
+
+  private logDebug(message: string, details?: unknown): void {
+    if (!this.config.debug) return;
+
+    const prefix = `[swarm][${this.now()}] ${message}`;
+    if (details === undefined) {
+      console.log(prefix);
+      return;
+    }
+    console.log(prefix, details);
+  }
+
+  private sortedDescriptors(): AgentDescriptor[] {
+    return Array.from(this.descriptors.values()).sort((a, b) => {
+      if (a.agentId === this.config.managerId) return -1;
+      if (b.agentId === this.config.managerId) return 1;
+      return a.createdAt.localeCompare(b.createdAt);
+    });
+  }
+
+  private prepareDescriptorsForBoot(): void {
+    const existingManager = this.descriptors.get(this.config.managerId);
+    const now = this.now();
+
+    for (const descriptor of this.descriptors.values()) {
+      if (descriptor.role === "worker" && descriptor.status !== "terminated") {
+        descriptor.status = "stopped_on_restart";
+        descriptor.updatedAt = now;
+      }
+    }
+
+    if (!existingManager) {
+      const managerDescriptor: AgentDescriptor = {
+        agentId: this.config.managerId,
+        displayName: this.config.managerDisplayName,
+        role: "manager",
+        status: "idle",
+        createdAt: now,
+        updatedAt: now,
+        cwd: this.config.defaultCwd,
+        model: { ...this.config.defaultModel },
+        sessionFile: join(this.config.paths.sessionsDir, `${this.config.managerId}.jsonl`)
+      };
+      this.descriptors.set(managerDescriptor.agentId, managerDescriptor);
+      return;
+    }
+
+    existingManager.status = "idle";
+    existingManager.updatedAt = now;
+    existingManager.sessionFile = join(this.config.paths.sessionsDir, `${this.config.managerId}.jsonl`);
+    if (!existingManager.cwd) {
+      existingManager.cwd = this.config.defaultCwd;
+    }
+    if (!existingManager.model) {
+      existingManager.model = { ...this.config.defaultModel };
+      return;
+    }
+
+    const normalizedExistingThinking = normalizeThinkingLevel(existingManager.model.thinkingLevel);
+    if (normalizedExistingThinking !== existingManager.model.thinkingLevel) {
+      existingManager.model = {
+        ...existingManager.model,
+        thinkingLevel: normalizedExistingThinking
+      };
+    }
+
+    // Migrate the historical default manager model to the current default.
+    if (
+      existingManager.model.provider === "openai-codex" &&
+      existingManager.model.modelId === "gpt-5.3-codex" &&
+      existingManager.model.thinkingLevel === "medium"
+    ) {
+      existingManager.model = { ...this.config.defaultModel };
+    }
+  }
+
+  private getManagerDescriptor(): AgentDescriptor {
+    const descriptor = this.descriptors.get(this.config.managerId);
+    if (!descriptor) {
+      throw new Error("Manager descriptor is missing");
+    }
+    return descriptor;
+  }
+
+  private resolveSpawnModel(
+    requested: SpawnAgentInput["model"] | undefined,
+    fallback: AgentModelDescriptor
+  ): AgentModelDescriptor {
+    if (!requested) {
+      return { ...fallback };
+    }
+
+    return {
+      provider: requested.provider,
+      modelId: requested.modelId,
+      thinkingLevel: normalizeThinkingLevel(requested.thinkingLevel ?? fallback.thinkingLevel)
+    };
+  }
+
+  private normalizeCwd(cwd: string): string {
+    if (cwd.startsWith("/")) return cwd;
+    return join(this.config.paths.rootDir, cwd);
+  }
+
+  private generateUniqueAgentId(name: string): string {
+    const base = slugify(name);
+    if (!this.descriptors.has(base)) {
+      return base;
+    }
+
+    let index = 2;
+    while (this.descriptors.has(`${base}-${index}`)) {
+      index += 1;
+    }
+
+    return `${base}-${index}`;
+  }
+
+  private assertManager(agentId: string, action: string): void {
+    const descriptor = this.descriptors.get(agentId);
+    if (!descriptor || descriptor.role !== "manager") {
+      throw new Error(`Only manager can ${action}`);
+    }
+  }
+
+  protected async createRuntimeForDescriptor(
+    descriptor: AgentDescriptor,
+    systemPrompt: string
+  ): Promise<AgentRuntime> {
+    const swarmTools = buildSwarmTools(this, descriptor);
+    const thinkingLevel = normalizeThinkingLevel(descriptor.model.thinkingLevel);
+    const runtimeAgentDir =
+      descriptor.role === "manager" ? this.config.paths.managerAgentDir : this.config.paths.agentDir;
+
+    this.logDebug("runtime:create:start", {
+      agentId: descriptor.agentId,
+      role: descriptor.role,
+      model: descriptor.model,
+      cwd: descriptor.cwd,
+      authFile: this.config.paths.authFile,
+      agentDir: runtimeAgentDir,
+      appendSystemPromptFile:
+        descriptor.role === "manager" ? this.config.paths.managerAppendSystemPromptFile : undefined
+    });
+
+    const authStorage = new AuthStorage(this.config.paths.authFile);
+    const modelRegistry = new ModelRegistry(authStorage);
+    const resourceLoader =
+      descriptor.role === "manager"
+        ? new DefaultResourceLoader({
+            cwd: descriptor.cwd,
+            agentDir: runtimeAgentDir,
+            appendSystemPrompt: this.config.paths.managerAppendSystemPromptFile
+          })
+        : new DefaultResourceLoader({
+            cwd: descriptor.cwd,
+            agentDir: runtimeAgentDir,
+            appendSystemPromptOverride: (base) => [...base, systemPrompt]
+          });
+    await resourceLoader.reload();
+
+    const model = this.resolveModel(modelRegistry, descriptor.model);
+    if (!model) {
+      throw new Error(
+        `Unable to resolve model ${descriptor.model.provider}/${descriptor.model.modelId}. ` +
+          "Set SWARM_MODEL_PROVIDER/SWARM_MODEL_ID or install a model supported by @mariozechner/pi-ai."
+      );
+    }
+
+    const { session } = await createAgentSession({
+      cwd: descriptor.cwd,
+      agentDir: runtimeAgentDir,
+      authStorage,
+      modelRegistry,
+      model,
+      thinkingLevel: thinkingLevel as any,
+      sessionManager: SessionManager.open(descriptor.sessionFile),
+      resourceLoader,
+      customTools: swarmTools
+    });
+
+    const activeToolNames = new Set(session.getActiveToolNames());
+    for (const tool of swarmTools) {
+      activeToolNames.add(tool.name);
+    }
+    session.setActiveToolsByName(Array.from(activeToolNames));
+
+    this.logDebug("runtime:create:ready", {
+      agentId: descriptor.agentId,
+      activeTools: session.getActiveToolNames(),
+      systemPromptPreview: previewForLog(session.systemPrompt, 240),
+      containsSpeakToUserRule:
+        descriptor.role === "manager" ? session.systemPrompt.includes("speak_to_user") : undefined
+    });
+
+    return new AgentRuntime({
+      descriptor,
+      session: session as AgentSession,
+      callbacks: {
+        onStatusChange: async (agentId, status, pendingCount) => {
+          await this.handleRuntimeStatus(agentId, status, pendingCount);
+        },
+        onSessionEvent: async (agentId, event) => {
+          await this.handleRuntimeSessionEvent(agentId, event);
+        },
+        onAgentEnd: async (agentId) => {
+          await this.handleRuntimeAgentEnd(agentId);
+        }
+      },
+      now: this.now
+    });
+  }
+
+  private resolveModel(modelRegistry: ModelRegistry, descriptor: AgentModelDescriptor): Model<any> | undefined {
+    const direct = modelRegistry.find(descriptor.provider, descriptor.modelId);
+    if (direct) return direct;
+
+    const fromCatalog = getModel(descriptor.provider as any, descriptor.modelId as any);
+    if (fromCatalog) return fromCatalog;
+
+    return modelRegistry.getAll()[0];
+  }
+
+  private async handleRuntimeStatus(
+    agentId: string,
+    status: AgentStatus,
+    pendingCount: number
+  ): Promise<void> {
+    const descriptor = this.descriptors.get(agentId);
+    if (!descriptor) return;
+
+    if (descriptor.status !== status) {
+      descriptor.status = status;
+      descriptor.updatedAt = this.now();
+      this.descriptors.set(agentId, descriptor);
+      await this.saveStore();
+    }
+
+    this.emitStatus(agentId, status, pendingCount);
+    this.logDebug("runtime:status", {
+      agentId,
+      status,
+      pendingCount
+    });
+  }
+
+  private async handleRuntimeSessionEvent(agentId: string, event: AgentSessionEvent): Promise<void> {
+    if (!this.config.debug) return;
+    if (agentId !== this.config.managerId) return;
+
+    switch (event.type) {
+      case "agent_start":
+      case "agent_end":
+      case "turn_start":
+        this.logDebug(`manager:event:${event.type}`);
+        return;
+
+      case "turn_end":
+        this.logDebug("manager:event:turn_end", {
+          toolResults: event.toolResults.length
+        });
+        return;
+
+      case "tool_execution_start":
+        this.logDebug("manager:tool:start", {
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          args: previewForLog(safeJson(event.args), 240)
+        });
+        return;
+
+      case "tool_execution_end":
+        this.logDebug("manager:tool:end", {
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          isError: event.isError,
+          result: previewForLog(safeJson(event.result), 240)
+        });
+        return;
+
+      case "message_start":
+      case "message_end":
+        this.logDebug(`manager:event:${event.type}`, {
+          role: extractRole(event.message),
+          textPreview: previewForLog(extractMessageText(event.message) ?? "")
+        });
+        return;
+
+      case "message_update":
+      case "tool_execution_update":
+      case "auto_compaction_start":
+      case "auto_compaction_end":
+      case "auto_retry_start":
+      case "auto_retry_end":
+        return;
+    }
+  }
+
+  private emitStatus(agentId: string, status: AgentStatus, pendingCount: number): void {
+    const payload: AgentStatusEvent = {
+      type: "agent_status",
+      agentId,
+      status,
+      pendingCount
+    };
+
+    this.emit("agent_status", payload satisfies ServerEvent);
+  }
+
+  private emitAgentsSnapshot(): void {
+    const payload: AgentsSnapshotEvent = {
+      type: "agents_snapshot",
+      agents: this.listAgents()
+    };
+
+    this.emit("agents_snapshot", payload satisfies ServerEvent);
+  }
+
+  private async handleRuntimeAgentEnd(agentId: string): Promise<void> {
+    if (agentId !== this.config.managerId) {
+      return;
+    }
+
+    if (this.managerPendingUserReplies > 0) {
+      const pending = this.managerPendingUserReplies;
+      this.managerPendingUserReplies = 0;
+
+      this.logDebug("manager:missing_speak_to_user", {
+        pending
+      });
+
+      await this.publishToUser(
+        this.config.managerId,
+        `Manager finished without speak_to_user for ${pending} pending user message(s).`,
+        "system"
+      );
+    }
+  }
+
+  private async ensureDirectories(): Promise<void> {
+    const dirs = [
+      this.config.paths.dataDir,
+      this.config.paths.swarmDir,
+      this.config.paths.sessionsDir,
+      this.config.paths.authDir,
+      this.config.paths.agentDir,
+      this.config.paths.managerAgentDir
+    ];
+
+    for (const dir of dirs) {
+      await mkdir(dir, { recursive: true });
+    }
+  }
+
+  private async ensureManagerPromptFile(): Promise<void> {
+    const target = this.config.paths.managerAppendSystemPromptFile;
+    try {
+      await readFile(target, "utf8");
+      return;
+    } catch (error) {
+      if (
+        typeof error !== "object" ||
+        !error ||
+        !("code" in error) ||
+        (error as { code?: string }).code !== "ENOENT"
+      ) {
+        throw error;
+      }
+    }
+
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, `${MANAGER_SYSTEM_PROMPT.trim()}\n`, "utf8");
+  }
+
+  private async deleteManagerSessionFile(sessionFile: string): Promise<void> {
+    try {
+      await unlink(sessionFile);
+    } catch (error) {
+      if (typeof error === "object" && error && "code" in error && (error as { code?: string }).code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async loadStore(): Promise<AgentsStoreFile> {
+    try {
+      const raw = await readFile(this.config.paths.agentsStoreFile, "utf8");
+      const parsed = JSON.parse(raw) as AgentsStoreFile;
+      if (!Array.isArray(parsed.agents)) {
+        return { agents: [] };
+      }
+      return {
+        agents: parsed.agents
+      };
+    } catch {
+      return { agents: [] };
+    }
+  }
+
+  private loadConversationHistoryFromRuntime(managerRuntime: AgentRuntime): void {
+    this.conversationHistory.length = 0;
+
+    try {
+      const messagesCandidate = managerRuntime.getCustomEntries(MANAGER_CONVERSATION_ENTRY_TYPE);
+
+      for (const message of messagesCandidate) {
+        if (!isConversationMessageEvent(message)) continue;
+        this.conversationHistory.push(message);
+      }
+
+      if (this.conversationHistory.length > MAX_CONVERSATION_HISTORY) {
+        this.conversationHistory.splice(0, this.conversationHistory.length - MAX_CONVERSATION_HISTORY);
+      }
+
+      this.logDebug("history:load:ready", {
+        messageCount: this.conversationHistory.length
+      });
+    } catch (error) {
+      this.logDebug("history:load:error", {
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  private async saveStore(): Promise<void> {
+    const payload: AgentsStoreFile = {
+      agents: this.sortedDescriptors()
+    };
+
+    const target = this.config.paths.agentsStoreFile;
+    const tmp = `${target}.tmp`;
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    await rename(tmp, target);
+  }
+}
+
+function slugify(input: string): string {
+  const normalized = input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+
+  if (!normalized) {
+    return "agent";
+  }
+
+  return normalized;
+}
+
+function previewForLog(text: string, maxLength = 160): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength)}...`;
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function extractRole(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") return undefined;
+  const maybeRole = (message as { role?: unknown }).role;
+  return typeof maybeRole === "string" ? maybeRole : undefined;
+}
+
+function extractMessageText(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") return undefined;
+
+  const content = (message as { content?: unknown }).content;
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+
+  const text = content
+    .map((item) => {
+      if (!item || typeof item !== "object") return "";
+      const maybeText = item as { type?: unknown; text?: unknown };
+      return maybeText.type === "text" && typeof maybeText.text === "string" ? maybeText.text : "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+
+  return text.length > 0 ? text : undefined;
+}
+
+function normalizeThinkingLevel(level: string): string {
+  return level === "x-high" ? "xhigh" : level;
+}
+
+function isConversationMessageEvent(value: unknown): value is ConversationMessageEvent {
+  if (!value || typeof value !== "object") return false;
+
+  const maybe = value as Partial<ConversationMessageEvent>;
+  if (maybe.type !== "conversation_message") return false;
+  if (typeof maybe.agentId !== "string" || maybe.agentId.length === 0) return false;
+  if (maybe.role !== "user" && maybe.role !== "assistant" && maybe.role !== "system") return false;
+  if (typeof maybe.text !== "string") return false;
+  if (typeof maybe.timestamp !== "string") return false;
+  if (maybe.source !== "user_input" && maybe.source !== "speak_to_user" && maybe.source !== "system") return false;
+
+  return true;
+}
