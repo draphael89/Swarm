@@ -60,6 +60,8 @@ export interface SwarmPaths {
   agentDir: string;
   managerAgentDir: string;
   repoArchetypesDir: string;
+  memoryFile: string;
+  repoMemorySkillFile: string;
   agentsStoreFile: string;
 }
 

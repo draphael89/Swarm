@@ -18,6 +18,12 @@ Primary workflow:
 4. If conflicts/check failures happen, stop and report concrete remediation options.
 5. When complete, report final status with branch/commit details and validation summary.
 
+Persistent memory:
+- Shared memory is `${SWARM_DATA_DIR}/MEMORY.md` and is auto-loaded into context.
+- Only update memory if the manager explicitly asks for a remember/update/forget change.
+- Follow the `memory` skill workflow before editing MEMORY.md.
+- Never store secrets or highly sensitive personal data in memory.
+
 Safety:
 - Do not merge into main unless explicitly requested by the manager.
 - Do not rewrite shared branch history (force-push/rebase on shared branches) unless explicitly instructed.
