@@ -313,7 +313,7 @@ describe('SwarmManager', () => {
     expect(descriptor?.status).toBe('terminated')
   })
 
-  it('marks workers as stopped_on_restart and restores only manager runtime', async () => {
+  it('restores non-terminated workers on restart', async () => {
     const config = await makeTempConfig()
 
     const seedAgents = {
@@ -333,7 +333,7 @@ describe('SwarmManager', () => {
           agentId: 'worker-a',
           displayName: 'Worker A',
           role: 'worker',
-          status: 'idle',
+          status: 'streaming',
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
           cwd: config.defaultCwd,
@@ -351,8 +351,47 @@ describe('SwarmManager', () => {
     const agents = manager.listAgents()
     const worker = agents.find((agent) => agent.agentId === 'worker-a')
 
-    expect(worker?.status).toBe('stopped_on_restart')
-    expect(manager.createdRuntimeIds).toEqual(['manager'])
+    expect(worker?.status).toBe('idle')
+    expect(manager.createdRuntimeIds).toEqual(['manager', 'worker-a'])
+    expect(manager.runtimeByAgentId.get('worker-a')).toBeDefined()
+  })
+
+  it('keeps killed workers terminated across restart', async () => {
+    const config = await makeTempConfig()
+    const firstBoot = new TestSwarmManager(config)
+    await firstBoot.boot()
+
+    const worker = await firstBoot.spawnAgent('manager', { agentId: 'Killed Worker' })
+    await firstBoot.killAgent('manager', worker.agentId)
+
+    const secondBoot = new TestSwarmManager(config)
+    await secondBoot.boot()
+
+    const restored = secondBoot.listAgents().find((agent) => agent.agentId === worker.agentId)
+    expect(restored?.status).toBe('terminated')
+    expect(secondBoot.createdRuntimeIds).toEqual(['manager'])
+
+    await expect(secondBoot.sendMessage('manager', worker.agentId, 'still there?')).rejects.toThrow(
+      `Target agent is not running: ${worker.agentId}`,
+    )
+  })
+
+  it('does not duplicate workers across repeated restarts', async () => {
+    const config = await makeTempConfig()
+    const firstBoot = new TestSwarmManager(config)
+    await firstBoot.boot()
+
+    const worker = await firstBoot.spawnAgent('manager', { agentId: 'Repeat Worker' })
+
+    const secondBoot = new TestSwarmManager(config)
+    await secondBoot.boot()
+    expect(secondBoot.listAgents().filter((agent) => agent.agentId === worker.agentId)).toHaveLength(1)
+    expect(secondBoot.createdRuntimeIds).toEqual(['manager', worker.agentId])
+
+    const thirdBoot = new TestSwarmManager(config)
+    await thirdBoot.boot()
+    expect(thirdBoot.listAgents().filter((agent) => agent.agentId === worker.agentId)).toHaveLength(1)
+    expect(thirdBoot.createdRuntimeIds).toEqual(['manager', worker.agentId])
   })
 
   it('persists manager conversation history to disk and reloads it on restart', async () => {

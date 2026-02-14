@@ -84,12 +84,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     await this.saveStore();
 
     this.loadConversationHistoriesFromStore();
+    await this.restoreRuntimesForBoot();
 
     const managerDescriptor = this.getManagerDescriptor();
-    const managerRuntime = await this.createRuntimeForDescriptor(managerDescriptor, MANAGER_SYSTEM_PROMPT);
-    this.runtimes.set(managerDescriptor.agentId, managerRuntime);
-
-    this.emitStatus(managerDescriptor.agentId, managerDescriptor.status, managerRuntime.getPendingCount());
     this.emitAgentsSnapshot();
 
     this.logDebug("boot:ready", {
@@ -97,7 +94,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       model: managerDescriptor.model,
       cwd: managerDescriptor.cwd,
       managerAgentDir: this.config.paths.managerAgentDir,
-      managerSystemPromptSource: "typescript"
+      managerSystemPromptSource: "typescript",
+      restoredAgentIds: Array.from(this.runtimes.keys())
     });
   }
 
@@ -437,13 +435,63 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
   }
 
+  private async restoreRuntimesForBoot(): Promise<void> {
+    let shouldPersist = false;
+
+    for (const descriptor of this.sortedDescriptors()) {
+      if (descriptor.status === "terminated") {
+        continue;
+      }
+
+      const systemPrompt =
+        descriptor.role === "manager" ? MANAGER_SYSTEM_PROMPT : DEFAULT_WORKER_SYSTEM_PROMPT;
+
+      try {
+        const runtime = await this.createRuntimeForDescriptor(descriptor, systemPrompt);
+        this.runtimes.set(descriptor.agentId, runtime);
+        this.emitStatus(descriptor.agentId, descriptor.status, runtime.getPendingCount());
+      } catch (error) {
+        if (descriptor.role === "manager") {
+          throw error;
+        }
+
+        descriptor.status = "stopped_on_restart";
+        descriptor.updatedAt = this.now();
+        this.descriptors.set(descriptor.agentId, descriptor);
+        shouldPersist = true;
+
+        this.emitStatus(descriptor.agentId, descriptor.status, 0);
+        this.logDebug("boot:restore_worker:error", {
+          agentId: descriptor.agentId,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
+    if (shouldPersist) {
+      await this.saveStore();
+    }
+
+    if (!this.runtimes.has(this.config.managerId)) {
+      throw new Error("Manager runtime is not initialized");
+    }
+  }
+
   private prepareDescriptorsForBoot(): void {
     const existingManager = this.descriptors.get(this.config.managerId);
     const now = this.now();
 
     for (const descriptor of this.descriptors.values()) {
-      if (descriptor.role === "worker" && descriptor.status !== "terminated") {
-        descriptor.status = "stopped_on_restart";
+      if (descriptor.role !== "worker") {
+        continue;
+      }
+
+      if (descriptor.status === "terminated") {
+        continue;
+      }
+
+      if (descriptor.status !== "idle") {
+        descriptor.status = "idle";
         descriptor.updatedAt = now;
       }
     }
