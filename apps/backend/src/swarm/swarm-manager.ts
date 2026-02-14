@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getModel, type Model } from "@mariozechner/pi-ai";
 import {
   AuthStorage,
@@ -43,13 +45,42 @@ const DEFAULT_WORKER_SYSTEM_PROMPT = `You are a worker agent in a swarm.
 - You are not user-facing.
 - End users only see messages they send and manager speak_to_user outputs.
 - Your plain assistant text is not directly visible to end users.
-- Incoming messages prefixed with "SYSTEM:" are internal control/context updates, not direct end-user chat.`;
+- Incoming messages prefixed with "SYSTEM:" are internal control/context updates, not direct end-user chat.
+- Persistent memory lives at \${SWARM_DATA_DIR}/MEMORY.md and is auto-loaded into context.
+- Only write memory when explicitly asked to remember/update/forget durable information.
+- Follow the memory skill workflow before editing MEMORY.md, and never store secrets in memory.`;
 const MANAGER_ARCHETYPE_ID = "manager";
 const MERGER_ARCHETYPE_ID = "merger";
 const INTERNAL_MODEL_MESSAGE_PREFIX = "SYSTEM: ";
 const MAX_CONVERSATION_HISTORY = 2000;
 const CONVERSATION_ENTRY_TYPE = "swarm_conversation_entry";
 const LEGACY_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
+const BUILT_IN_MEMORY_SKILL_RELATIVE_PATH = "apps/backend/src/swarm/skills/builtins/memory/SKILL.md";
+const SWARM_MANAGER_DIR = fileURLToPath(new URL(".", import.meta.url));
+const BACKEND_PACKAGE_DIR = resolve(SWARM_MANAGER_DIR, "..", "..");
+const BUILT_IN_MEMORY_SKILL_FALLBACK_PATH = resolve(
+  BACKEND_PACKAGE_DIR,
+  "src",
+  "swarm",
+  "skills",
+  "builtins",
+  "memory",
+  "SKILL.md"
+);
+const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
+
+## User Preferences
+- (none yet)
+
+## Project Facts
+- (none yet)
+
+## Decisions
+- (none yet)
+
+## Open Follow-ups
+- (none yet)
+`;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -88,6 +119,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
 
     await this.ensureDirectories();
+    await this.ensureMemoryFile();
 
     this.archetypePromptRegistry = await loadArchetypePromptRegistry({
       repoOverridesDir: this.config.paths.repoArchetypesDir
@@ -677,6 +709,51 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
   }
 
+  protected async getMemoryRuntimeResources(): Promise<{
+    memoryContextFile: { path: string; content: string };
+    additionalSkillPaths: string[];
+  }> {
+    await this.ensureMemoryFile();
+
+    const memoryContextFile = {
+      path: this.config.paths.memoryFile,
+      content: await readFile(this.config.paths.memoryFile, "utf8")
+    };
+
+    return {
+      memoryContextFile,
+      additionalSkillPaths: [this.resolveMemorySkillPath()]
+    };
+  }
+
+  private resolveMemorySkillPath(): string {
+    const repoOverride = this.config.paths.repoMemorySkillFile;
+    if (existsSync(repoOverride)) {
+      return repoOverride;
+    }
+
+    const candidatePaths = [
+      resolve(this.config.paths.rootDir, BUILT_IN_MEMORY_SKILL_RELATIVE_PATH),
+      BUILT_IN_MEMORY_SKILL_FALLBACK_PATH
+    ];
+
+    for (const candidatePath of candidatePaths) {
+      if (existsSync(candidatePath)) {
+        return candidatePath;
+      }
+    }
+
+    throw new Error(`Missing built-in memory skill file: ${candidatePaths[0]}`);
+  }
+
+  private mergeMemoryContextFile(
+    baseAgentsFiles: Array<{ path: string; content: string }>,
+    memoryContextFile: { path: string; content: string }
+  ): Array<{ path: string; content: string }> {
+    const withoutMemory = baseAgentsFiles.filter((entry) => entry.path !== memoryContextFile.path);
+    return [...withoutMemory, memoryContextFile];
+  }
+
   protected async createRuntimeForDescriptor(
     descriptor: AgentDescriptor,
     systemPrompt: string
@@ -694,17 +771,25 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       cwd: descriptor.cwd,
       authFile: this.config.paths.authFile,
       agentDir: runtimeAgentDir,
+      memoryFile: this.config.paths.memoryFile,
       managerSystemPromptSource:
         descriptor.role === "manager" ? `archetype:${MANAGER_ARCHETYPE_ID}` : undefined
     });
 
     const authStorage = new AuthStorage(this.config.paths.authFile);
     const modelRegistry = new ModelRegistry(authStorage);
+    const memoryResources = await this.getMemoryRuntimeResources();
+    const applyMemoryContext = (base: { agentsFiles: Array<{ path: string; content: string }> }) => ({
+      agentsFiles: this.mergeMemoryContextFile(base.agentsFiles, memoryResources.memoryContextFile)
+    });
+
     const resourceLoader =
       descriptor.role === "manager"
         ? new DefaultResourceLoader({
             cwd: descriptor.cwd,
             agentDir: runtimeAgentDir,
+            additionalSkillPaths: memoryResources.additionalSkillPaths,
+            agentsFilesOverride: applyMemoryContext,
             // Manager prompt comes from the archetype prompt registry.
             systemPrompt,
             appendSystemPromptOverride: () => []
@@ -712,6 +797,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         : new DefaultResourceLoader({
             cwd: descriptor.cwd,
             agentDir: runtimeAgentDir,
+            additionalSkillPaths: memoryResources.additionalSkillPaths,
+            agentsFilesOverride: applyMemoryContext,
             appendSystemPromptOverride: (base) => [...base, systemPrompt]
           });
     await resourceLoader.reload();
@@ -1022,6 +1109,19 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
   }
 
+  private async ensureMemoryFile(): Promise<void> {
+    try {
+      await readFile(this.config.paths.memoryFile, "utf8");
+      return;
+    } catch (error) {
+      if (!isEnoentError(error)) {
+        throw error;
+      }
+    }
+
+    await writeFile(this.config.paths.memoryFile, DEFAULT_MEMORY_FILE_CONTENT, "utf8");
+  }
+
   private async deleteManagerSessionFile(sessionFile: string): Promise<void> {
     try {
       await unlink(sessionFile);
@@ -1109,6 +1209,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     await writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     await rename(tmp, target);
   }
+}
+
+function isEnoentError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "ENOENT"
+  );
 }
 
 function normalizeAgentId(input: string): string {

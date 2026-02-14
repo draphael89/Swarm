@@ -32,6 +32,8 @@ export function createConfig(): SwarmConfig {
   const agentDir = resolve(dataDir, "agent");
   const managerAgentDir = resolve(agentDir, "manager");
   const repoArchetypesDir = resolve(rootDir, ".swarm", "archetypes");
+  const memoryFile = resolve(dataDir, "MEMORY.md");
+  const repoMemorySkillFile = resolve(rootDir, ".swarm", "skills", "memory", "SKILL.md");
 
   return {
     host: process.env.SWARM_HOST ?? "127.0.0.1",
@@ -56,6 +58,8 @@ export function createConfig(): SwarmConfig {
       agentDir,
       managerAgentDir,
       repoArchetypesDir,
+      memoryFile,
+      repoMemorySkillFile,
       agentsStoreFile: resolve(swarmDir, "agents.json")
     }
   };
