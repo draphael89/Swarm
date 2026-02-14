@@ -326,7 +326,7 @@ describe('SwarmWebSocketServer', () => {
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    const worker = await manager.spawnAgent('manager', { name: 'Worker Thread' })
+    const worker = await manager.spawnAgent('manager', { agentId: 'Worker Thread' })
 
     const server = new SwarmWebSocketServer({
       swarmManager: manager,

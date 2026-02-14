@@ -35,7 +35,7 @@ export interface SendMessageReceipt {
 }
 
 export interface SpawnAgentInput {
-  name: string;
+  agentId: string;
   systemPrompt?: string;
   model?: {
     provider: string;

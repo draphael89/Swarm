@@ -114,20 +114,20 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   async spawnAgent(callerAgentId: string, input: SpawnAgentInput): Promise<AgentDescriptor> {
     this.assertManager(callerAgentId, "spawn agents");
 
-    const name = input.name?.trim();
-    if (!name) {
-      throw new Error("spawn_agent requires a non-empty name");
+    const requestedAgentId = input.agentId?.trim();
+    if (!requestedAgentId) {
+      throw new Error("spawn_agent requires a non-empty agentId");
     }
 
     const manager = this.getManagerDescriptor();
-    const agentId = this.generateUniqueAgentId(name);
+    const agentId = this.generateUniqueAgentId(requestedAgentId);
     const createdAt = this.now();
 
     const model = this.resolveSpawnModel(input.model, manager.model);
 
     const descriptor: AgentDescriptor = {
       agentId,
-      displayName: name,
+      displayName: agentId,
       role: "worker",
       status: "idle",
       createdAt,
@@ -522,8 +522,17 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return join(this.config.paths.rootDir, cwd);
   }
 
-  private generateUniqueAgentId(name: string): string {
-    const base = slugify(name);
+  private generateUniqueAgentId(source: string): string {
+    const base = normalizeAgentId(source);
+
+    if (!base) {
+      throw new Error("spawn_agent agentId must include at least one letter or number");
+    }
+
+    if (base === this.config.managerId) {
+      throw new Error(`spawn_agent agentId \"${this.config.managerId}\" is reserved`);
+    }
+
     if (!this.descriptors.has(base)) {
       return base;
     }
@@ -1016,18 +1025,13 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 }
 
-function slugify(input: string): string {
-  const normalized = input
+function normalizeAgentId(input: string): string {
+  return input
+    .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
-
-  if (!normalized) {
-    return "agent";
-  }
-
-  return normalized;
 }
 
 function previewForLog(text: string, maxLength = 160): string {

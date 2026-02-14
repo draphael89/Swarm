@@ -153,7 +153,7 @@ describe('SwarmManager', () => {
     expect(managerPrompt).toContain('End users only see two things')
     expect(managerPrompt).toContain('prefixed with "SYSTEM:"')
 
-    const worker = await manager.spawnAgent('manager', { name: 'Prompt Worker' })
+    const worker = await manager.spawnAgent('manager', { agentId: 'Prompt Worker' })
     const workerPrompt = manager.systemPromptByAgentId.get(worker.agentId)
 
     expect(workerPrompt).toBeDefined()
@@ -161,16 +161,39 @@ describe('SwarmManager', () => {
     expect(workerPrompt).toContain('Incoming messages prefixed with "SYSTEM:"')
   })
 
-  it('spawns unique semantic agent ids on collisions', async () => {
+  it('spawns unique normalized agent ids on collisions', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    const first = await manager.spawnAgent('manager', { name: 'Code Scout' })
-    const second = await manager.spawnAgent('manager', { name: 'Code Scout' })
+    const first = await manager.spawnAgent('manager', { agentId: 'Code Scout' })
+    const second = await manager.spawnAgent('manager', { agentId: 'Code Scout' })
 
     expect(first.agentId).toBe('code-scout')
+    expect(first.displayName).toBe('code-scout')
     expect(second.agentId).toBe('code-scout-2')
+    expect(second.displayName).toBe('code-scout-2')
+  })
+
+  it('does not force a worker suffix for normalized ids', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const spawned = await manager.spawnAgent('manager', { agentId: 'Task Owner' })
+
+    expect(spawned.agentId).toBe('task-owner')
+    expect(spawned.displayName).toBe('task-owner')
+  })
+
+  it('rejects explicit agent ids that would use the reserved manager id', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await expect(manager.spawnAgent('manager', { agentId: 'manager' })).rejects.toThrow(
+      'spawn_agent agentId "manager" is reserved',
+    )
   })
 
   it('SYSTEM-prefixes worker initial messages (internal manager->worker input)', async () => {
@@ -179,7 +202,7 @@ describe('SwarmManager', () => {
     await manager.boot()
 
     const worker = await manager.spawnAgent('manager', {
-      name: 'Kickoff Worker',
+      agentId: 'Kickoff Worker',
       initialMessage: 'start implementation',
     })
 
@@ -193,9 +216,9 @@ describe('SwarmManager', () => {
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    const worker = await manager.spawnAgent('manager', { name: 'Worker' })
+    const worker = await manager.spawnAgent('manager', { agentId: 'Worker' })
 
-    await expect(manager.spawnAgent(worker.agentId, { name: 'Nope' })).rejects.toThrow('Only manager can spawn agents')
+    await expect(manager.spawnAgent(worker.agentId, { agentId: 'Nope' })).rejects.toThrow('Only manager can spawn agents')
     await expect(manager.killAgent(worker.agentId, worker.agentId)).rejects.toThrow('Only manager can kill agents')
   })
 
@@ -204,7 +227,7 @@ describe('SwarmManager', () => {
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    const worker = await manager.spawnAgent('manager', { name: 'Messenger' })
+    const worker = await manager.spawnAgent('manager', { agentId: 'Messenger' })
 
     const receipt = await manager.sendMessage('manager', worker.agentId, 'hi worker', 'auto')
 
@@ -234,7 +257,7 @@ describe('SwarmManager', () => {
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    const worker = await manager.spawnAgent('manager', { name: 'User Routed Worker' })
+    const worker = await manager.spawnAgent('manager', { agentId: 'User Routed Worker' })
 
     await manager.handleUserMessage('hello worker', { targetAgentId: worker.agentId })
 
@@ -248,7 +271,7 @@ describe('SwarmManager', () => {
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    const worker = await manager.spawnAgent('manager', { name: 'Already Tagged Worker' })
+    const worker = await manager.spawnAgent('manager', { agentId: 'Already Tagged Worker' })
 
     await manager.sendMessage('manager', worker.agentId, 'SYSTEM: pre-tagged', 'auto')
 
@@ -262,7 +285,7 @@ describe('SwarmManager', () => {
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    const worker = await manager.spawnAgent('manager', { name: 'Busy Worker' })
+    const worker = await manager.spawnAgent('manager', { agentId: 'Busy Worker' })
     const runtime = manager.runtimeByAgentId.get(worker.agentId)
     expect(runtime).toBeDefined()
     runtime!.busy = true
@@ -281,7 +304,7 @@ describe('SwarmManager', () => {
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    const worker = await manager.spawnAgent('manager', { name: 'Killable Worker' })
+    const worker = await manager.spawnAgent('manager', { agentId: 'Killable Worker' })
     const runtime = manager.runtimeByAgentId.get(worker.agentId)
     expect(runtime).toBeDefined()
 
