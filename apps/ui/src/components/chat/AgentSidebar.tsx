@@ -45,7 +45,7 @@ export function AgentSidebar({ connected, agents, statuses, selectedAgentId, onS
               const isWorker = agent.role === 'worker'
 
               return (
-                <li key={agent.agentId} className={cn(isWorker && 'pl-2')}>
+                <li key={agent.agentId}>
                   <button
                     type="button"
                     onClick={() => onSelectAgent(agent.agentId)}
@@ -54,7 +54,7 @@ export function AgentSidebar({ connected, agents, statuses, selectedAgentId, onS
                       isSelected ? 'bg-primary/10' : 'hover:bg-accent/60',
                     )}
                   >
-                    <div className="flex items-center gap-2 text-xs">
+                    <div className={cn('flex items-center gap-2 text-xs', isWorker && 'pl-1')}>
                       <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground">
                         {isWorking ? <CircleDashed aria-hidden="true" className="size-3 animate-spin" /> : <span aria-hidden="true" className="size-3" />}
                         <span className="sr-only">{isWorking ? 'Working' : 'Idle'}</span>
