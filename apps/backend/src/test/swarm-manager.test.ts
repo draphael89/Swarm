@@ -111,8 +111,6 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
       authFile: join(authDir, 'auth.json'),
       agentDir,
       managerAgentDir,
-      managerSystemPromptFile: join(managerAgentDir, 'SYSTEM.md'),
-      managerAppendSystemPromptFile: join(managerAgentDir, 'APPEND_SYSTEM.md'),
       agentsStoreFile: join(swarmDir, 'agents.json'),
     },
   }
@@ -132,15 +130,15 @@ describe('SwarmManager', () => {
     expect(manager.createdRuntimeIds).toEqual(['manager'])
   })
 
-  it('creates manager SYSTEM.md when missing', async () => {
+  it('does not materialize manager SYSTEM.md into the data dir on boot', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
 
     await manager.boot()
 
-    const systemPromptOnDisk = await readFile(config.paths.managerSystemPromptFile, 'utf8')
-    expect(systemPromptOnDisk).toContain('Operating stance (delegation-first):')
-    expect(systemPromptOnDisk).toContain('User-facing output MUST go through speak_to_user.')
+    await expect(readFile(join(config.paths.managerAgentDir, 'SYSTEM.md'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('uses manager and default worker prompts with explicit visibility guidance', async () => {

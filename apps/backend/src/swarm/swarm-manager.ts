@@ -74,7 +74,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
 
     await this.ensureDirectories();
-    await this.ensureManagerSystemPromptFile();
 
     const loaded = await this.loadStore();
     for (const descriptor of loaded.agents) {
@@ -98,7 +97,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       model: managerDescriptor.model,
       cwd: managerDescriptor.cwd,
       managerAgentDir: this.config.paths.managerAgentDir,
-      managerSystemPromptFile: this.config.paths.managerSystemPromptFile
+      managerSystemPromptSource: "typescript"
     });
   }
 
@@ -568,8 +567,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       cwd: descriptor.cwd,
       authFile: this.config.paths.authFile,
       agentDir: runtimeAgentDir,
-      systemPromptFile:
-        descriptor.role === "manager" ? this.config.paths.managerSystemPromptFile : undefined
+      managerSystemPromptSource: descriptor.role === "manager" ? "typescript" : undefined
     });
 
     const authStorage = new AuthStorage(this.config.paths.authFile);
@@ -579,8 +577,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         ? new DefaultResourceLoader({
             cwd: descriptor.cwd,
             agentDir: runtimeAgentDir,
-            // Manager uses a full custom SYSTEM.md, not append-only behavior.
-            systemPrompt: this.config.paths.managerSystemPromptFile,
+            // Keep manager prompt canonical and checked in via TypeScript source.
+            systemPrompt,
             appendSystemPromptOverride: () => []
           })
         : new DefaultResourceLoader({
@@ -894,46 +892,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     for (const dir of dirs) {
       await mkdir(dir, { recursive: true });
     }
-  }
-
-  private async ensureManagerSystemPromptFile(): Promise<void> {
-    const target = this.config.paths.managerSystemPromptFile;
-    try {
-      await readFile(target, "utf8");
-      return;
-    } catch (error) {
-      if (
-        typeof error !== "object" ||
-        !error ||
-        !("code" in error) ||
-        (error as { code?: string }).code !== "ENOENT"
-      ) {
-        throw error;
-      }
-    }
-
-    let seedPrompt = MANAGER_SYSTEM_PROMPT.trim();
-    const legacyAppendPath = this.config.paths.managerAppendSystemPromptFile;
-    if (legacyAppendPath) {
-      try {
-        const legacyAppendPrompt = await readFile(legacyAppendPath, "utf8");
-        if (legacyAppendPrompt.trim().length > 0) {
-          seedPrompt = legacyAppendPrompt.trim();
-        }
-      } catch (error) {
-        if (
-          typeof error !== "object" ||
-          !error ||
-          !("code" in error) ||
-          (error as { code?: string }).code !== "ENOENT"
-        ) {
-          throw error;
-        }
-      }
-    }
-
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, `${seedPrompt}\n`, "utf8");
   }
 
   private async deleteManagerSessionFile(sessionFile: string): Promise<void> {

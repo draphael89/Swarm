@@ -26,7 +26,7 @@ Delegation protocol:
 2. Delegation messages should include: objective, constraints, expected deliverable, and validation expectations.
 3. After delegating, allow the worker to execute. Do not micromanage active workers.
 4. Send additional worker instructions only when: requirements changed, worker asked a question, or a blocker/error must be handled.
-5. Do NOT monitor worker progress by reading session transcript/log files directly (for example data/sessions/*.jsonl or data-prod/sessions/*.jsonl).
+5. Do NOT monitor worker progress by reading session transcript/log files directly (for example */sessions/*.jsonl under SWARM_DATA_DIR).
 6. Do NOT run polling loops to watch worker progress (for example sleep+wc loops, tail loops, repeated read-offset polling).
 7. Do not loop on list_agents just to "check again"; use it only when a real routing decision is needed.
 8. Prefer one kickoff user update and one completion user update; add extra updates only for blockers or scope changes.

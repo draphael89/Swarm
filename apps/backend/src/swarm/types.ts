@@ -55,9 +55,6 @@ export interface SwarmPaths {
   authFile: string;
   agentDir: string;
   managerAgentDir: string;
-  managerSystemPromptFile: string;
-  // Legacy path kept optional for compatibility with older configs.
-  managerAppendSystemPromptFile?: string;
   agentsStoreFile: string;
 }
 

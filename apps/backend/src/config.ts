@@ -17,12 +17,11 @@ export function createConfig(): SwarmConfig {
     ? resolve(process.env.SWARM_ROOT_DIR)
     : resolve(process.cwd(), "../..");
 
-  const dataDirEnv = process.env.SWARM_DATA_DIR;
-  const dataDir = dataDirEnv
-    ? isAbsolute(dataDirEnv)
-      ? resolve(dataDirEnv)
-      : resolve(rootDir, dataDirEnv)
-    : resolve(rootDir, "data");
+  const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
+  const defaultDataDir = resolve(homedir(), nodeEnv === "production" ? ".swarm" : ".swarm-dev");
+
+  const dataDirEnv = process.env.SWARM_DATA_DIR?.trim();
+  const dataDir = dataDirEnv ? resolveDataDir(rootDir, dataDirEnv) : defaultDataDir;
   const swarmDir = resolve(dataDir, "swarm");
   const sessionsDir = resolve(dataDir, "sessions");
   const authDir = resolve(dataDir, "auth");
@@ -55,10 +54,23 @@ export function createConfig(): SwarmConfig {
       authFile,
       agentDir,
       managerAgentDir,
-      managerSystemPromptFile: resolve(managerAgentDir, "SYSTEM.md"),
-      // Keep legacy append path populated for compatibility/migration.
-      managerAppendSystemPromptFile: resolve(managerAgentDir, "APPEND_SYSTEM.md"),
       agentsStoreFile: resolve(swarmDir, "agents.json")
     }
   };
+}
+
+function resolveDataDir(rootDir: string, dataDirEnv: string): string {
+  if (dataDirEnv === "~") {
+    return homedir();
+  }
+
+  if (dataDirEnv.startsWith("~/")) {
+    return resolve(homedir(), dataDirEnv.slice(2));
+  }
+
+  if (isAbsolute(dataDirEnv)) {
+    return resolve(dataDirEnv);
+  }
+
+  return resolve(rootDir, dataDirEnv);
 }

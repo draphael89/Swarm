@@ -116,8 +116,6 @@ async function makeTempConfig(port: number, allowNonManagerSubscriptions = false
       authFile: join(authDir, 'auth.json'),
       agentDir,
       managerAgentDir,
-      managerSystemPromptFile: join(managerAgentDir, 'SYSTEM.md'),
-      managerAppendSystemPromptFile: join(managerAgentDir, 'APPEND_SYSTEM.md'),
       agentsStoreFile: join(swarmDir, 'agents.json'),
     },
   }
