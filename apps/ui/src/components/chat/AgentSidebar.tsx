@@ -54,15 +54,15 @@ export function AgentSidebar({ connected, agents, statuses, selectedAgentId, onS
                       isSelected ? 'bg-primary/10' : 'hover:bg-accent/60',
                     )}
                   >
-                    <div className={cn('flex items-center gap-2 text-xs', isWorker && 'pl-1')}>
+                    <div className="flex items-center gap-2 text-xs">
                       <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground">
                         {isWorking ? <CircleDashed aria-hidden="true" className="size-3 animate-spin" /> : <span aria-hidden="true" className="size-3" />}
                         <span className="sr-only">{isWorking ? 'Working' : 'Idle'}</span>
                       </span>
-                      {isWorker ? <span aria-hidden="true" className="text-[10px] text-muted-foreground/70">↳</span> : null}
-                      <span className={cn('truncate font-mono text-[11px]', isWorker ? 'text-muted-foreground' : 'font-semibold')}>
+                      <span className={cn('min-w-0 flex-1 truncate font-mono text-[11px]', isWorker ? 'text-muted-foreground' : 'font-semibold')}>
                         {agent.agentId}
                       </span>
+                      {isWorker ? <span aria-hidden="true" className="text-[10px] text-muted-foreground/70">↳</span> : null}
                     </div>
                   </button>
                 </li>
