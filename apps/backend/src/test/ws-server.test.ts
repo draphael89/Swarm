@@ -79,7 +79,7 @@ async function getAvailablePort(): Promise<number> {
   return port
 }
 
-async function makeTempConfig(port: number): Promise<SwarmConfig> {
+async function makeTempConfig(port: number, allowNonManagerSubscriptions = false): Promise<SwarmConfig> {
   const root = await mkdtemp(join(tmpdir(), 'swarm-ws-test-'))
   const dataDir = join(root, 'data')
   const swarmDir = join(dataDir, 'swarm')
@@ -98,7 +98,7 @@ async function makeTempConfig(port: number): Promise<SwarmConfig> {
     host: '127.0.0.1',
     port,
     debug: false,
-    allowNonManagerSubscriptions: false,
+    allowNonManagerSubscriptions,
     managerId: 'manager',
     managerDisplayName: 'Manager',
     defaultModel: {
@@ -315,6 +315,83 @@ describe('SwarmWebSocketServer', () => {
 
     clientB.close()
     await once(clientB, 'close')
+    await server.stop()
+  })
+
+  it('supports worker subscriptions and direct user messaging to the selected worker', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port, true)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', { name: 'Worker Thread' })
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe', agentId: worker.agentId }))
+
+    await waitForEvent(
+      events,
+      (event) => event.type === 'ready' && event.subscribedAgentId === worker.agentId,
+    )
+    await waitForEvent(
+      events,
+      (event) => event.type === 'conversation_history' && event.agentId === worker.agentId,
+    )
+
+    client.send(JSON.stringify({ type: 'user_message', text: 'hello worker' }))
+
+    const workerEvent = await waitForEvent(
+      events,
+      (event) =>
+        event.type === 'conversation_message' &&
+        event.agentId === worker.agentId &&
+        event.source === 'user_input' &&
+        event.text === 'hello worker',
+    )
+
+    expect(workerEvent.type).toBe('conversation_message')
+
+    ;(manager as any).emitConversationLog({
+      type: 'conversation_log',
+      agentId: worker.agentId,
+      timestamp: new Date().toISOString(),
+      source: 'runtime_log',
+      kind: 'tool_execution_start',
+      toolName: 'bash',
+      toolCallId: 'call-1',
+      text: '{"command":"ls"}',
+    })
+
+    const logEvent = await waitForEvent(
+      events,
+      (event) =>
+        event.type === 'conversation_log' &&
+        event.agentId === worker.agentId &&
+        event.kind === 'tool_execution_start' &&
+        event.toolName === 'bash',
+    )
+
+    expect(logEvent.type).toBe('conversation_log')
+
+    client.close()
+    await once(client, 'close')
     await server.stop()
   })
 

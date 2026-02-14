@@ -80,6 +80,28 @@ export interface ConversationMessageEvent {
   source: "user_input" | "speak_to_user" | "system";
 }
 
+export type ConversationLogKind =
+  | "message_start"
+  | "message_end"
+  | "tool_execution_start"
+  | "tool_execution_update"
+  | "tool_execution_end";
+
+export interface ConversationLogEvent {
+  type: "conversation_log";
+  agentId: string;
+  timestamp: string;
+  source: "runtime_log";
+  kind: ConversationLogKind;
+  role?: "user" | "assistant" | "system";
+  toolName?: string;
+  toolCallId?: string;
+  text: string;
+  isError?: boolean;
+}
+
+export type ConversationEntryEvent = ConversationMessageEvent | ConversationLogEvent;
+
 export interface AgentStatusEvent {
   type: "agent_status";
   agentId: string;

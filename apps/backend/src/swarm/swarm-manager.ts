@@ -23,6 +23,8 @@ import type {
   AgentStatusEvent,
   AgentsSnapshotEvent,
   AgentsStoreFile,
+  ConversationEntryEvent,
+  ConversationLogEvent,
   ConversationMessageEvent,
   RequestedDeliveryMode,
   SendMessageReceipt,
@@ -36,7 +38,8 @@ const DEFAULT_WORKER_SYSTEM_PROMPT = `You are a worker agent in a swarm.
 - Report progress and outcomes back to the manager using send_message_to_agent.
 - You are not user-facing. Do not assume direct user communication.`;
 const MAX_CONVERSATION_HISTORY = 2000;
-const MANAGER_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
+const CONVERSATION_ENTRY_TYPE = "swarm_conversation_entry";
+const LEGACY_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -48,7 +51,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
   private readonly descriptors = new Map<string, AgentDescriptor>();
   private readonly runtimes = new Map<string, AgentRuntime>();
-  private readonly conversationHistory: ConversationMessageEvent[] = [];
+  private readonly conversationEntriesByAgentId = new Map<string, ConversationEntryEvent[]>();
 
   private managerPendingUserReplies = 0;
 
@@ -77,10 +80,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.prepareDescriptorsForBoot();
     await this.saveStore();
 
+    this.loadConversationHistoriesFromStore();
+
     const managerDescriptor = this.getManagerDescriptor();
     const managerRuntime = await this.createRuntimeForDescriptor(managerDescriptor, MANAGER_SYSTEM_PROMPT);
     this.runtimes.set(managerDescriptor.agentId, managerRuntime);
-    this.loadConversationHistoryFromRuntime(managerRuntime);
 
     this.emitStatus(managerDescriptor.agentId, managerDescriptor.status, managerRuntime.getPendingCount());
     this.emitAgentsSnapshot();
@@ -98,12 +102,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return this.sortedDescriptors().map((descriptor) => ({ ...descriptor, model: { ...descriptor.model } }));
   }
 
-  getConversationHistory(agentId: string = this.config.managerId): ConversationMessageEvent[] {
-    if (agentId !== this.config.managerId) {
-      return [];
-    }
-
-    return this.conversationHistory.map((message) => ({ ...message }));
+  getConversationHistory(agentId: string = this.config.managerId): ConversationEntryEvent[] {
+    const history = this.conversationEntriesByAgentId.get(agentId) ?? [];
+    return history.map((entry) => ({ ...entry }));
   }
 
   async spawnAgent(callerAgentId: string, input: SpawnAgentInput): Promise<AgentDescriptor> {
@@ -254,24 +255,42 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
   }
 
-  async handleUserMessage(text: string): Promise<void> {
+  async handleUserMessage(
+    text: string,
+    options?: { targetAgentId?: string; delivery?: RequestedDeliveryMode }
+  ): Promise<void> {
     const trimmed = text.trim();
     if (!trimmed) return;
 
+    const targetAgentId = options?.targetAgentId ?? this.config.managerId;
+    const target = this.descriptors.get(targetAgentId);
+    if (!target) {
+      throw new Error(`Unknown target agent: ${targetAgentId}`);
+    }
+    if (target.status === "terminated" || target.status === "stopped_on_restart") {
+      throw new Error(`Target agent is not running: ${targetAgentId}`);
+    }
+
     this.logDebug("manager:user_message_received", {
+      targetAgentId,
       textPreview: previewForLog(trimmed),
       pendingBefore: this.managerPendingUserReplies
     });
 
     const userEvent: ConversationMessageEvent = {
       type: "conversation_message",
-      agentId: this.config.managerId,
+      agentId: targetAgentId,
       role: "user",
       text: trimmed,
       timestamp: this.now(),
       source: "user_input"
     };
     this.emitConversationMessage(userEvent);
+
+    if (targetAgentId !== this.config.managerId) {
+      await this.sendMessage(this.config.managerId, targetAgentId, trimmed, options?.delivery ?? "auto");
+      return;
+    }
 
     this.managerPendingUserReplies += 1;
     this.logDebug("manager:user_message_dispatched", {
@@ -283,7 +302,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error("Manager runtime is not initialized");
     }
 
-    await managerRuntime.sendMessage(trimmed, "auto");
+    // User messages to manager should always steer in-flight work.
+    await managerRuntime.sendMessage(trimmed, "steer");
   }
 
   async resetManagerSession(reason: "user_new_command" | "api_reset" = "api_reset"): Promise<void> {
@@ -302,7 +322,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     this.managerPendingUserReplies = 0;
-    this.conversationHistory.length = 0;
+    this.conversationEntriesByAgentId.set(managerId, []);
     await this.deleteManagerSessionFile(managerDescriptor.sessionFile);
 
     managerDescriptor.status = "idle";
@@ -312,7 +332,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     const managerRuntime = await this.createRuntimeForDescriptor(managerDescriptor, MANAGER_SYSTEM_PROMPT);
     this.runtimes.set(managerId, managerRuntime);
-    this.loadConversationHistoryFromRuntime(managerRuntime);
 
     this.emitConversationReset(managerId, reason);
     this.emitStatus(managerId, managerDescriptor.status, managerRuntime.getPendingCount());
@@ -329,19 +348,30 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   private emitConversationMessage(event: ConversationMessageEvent): void {
-    this.conversationHistory.push(event);
-    if (this.conversationHistory.length > MAX_CONVERSATION_HISTORY) {
-      this.conversationHistory.splice(0, this.conversationHistory.length - MAX_CONVERSATION_HISTORY);
-    }
+    this.emitConversationEntry(event);
     this.emit("conversation_message", event satisfies ServerEvent);
+  }
 
-    const managerRuntime = this.runtimes.get(this.config.managerId);
-    if (!managerRuntime) {
+  private emitConversationLog(event: ConversationLogEvent): void {
+    this.emitConversationEntry(event);
+    this.emit("conversation_log", event satisfies ServerEvent);
+  }
+
+  private emitConversationEntry(event: ConversationEntryEvent): void {
+    const history = this.conversationEntriesByAgentId.get(event.agentId) ?? [];
+    history.push(event);
+    if (history.length > MAX_CONVERSATION_HISTORY) {
+      history.splice(0, history.length - MAX_CONVERSATION_HISTORY);
+    }
+    this.conversationEntriesByAgentId.set(event.agentId, history);
+
+    const runtime = this.runtimes.get(event.agentId);
+    if (!runtime) {
       return;
     }
 
     try {
-      managerRuntime.appendCustomEntry(MANAGER_CONVERSATION_ENTRY_TYPE, event);
+      runtime.appendCustomEntry(CONVERSATION_ENTRY_TYPE, event);
     } catch (error) {
       this.logDebug("history:save:error", {
         message: error instanceof Error ? error.message : String(error)
@@ -607,6 +637,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   private async handleRuntimeSessionEvent(agentId: string, event: AgentSessionEvent): Promise<void> {
+    this.captureConversationEventFromRuntime(agentId, event);
+
     if (!this.config.debug) return;
     if (agentId !== this.config.managerId) return;
 
@@ -657,6 +689,117 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         return;
     }
   }
+
+  private captureConversationEventFromRuntime(agentId: string, event: AgentSessionEvent): void {
+    if (agentId === this.config.managerId) {
+      return;
+    }
+
+    const timestamp = this.now();
+
+    switch (event.type) {
+      case "message_start": {
+        const role = extractRole(event.message);
+        if (role !== "user" && role !== "assistant" && role !== "system") {
+          return;
+        }
+
+        this.emitConversationLog({
+          type: "conversation_log",
+          agentId,
+          timestamp,
+          source: "runtime_log",
+          kind: "message_start",
+          role,
+          text: extractMessageText(event.message) ?? "(non-text message)"
+        });
+        return;
+      }
+
+      case "message_end": {
+        const role = extractRole(event.message);
+        if (role !== "user" && role !== "assistant" && role !== "system") {
+          return;
+        }
+
+        const text = extractMessageText(event.message) ?? "(non-text message)";
+
+        if ((role === "assistant" || role === "system") && text !== "(non-text message)") {
+          this.emitConversationMessage({
+            type: "conversation_message",
+            agentId,
+            role,
+            text,
+            timestamp,
+            source: "system"
+          });
+        }
+
+        this.emitConversationLog({
+          type: "conversation_log",
+          agentId,
+          timestamp,
+          source: "runtime_log",
+          kind: "message_end",
+          role,
+          text
+        });
+        return;
+      }
+
+      case "tool_execution_start":
+        this.emitConversationLog({
+          type: "conversation_log",
+          agentId,
+          timestamp,
+          source: "runtime_log",
+          kind: "tool_execution_start",
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          text: safeJson(event.args)
+        });
+        return;
+
+      case "tool_execution_update":
+        this.emitConversationLog({
+          type: "conversation_log",
+          agentId,
+          timestamp,
+          source: "runtime_log",
+          kind: "tool_execution_update",
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          text: safeJson(event.partialResult)
+        });
+        return;
+
+      case "tool_execution_end":
+        this.emitConversationLog({
+          type: "conversation_log",
+          agentId,
+          timestamp,
+          source: "runtime_log",
+          kind: "tool_execution_end",
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          text: safeJson(event.result),
+          isError: event.isError
+        });
+        return;
+
+      case "agent_start":
+      case "agent_end":
+      case "turn_start":
+      case "turn_end":
+      case "message_update":
+      case "auto_compaction_start":
+      case "auto_compaction_end":
+      case "auto_retry_start":
+      case "auto_retry_end":
+        return;
+    }
+  }
+
 
   private emitStatus(agentId: string, status: AgentStatus, pendingCount: number): void {
     const payload: AgentStatusEvent = {
@@ -760,29 +903,54 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
   }
 
-  private loadConversationHistoryFromRuntime(managerRuntime: AgentRuntime): void {
-    this.conversationHistory.length = 0;
+  private loadConversationHistoriesFromStore(): void {
+    this.conversationEntriesByAgentId.clear();
+
+    for (const descriptor of this.descriptors.values()) {
+      this.loadConversationHistoryForDescriptor(descriptor);
+    }
+  }
+
+  private loadConversationHistoryForDescriptor(descriptor: AgentDescriptor): void {
+    const entriesForAgent: ConversationEntryEvent[] = [];
 
     try {
-      const messagesCandidate = managerRuntime.getCustomEntries(MANAGER_CONVERSATION_ENTRY_TYPE);
+      const sessionManager = SessionManager.open(descriptor.sessionFile);
+      const entries = sessionManager.getEntries();
 
-      for (const message of messagesCandidate) {
-        if (!isConversationMessageEvent(message)) continue;
-        this.conversationHistory.push(message);
+      for (const entry of entries) {
+        if (entry.type !== "custom") {
+          continue;
+        }
+
+        if (
+          entry.customType !== CONVERSATION_ENTRY_TYPE &&
+          entry.customType !== LEGACY_CONVERSATION_ENTRY_TYPE
+        ) {
+          continue;
+        }
+        if (!isConversationEntryEvent(entry.data)) {
+          continue;
+        }
+        entriesForAgent.push(entry.data);
       }
 
-      if (this.conversationHistory.length > MAX_CONVERSATION_HISTORY) {
-        this.conversationHistory.splice(0, this.conversationHistory.length - MAX_CONVERSATION_HISTORY);
+      if (entriesForAgent.length > MAX_CONVERSATION_HISTORY) {
+        entriesForAgent.splice(0, entriesForAgent.length - MAX_CONVERSATION_HISTORY);
       }
 
       this.logDebug("history:load:ready", {
-        messageCount: this.conversationHistory.length
+        agentId: descriptor.agentId,
+        messageCount: entriesForAgent.length
       });
     } catch (error) {
       this.logDebug("history:load:error", {
+        agentId: descriptor.agentId,
         message: error instanceof Error ? error.message : String(error)
       });
     }
+
+    this.conversationEntriesByAgentId.set(descriptor.agentId, entriesForAgent);
   }
 
   private async saveStore(): Promise<void> {
@@ -861,6 +1029,10 @@ function normalizeThinkingLevel(level: string): string {
   return level === "x-high" ? "xhigh" : level;
 }
 
+function isConversationEntryEvent(value: unknown): value is ConversationEntryEvent {
+  return isConversationMessageEvent(value) || isConversationLogEvent(value);
+}
+
 function isConversationMessageEvent(value: unknown): value is ConversationMessageEvent {
   if (!value || typeof value !== "object") return false;
 
@@ -871,6 +1043,37 @@ function isConversationMessageEvent(value: unknown): value is ConversationMessag
   if (typeof maybe.text !== "string") return false;
   if (typeof maybe.timestamp !== "string") return false;
   if (maybe.source !== "user_input" && maybe.source !== "speak_to_user" && maybe.source !== "system") return false;
+
+  return true;
+}
+
+function isConversationLogEvent(value: unknown): value is ConversationLogEvent {
+  if (!value || typeof value !== "object") return false;
+
+  const maybe = value as Partial<ConversationLogEvent>;
+  if (maybe.type !== "conversation_log") return false;
+  if (typeof maybe.agentId !== "string" || maybe.agentId.length === 0) return false;
+  if (typeof maybe.timestamp !== "string") return false;
+  if (maybe.source !== "runtime_log") return false;
+
+  if (
+    maybe.kind !== "message_start" &&
+    maybe.kind !== "message_end" &&
+    maybe.kind !== "tool_execution_start" &&
+    maybe.kind !== "tool_execution_update" &&
+    maybe.kind !== "tool_execution_end"
+  ) {
+    return false;
+  }
+
+  if (maybe.role !== undefined && maybe.role !== "user" && maybe.role !== "assistant" && maybe.role !== "system") {
+    return false;
+  }
+
+  if (maybe.toolName !== undefined && typeof maybe.toolName !== "string") return false;
+  if (maybe.toolCallId !== undefined && typeof maybe.toolCallId !== "string") return false;
+  if (typeof maybe.text !== "string") return false;
+  if (maybe.isError !== undefined && typeof maybe.isError !== "boolean") return false;
 
   return true;
 }

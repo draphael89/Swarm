@@ -1,12 +1,20 @@
-import type { AgentDescriptor, AgentStatus, ClientCommand, ServerEvent } from './ws-types'
+import type {
+  AgentDescriptor,
+  AgentStatus,
+  ClientCommand,
+  ConversationEntry,
+  ConversationMessageEvent,
+  ServerEvent,
+} from './ws-types'
 
 const INITIAL_CONNECT_DELAY_MS = 50
 const RECONNECT_MS = 1200
 
 export interface ManagerWsState {
   connected: boolean
+  targetAgentId: string | null
   subscribedAgentId: string | null
-  messages: Array<Extract<ServerEvent, { type: 'conversation_message' }>>
+  messages: ConversationEntry[]
   agents: AgentDescriptor[]
   statuses: Record<string, { status: AgentStatus; pendingCount: number }>
   lastError: string | null
@@ -16,6 +24,7 @@ type Listener = (state: ManagerWsState) => void
 
 const initialState: ManagerWsState = {
   connected: false,
+  targetAgentId: 'manager',
   subscribedAgentId: null,
   messages: [],
   agents: [],
@@ -25,19 +34,23 @@ const initialState: ManagerWsState = {
 
 export class ManagerWsClient {
   private readonly url: string
-  private readonly targetAgentId: string
+  private desiredAgentId: string
 
   private socket: WebSocket | null = null
   private connectTimer: ReturnType<typeof setTimeout> | undefined
   private started = false
   private destroyed = false
 
-  private state: ManagerWsState = { ...initialState }
+  private state: ManagerWsState
   private readonly listeners = new Set<Listener>()
 
-  constructor(url: string, targetAgentId = 'manager') {
+  constructor(url: string, initialAgentId = 'manager') {
     this.url = url
-    this.targetAgentId = targetAgentId
+    this.desiredAgentId = initialAgentId
+    this.state = {
+      ...initialState,
+      targetAgentId: initialAgentId,
+    }
   }
 
   getState(): ManagerWsState {
@@ -77,7 +90,31 @@ export class ManagerWsClient {
     }
   }
 
-  sendUserMessage(text: string): void {
+  subscribeToAgent(agentId: string): void {
+    const trimmed = agentId.trim()
+    if (!trimmed) return
+
+    this.desiredAgentId = trimmed
+    this.updateState({
+      targetAgentId: trimmed,
+      messages: [],
+      lastError: null,
+    })
+
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      return
+    }
+
+    this.send({
+      type: 'subscribe',
+      agentId: trimmed,
+    })
+  }
+
+  sendUserMessage(
+    text: string,
+    options?: { agentId?: string; delivery?: 'auto' | 'followUp' | 'steer' },
+  ): void {
     const trimmed = text.trim()
     if (!trimmed) return
 
@@ -88,9 +125,14 @@ export class ManagerWsClient {
       return
     }
 
+    const agentId =
+      options?.agentId ?? this.state.targetAgentId ?? this.state.subscribedAgentId ?? this.desiredAgentId
+
     this.send({
       type: 'user_message',
-      text: trimmed
+      text: trimmed,
+      agentId,
+      delivery: options?.delivery,
     })
   }
 
@@ -108,7 +150,7 @@ export class ManagerWsClient {
 
       this.send({
         type: 'subscribe',
-        agentId: this.targetAgentId,
+        agentId: this.desiredAgentId,
       })
     })
 
@@ -158,26 +200,38 @@ export class ManagerWsClient {
       case 'ready':
         this.updateState({
           connected: true,
+          targetAgentId: event.subscribedAgentId,
           subscribedAgentId: event.subscribedAgentId,
           lastError: null,
         })
         break
 
-      case 'conversation_message': {
+      case 'conversation_message':
+      case 'conversation_log': {
+        if (event.agentId !== this.state.targetAgentId) {
+          break
+        }
+
         const messages = [...this.state.messages, event].slice(-500)
         this.updateState({ messages })
         break
       }
 
       case 'conversation_history':
-        this.updateState({ messages: mergeConversationMessages(event.messages, this.state.messages).slice(-500) })
+        if (event.agentId !== this.state.targetAgentId) {
+          break
+        }
+
+        this.updateState({ messages: event.messages.slice(-500) })
         break
 
       case 'conversation_reset':
+        if (event.agentId !== this.state.targetAgentId) {
+          break
+        }
+
         this.updateState({
           messages: [],
-          agents: [],
-          statuses: {},
           lastError: null,
         })
         break
@@ -206,9 +260,9 @@ export class ManagerWsClient {
   }
 
   private pushSystemMessage(text: string): void {
-    const message: Extract<ServerEvent, { type: 'conversation_message' }> = {
+    const message: ConversationMessageEvent = {
       type: 'conversation_message',
-      agentId: 'manager',
+      agentId: this.state.targetAgentId ?? 'manager',
       role: 'system',
       text,
       timestamp: new Date().toISOString(),
@@ -230,25 +284,4 @@ export class ManagerWsClient {
       listener(this.state)
     }
   }
-}
-
-function mergeConversationMessages(
-  fromHistory: Array<Extract<ServerEvent, { type: 'conversation_message' }>>,
-  existing: Array<Extract<ServerEvent, { type: 'conversation_message' }>>,
-): Array<Extract<ServerEvent, { type: 'conversation_message' }>> {
-  const merged: Array<Extract<ServerEvent, { type: 'conversation_message' }>> = []
-  const seen = new Set<string>()
-
-  const add = (message: Extract<ServerEvent, { type: 'conversation_message' }>) => {
-    const key = `${message.timestamp}|${message.agentId}|${message.role}|${message.source}|${message.text}`
-    if (seen.has(key)) return
-    seen.add(key)
-    merged.push(message)
-  }
-
-  for (const message of fromHistory) add(message)
-  for (const message of existing) add(message)
-
-  merged.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
-  return merged
 }

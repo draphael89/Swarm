@@ -16,6 +16,11 @@ export class SwarmWebSocketServer {
     this.broadcastToSubscribed(event);
   };
 
+  private readonly onConversationLog = (event: ServerEvent): void => {
+    if (event.type !== "conversation_log") return;
+    this.broadcastToSubscribed(event);
+  };
+
   private readonly onConversationReset = (event: ServerEvent): void => {
     if (event.type !== "conversation_reset") return;
     this.broadcastToSubscribed(event);
@@ -87,6 +92,7 @@ export class SwarmWebSocketServer {
     });
 
     this.swarmManager.on("conversation_message", this.onConversationMessage);
+    this.swarmManager.on("conversation_log", this.onConversationLog);
     this.swarmManager.on("conversation_reset", this.onConversationReset);
     this.swarmManager.on("agent_status", this.onAgentStatus);
     this.swarmManager.on("agents_snapshot", this.onAgentsSnapshot);
@@ -94,6 +100,7 @@ export class SwarmWebSocketServer {
 
   async stop(): Promise<void> {
     this.swarmManager.off("conversation_message", this.onConversationMessage);
+    this.swarmManager.off("conversation_log", this.onConversationLog);
     this.swarmManager.off("conversation_reset", this.onConversationReset);
     this.swarmManager.off("agent_status", this.onAgentStatus);
     this.swarmManager.off("agents_snapshot", this.onAgentsSnapshot);
@@ -138,13 +145,24 @@ export class SwarmWebSocketServer {
     }
 
     if (command.type === "subscribe") {
-      const targetAgent = command.agentId ?? this.swarmManager.getConfig().managerId;
+      const managerId = this.swarmManager.getConfig().managerId;
+      const targetAgent = command.agentId ?? managerId;
 
-      if (!this.allowNonManagerSubscriptions && targetAgent !== this.swarmManager.getConfig().managerId) {
+      if (!this.allowNonManagerSubscriptions && targetAgent !== managerId) {
         this.send(socket, {
           type: "error",
           code: "SUBSCRIPTION_NOT_SUPPORTED",
-          message: `Subscriptions are currently limited to ${this.swarmManager.getConfig().managerId}.`
+          message: `Subscriptions are currently limited to ${managerId}.`
+        });
+        return;
+      }
+
+      const targetDescriptor = this.swarmManager.listAgents().find((agent) => agent.agentId === targetAgent);
+      if (!targetDescriptor) {
+        this.send(socket, {
+          type: "error",
+          code: "UNKNOWN_AGENT",
+          message: `Agent ${targetAgent} does not exist.`
         });
         return;
       }
@@ -169,7 +187,8 @@ export class SwarmWebSocketServer {
     }
 
     if (command.type === "user_message") {
-      if (!this.subscriptions.has(socket)) {
+      const subscribedAgentId = this.subscriptions.get(socket);
+      if (!subscribedAgentId) {
         this.send(socket, {
           type: "error",
           code: "NOT_SUBSCRIBED",
@@ -178,12 +197,28 @@ export class SwarmWebSocketServer {
         return;
       }
 
+      const managerId = this.swarmManager.getConfig().managerId;
+      const targetAgentId = command.agentId ?? subscribedAgentId;
+
+      if (!this.allowNonManagerSubscriptions && targetAgentId !== managerId) {
+        this.send(socket, {
+          type: "error",
+          code: "SUBSCRIPTION_NOT_SUPPORTED",
+          message: `Messages are currently limited to ${managerId}.`
+        });
+        return;
+      }
+
       try {
-        if (command.text.trim() === "/new") {
+        if (targetAgentId === managerId && command.text.trim() === "/new") {
           await this.swarmManager.resetManagerSession("user_new_command");
           return;
         }
-        await this.swarmManager.handleUserMessage(command.text);
+
+        await this.swarmManager.handleUserMessage(command.text, {
+          targetAgentId,
+          delivery: command.delivery
+        });
       } catch (error) {
         this.send(socket, {
           type: "error",
@@ -204,8 +239,12 @@ export class SwarmWebSocketServer {
       const subscribedAgent = this.subscriptions.get(client);
       if (!subscribedAgent) continue;
 
-      if (event.type === "conversation_message" || event.type === "conversation_reset") {
-        if (subscribedAgent !== this.swarmManager.getConfig().managerId) {
+      if (
+        event.type === "conversation_message" ||
+        event.type === "conversation_log" ||
+        event.type === "conversation_reset"
+      ) {
+        if (subscribedAgent !== event.agentId) {
           continue;
         }
       }
@@ -252,7 +291,29 @@ export class SwarmWebSocketServer {
       if (typeof maybe.text !== "string" || maybe.text.trim().length === 0) {
         return { ok: false, error: "user_message.text must be a non-empty string" };
       }
-      return { ok: true, command: { type: "user_message", text: maybe.text } };
+
+      if (maybe.agentId !== undefined && typeof maybe.agentId !== "string") {
+        return { ok: false, error: "user_message.agentId must be a string when provided" };
+      }
+
+      if (
+        maybe.delivery !== undefined &&
+        maybe.delivery !== "auto" &&
+        maybe.delivery !== "followUp" &&
+        maybe.delivery !== "steer"
+      ) {
+        return { ok: false, error: "user_message.delivery must be one of auto|followUp|steer" };
+      }
+
+      return {
+        ok: true,
+        command: {
+          type: "user_message",
+          text: maybe.text,
+          agentId: maybe.agentId,
+          delivery: maybe.delivery
+        }
+      };
     }
 
     return { ok: false, error: "Unknown command type" };

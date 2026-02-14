@@ -162,6 +162,18 @@ describe('SwarmManager', () => {
     expect(receipt.acceptedMode).toBe('prompt')
   })
 
+  it('sends manager user input as steer delivery', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await manager.handleUserMessage('interrupt current plan')
+
+    const managerRuntime = manager.runtimeByAgentId.get('manager')
+    expect(managerRuntime).toBeDefined()
+    expect(managerRuntime?.sendCalls.at(-1)?.delivery).toBe('steer')
+  })
+
   it('uses followUp by default and steer when requested for busy runtime', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)

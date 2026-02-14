@@ -18,8 +18,39 @@ export interface AgentDescriptor {
 
 export type ClientCommand =
   | { type: 'subscribe'; agentId?: string }
-  | { type: 'user_message'; text: string }
+  | { type: 'user_message'; text: string; agentId?: string; delivery?: 'auto' | 'followUp' | 'steer' }
   | { type: 'ping' }
+
+export interface ConversationMessageEvent {
+  type: 'conversation_message'
+  agentId: string
+  role: 'user' | 'assistant' | 'system'
+  text: string
+  timestamp: string
+  source: 'user_input' | 'speak_to_user' | 'system'
+}
+
+export type ConversationLogKind =
+  | 'message_start'
+  | 'message_end'
+  | 'tool_execution_start'
+  | 'tool_execution_update'
+  | 'tool_execution_end'
+
+export interface ConversationLogEvent {
+  type: 'conversation_log'
+  agentId: string
+  timestamp: string
+  source: 'runtime_log'
+  kind: ConversationLogKind
+  role?: 'user' | 'assistant' | 'system'
+  toolName?: string
+  toolCallId?: string
+  text: string
+  isError?: boolean
+}
+
+export type ConversationEntry = ConversationMessageEvent | ConversationLogEvent
 
 export type ServerEvent =
   | { type: 'ready'; serverTime: string; subscribedAgentId: string }
@@ -27,23 +58,10 @@ export type ServerEvent =
   | {
       type: 'conversation_history'
       agentId: string
-      messages: Array<{
-        type: 'conversation_message'
-        agentId: string
-        role: 'user' | 'assistant' | 'system'
-        text: string
-        timestamp: string
-        source: 'user_input' | 'speak_to_user' | 'system'
-      }>
+      messages: ConversationEntry[]
     }
-  | {
-      type: 'conversation_message'
-      agentId: string
-      role: 'user' | 'assistant' | 'system'
-      text: string
-      timestamp: string
-      source: 'user_input' | 'speak_to_user' | 'system'
-    }
+  | ConversationMessageEvent
+  | ConversationLogEvent
   | { type: 'agent_status'; agentId: string; status: AgentStatus; pendingCount: number }
   | { type: 'agents_snapshot'; agents: AgentDescriptor[] }
   | { type: 'error'; code: string; message: string }

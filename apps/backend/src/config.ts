@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
 import type { SwarmConfig } from "./swarm/types.js";
@@ -7,11 +7,22 @@ export function createConfig(): SwarmConfig {
   const debugEnv = process.env.SWARM_DEBUG?.trim().toLowerCase();
   const debug = debugEnv ? !["0", "false", "off", "no"].includes(debugEnv) : true;
 
+  const allowNonManagerSubscriptionsEnv =
+    process.env.SWARM_ALLOW_NON_MANAGER_SUBSCRIPTIONS?.trim().toLowerCase();
+  const allowNonManagerSubscriptions = allowNonManagerSubscriptionsEnv
+    ? ["1", "true", "yes", "on"].includes(allowNonManagerSubscriptionsEnv)
+    : true;
+
   const rootDir = process.env.SWARM_ROOT_DIR
     ? resolve(process.env.SWARM_ROOT_DIR)
     : resolve(process.cwd(), "../..");
 
-  const dataDir = resolve(rootDir, "data");
+  const dataDirEnv = process.env.SWARM_DATA_DIR;
+  const dataDir = dataDirEnv
+    ? isAbsolute(dataDirEnv)
+      ? resolve(dataDirEnv)
+      : resolve(rootDir, dataDirEnv)
+    : resolve(rootDir, "data");
   const swarmDir = resolve(dataDir, "swarm");
   const sessionsDir = resolve(dataDir, "sessions");
   const authDir = resolve(dataDir, "auth");
@@ -26,7 +37,7 @@ export function createConfig(): SwarmConfig {
     host: process.env.SWARM_HOST ?? "127.0.0.1",
     port: Number.parseInt(process.env.SWARM_PORT ?? "47187", 10),
     debug,
-    allowNonManagerSubscriptions: process.env.SWARM_ALLOW_NON_MANAGER_SUBSCRIPTIONS === "true",
+    allowNonManagerSubscriptions,
     managerId: "manager",
     managerDisplayName: "Manager",
     defaultModel: {

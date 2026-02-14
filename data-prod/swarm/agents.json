@@ -1,0 +1,79 @@
+{
+  "agents": [
+    {
+      "agentId": "manager",
+      "displayName": "Manager",
+      "role": "manager",
+      "status": "streaming",
+      "createdAt": "2026-02-14T05:40:30.720Z",
+      "updatedAt": "2026-02-14T06:30:28.351Z",
+      "cwd": "/Users/sawyerhood/swarm",
+      "model": {
+        "provider": "openai-codex",
+        "modelId": "gpt-5.3-codex",
+        "thinkingLevel": "xhigh"
+      },
+      "sessionFile": "/Users/sawyerhood/swarm/data-prod/sessions/manager.jsonl"
+    },
+    {
+      "agentId": "spinner-removal-worker",
+      "displayName": "spinner-removal-worker",
+      "role": "worker",
+      "status": "stopped_on_restart",
+      "createdAt": "2026-02-14T06:06:56.629Z",
+      "updatedAt": "2026-02-14T06:28:32.948Z",
+      "cwd": "/Users/sawyerhood/swarm",
+      "model": {
+        "provider": "openai-codex",
+        "modelId": "gpt-5.3-codex",
+        "thinkingLevel": "xhigh"
+      },
+      "sessionFile": "/Users/sawyerhood/swarm/data-prod/sessions/spinner-removal-worker.jsonl"
+    },
+    {
+      "agentId": "agent-transparency-worker",
+      "displayName": "agent-transparency-worker",
+      "role": "worker",
+      "status": "stopped_on_restart",
+      "createdAt": "2026-02-14T06:09:38.741Z",
+      "updatedAt": "2026-02-14T06:28:32.948Z",
+      "cwd": "/Users/sawyerhood/swarm",
+      "model": {
+        "provider": "openai-codex",
+        "modelId": "gpt-5.3-codex",
+        "thinkingLevel": "xhigh"
+      },
+      "sessionFile": "/Users/sawyerhood/swarm/data-prod/sessions/agent-transparency-worker.jsonl"
+    },
+    {
+      "agentId": "agent-transparency-worker-2",
+      "displayName": "agent-transparency-worker-2",
+      "role": "worker",
+      "status": "stopped_on_restart",
+      "createdAt": "2026-02-14T06:11:17.025Z",
+      "updatedAt": "2026-02-14T06:28:32.948Z",
+      "cwd": "/Users/sawyerhood/swarm",
+      "model": {
+        "provider": "openai-codex",
+        "modelId": "gpt-5.3-codex",
+        "thinkingLevel": "xhigh"
+      },
+      "sessionFile": "/Users/sawyerhood/swarm/data-prod/sessions/agent-transparency-worker-2.jsonl"
+    },
+    {
+      "agentId": "sidebar-hierarchy-worker",
+      "displayName": "sidebar-hierarchy-worker",
+      "role": "worker",
+      "status": "idle",
+      "createdAt": "2026-02-14T06:30:37.742Z",
+      "updatedAt": "2026-02-14T06:30:37.742Z",
+      "cwd": "/Users/sawyerhood/swarm",
+      "model": {
+        "provider": "openai-codex",
+        "modelId": "gpt-5.3-codex",
+        "thinkingLevel": "xhigh"
+      },
+      "sessionFile": "/Users/sawyerhood/swarm/data-prod/sessions/sidebar-hierarchy-worker.jsonl"
+    }
+  ]
+}
