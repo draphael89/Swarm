@@ -275,6 +275,33 @@ describe('ManagerWsClient', () => {
     client.destroy()
   })
 
+  it('sends kill_agent command when deleting a sub-agent', () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('open')
+
+    socket.emit('message', {
+      data: JSON.stringify({
+        type: 'ready',
+        serverTime: new Date().toISOString(),
+        subscribedAgentId: 'manager',
+      }),
+    })
+
+    client.deleteAgent('worker-2')
+
+    expect(JSON.parse(socket.sentPayloads.at(-1) ?? '')).toEqual({
+      type: 'kill_agent',
+      agentId: 'worker-2',
+    })
+
+    client.destroy()
+  })
+
   it('clears only the current thread messages on conversation_reset', () => {
     const client = new ManagerWsClient('ws://127.0.0.1:47187', 'manager')
     const snapshots: ReturnType<typeof client.getState>[] = []

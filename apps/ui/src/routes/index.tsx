@@ -76,6 +76,16 @@ function IndexPage() {
     clientRef.current?.subscribeToAgent(agentId)
   }
 
+  const handleDeleteAgent = (agentId: string) => {
+    if (agentId === 'manager') return
+
+    if (activeAgentId === agentId) {
+      clientRef.current?.subscribeToAgent('manager')
+    }
+
+    clientRef.current?.deleteAgent(agentId)
+  }
+
   const handleSuggestionClick = (prompt: string) => {
     messageInputRef.current?.setInput(prompt)
   }
@@ -89,6 +99,7 @@ function IndexPage() {
           statuses={state.statuses}
           selectedAgentId={activeAgentId}
           onSelectAgent={handleSelectAgent}
+          onDeleteAgent={handleDeleteAgent}
         />
 
         <div className="flex min-w-0 flex-1 flex-col">

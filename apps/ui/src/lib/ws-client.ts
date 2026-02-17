@@ -136,6 +136,23 @@ export class ManagerWsClient {
     })
   }
 
+  deleteAgent(agentId: string): void {
+    const trimmed = agentId.trim()
+    if (!trimmed) return
+
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      this.updateState({
+        lastError: 'WebSocket is disconnected. Reconnecting...'
+      })
+      return
+    }
+
+    this.send({
+      type: 'kill_agent',
+      agentId: trimmed,
+    })
+  }
+
   private connect(): void {
     if (this.destroyed) return
 

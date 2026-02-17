@@ -401,6 +401,61 @@ describe('SwarmWebSocketServer', () => {
     await server.stop()
   })
 
+  it('kills a worker via kill_agent command and emits updated status + snapshot events', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port, true)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', { agentId: 'Disposable Worker' })
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe' }))
+
+    await waitForEvent(events, (event) => event.type === 'ready')
+    await waitForEvent(events, (event) => event.type === 'agents_snapshot')
+
+    client.send(JSON.stringify({ type: 'kill_agent', agentId: worker.agentId }))
+
+    const statusEvent = await waitForEvent(
+      events,
+      (event) => event.type === 'agent_status' && event.agentId === worker.agentId && event.status === 'terminated',
+    )
+    expect(statusEvent.type).toBe('agent_status')
+
+    const snapshotEvent = await waitForEvent(
+      events,
+      (event) =>
+        event.type === 'agents_snapshot' &&
+        event.agents.some((agent) => agent.agentId === worker.agentId && agent.status === 'terminated'),
+    )
+    expect(snapshotEvent.type).toBe('agents_snapshot')
+
+    const descriptor = manager.listAgents().find((agent) => agent.agentId === worker.agentId)
+    expect(descriptor?.status).toBe('terminated')
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
   it('rejects non-manager subscription with explicit error', async () => {
     const port = await getAvailablePort()
     const config = await makeTempConfig(port)

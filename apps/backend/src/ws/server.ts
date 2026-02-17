@@ -186,6 +186,31 @@ export class SwarmWebSocketServer {
       return;
     }
 
+    if (command.type === "kill_agent") {
+      const subscribedAgentId = this.subscriptions.get(socket);
+      if (!subscribedAgentId) {
+        this.send(socket, {
+          type: "error",
+          code: "NOT_SUBSCRIBED",
+          message: "Send subscribe before kill_agent."
+        });
+        return;
+      }
+
+      const managerId = this.swarmManager.getConfig().managerId;
+
+      try {
+        await this.swarmManager.killAgent(managerId, command.agentId);
+      } catch (error) {
+        this.send(socket, {
+          type: "error",
+          code: "KILL_AGENT_FAILED",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+      return;
+    }
+
     if (command.type === "user_message") {
       const subscribedAgentId = this.subscriptions.get(socket);
       if (!subscribedAgentId) {
@@ -285,6 +310,20 @@ export class SwarmWebSocketServer {
         return { ok: false, error: "subscribe.agentId must be a string when provided" };
       }
       return { ok: true, command: { type: "subscribe", agentId: maybe.agentId } };
+    }
+
+    if (maybe.type === "kill_agent") {
+      if (typeof maybe.agentId !== "string" || maybe.agentId.trim().length === 0) {
+        return { ok: false, error: "kill_agent.agentId must be a non-empty string" };
+      }
+
+      return {
+        ok: true,
+        command: {
+          type: "kill_agent",
+          agentId: maybe.agentId.trim()
+        }
+      };
     }
 
     if (maybe.type === "user_message") {

@@ -8,6 +8,7 @@ import type {
 export type ClientCommand =
   | { type: "subscribe"; agentId?: string }
   | { type: "user_message"; text: string; agentId?: string; delivery?: "auto" | "followUp" | "steer" }
+  | { type: "kill_agent"; agentId: string }
   | { type: "ping" };
 
 export type ServerEvent =

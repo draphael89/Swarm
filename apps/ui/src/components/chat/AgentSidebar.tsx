@@ -1,4 +1,4 @@
-import { CircleDashed } from 'lucide-react'
+import { CircleDashed, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { AgentDescriptor, AgentStatus } from '@/lib/ws-types'
 
@@ -8,13 +8,21 @@ interface AgentSidebarProps {
   statuses: Record<string, { status: AgentStatus; pendingCount: number }>
   selectedAgentId: string
   onSelectAgent: (agentId: string) => void
+  onDeleteAgent: (agentId: string) => void
 }
 
 function isWorkingStatus(status: AgentStatus): boolean {
   return status === 'streaming'
 }
 
-export function AgentSidebar({ connected, agents, statuses, selectedAgentId, onSelectAgent }: AgentSidebarProps) {
+export function AgentSidebar({
+  connected,
+  agents,
+  statuses,
+  selectedAgentId,
+  onSelectAgent,
+  onDeleteAgent,
+}: AgentSidebarProps) {
   const activeAgents = [...agents]
     .filter((agent) => agent.status === 'idle' || agent.status === 'streaming')
     .sort((a, b) => {
@@ -46,25 +54,44 @@ export function AgentSidebar({ connected, agents, statuses, selectedAgentId, onS
 
               return (
                 <li key={agent.agentId}>
-                  <button
-                    type="button"
-                    onClick={() => onSelectAgent(agent.agentId)}
-                    className={cn(
-                      'w-full rounded-md px-2 py-1.5 text-left transition-colors',
-                      isSelected ? 'bg-primary/10' : 'hover:bg-accent/60',
-                    )}
-                  >
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground">
-                        {isWorking ? <CircleDashed aria-hidden="true" className="size-3 animate-spin" /> : <span aria-hidden="true" className="size-3" />}
-                        <span className="sr-only">{isWorking ? 'Working' : 'Idle'}</span>
-                      </span>
-                      {isWorker ? <span aria-hidden="true" className="shrink-0 text-[10px] text-muted-foreground/70">↳</span> : null}
-                      <span className={cn('min-w-0 flex-1 truncate font-mono text-[11px]', isWorker ? 'text-muted-foreground' : 'font-semibold')}>
-                        {agent.agentId}
-                      </span>
-                    </div>
-                  </button>
+                  <div className="group relative">
+                    <button
+                      type="button"
+                      onClick={() => onSelectAgent(agent.agentId)}
+                      className={cn(
+                        'w-full rounded-md px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                        isWorker && 'pr-9',
+                        isSelected ? 'bg-primary/10' : 'hover:bg-accent/60',
+                      )}
+                    >
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground">
+                          {isWorking ? <CircleDashed aria-hidden="true" className="size-3 animate-spin" /> : <span aria-hidden="true" className="size-3" />}
+                          <span className="sr-only">{isWorking ? 'Working' : 'Idle'}</span>
+                        </span>
+                        {isWorker ? <span aria-hidden="true" className="shrink-0 text-[10px] text-muted-foreground/70">↳</span> : null}
+                        <span className={cn('min-w-0 flex-1 truncate font-mono text-[11px]', isWorker ? 'text-muted-foreground' : 'font-semibold')}>
+                          {agent.agentId}
+                        </span>
+                      </div>
+                    </button>
+
+                    {isWorker ? (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteAgent(agent.agentId)}
+                        aria-label={`Delete ${agent.agentId}`}
+                        className={cn(
+                          'absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/70 transition',
+                          'opacity-0 hover:bg-destructive/10 hover:text-destructive',
+                          'group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                        )}
+                      >
+                        <Trash2 aria-hidden="true" className="size-3.5" />
+                      </button>
+                    ) : null}
+                  </div>
                 </li>
               )
             })}
