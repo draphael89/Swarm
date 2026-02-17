@@ -639,14 +639,32 @@ describe('SwarmManager', () => {
     expect(manager.listAgents().some((agent) => agent.agentId === ownedWorker.agentId)).toBe(false)
   })
 
-  it('protects the primary manager from deletion', async () => {
+  it('allows deleting the default manager when requested', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    await expect(manager.deleteManager('manager', 'manager')).rejects.toThrow(
-      'Manager manager is protected and cannot be deleted',
-    )
+    const deleted = await manager.deleteManager('manager', 'manager')
+
+    expect(deleted.managerId).toBe('manager')
+    expect(deleted.terminatedWorkerIds).toEqual([])
+    expect(manager.listAgents()).toHaveLength(0)
+  })
+
+  it('allows bootstrapping a new manager after deleting the last running manager', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await manager.deleteManager('manager', 'manager')
+
+    const recreated = await manager.createManager('manager', {
+      name: 'Recreated Manager',
+      cwd: config.defaultCwd,
+    })
+
+    expect(recreated.role).toBe('manager')
+    expect(manager.listAgents().some((agent) => agent.agentId === recreated.agentId)).toBe(true)
   })
 
   it('enforces strict manager ownership for worker control operations', async () => {
@@ -689,29 +707,31 @@ describe('SwarmManager', () => {
     expect(workerRuntime?.sendCalls.at(-1)?.message).toBe('hello owned worker')
   })
 
-  it('enforces cwd allowlist restrictions for manager and worker creation', async () => {
+  it('accepts any existing directory for manager and worker creation', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
     const outsideDir = await mkdtemp(join(tmpdir(), 'outside-allowlist-'))
 
-    await expect(
-      manager.createManager('manager', {
-        name: 'Blocked Manager',
-        cwd: outsideDir,
-      }),
-    ).rejects.toThrow('outside the allowed workspace roots')
+    const externalManager = await manager.createManager('manager', {
+      name: 'External Manager',
+      cwd: outsideDir,
+    })
 
-    await expect(
-      manager.spawnAgent('manager', {
-        agentId: 'Blocked Worker',
-        cwd: outsideDir,
-      }),
-    ).rejects.toThrow('outside the allowed workspace roots')
+    const externalWorker = await manager.spawnAgent(externalManager.agentId, {
+      agentId: 'External Worker',
+      cwd: outsideDir,
+    })
 
     const validation = await manager.validateDirectory(outsideDir)
-    expect(validation.valid).toBe(false)
-    expect(validation.message).toContain('outside the allowed workspace roots')
+    const listed = await manager.listDirectories(outsideDir)
+
+    expect(externalManager.cwd).toBe(validation.resolvedPath)
+    expect(externalWorker.cwd).toBe(validation.resolvedPath)
+    expect(validation.valid).toBe(true)
+    expect(validation.message).toBeUndefined()
+    expect(listed.resolvedPath).toBe(validation.resolvedPath)
+    expect(listed.roots).toEqual([])
   })
 })

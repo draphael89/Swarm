@@ -44,7 +44,7 @@ interface PendingRequest<T> {
 
 const initialState: ManagerWsState = {
   connected: false,
-  targetAgentId: 'manager',
+  targetAgentId: null,
   subscribedAgentId: null,
   messages: [],
   agents: [],
@@ -155,6 +155,32 @@ export class ManagerWsClient {
 
     const agentId =
       options?.agentId ?? this.state.targetAgentId ?? this.state.subscribedAgentId ?? this.desiredAgentId
+
+    if (!agentId) {
+      this.updateState({
+        lastError: 'No active agent selected. Create a manager or select an active thread.',
+      })
+      return
+    }
+
+    if (
+      !options?.agentId &&
+      !this.state.targetAgentId &&
+      !this.state.subscribedAgentId &&
+      this.state.agents.length === 0
+    ) {
+      this.updateState({
+        lastError: 'No active agent selected. Create a manager or select an active thread.',
+      })
+      return
+    }
+
+    if (this.state.agents.length > 0 && !this.state.agents.some((agent) => agent.agentId === agentId)) {
+      this.updateState({
+        lastError: 'No active agent selected. Create a manager or select an active thread.',
+      })
+      return
+    }
 
     this.send({
       type: 'user_message',
@@ -472,8 +498,15 @@ export class ManagerWsClient {
       Object.entries(this.state.statuses).filter(([agentId]) => liveAgentIds.has(agentId)),
     )
 
-    const fallbackTarget = chooseFallbackAgentId(agents, this.state.targetAgentId ?? this.desiredAgentId)
+    const fallbackTarget = chooseFallbackAgentId(
+      agents,
+      this.state.targetAgentId ?? this.state.subscribedAgentId ?? this.desiredAgentId,
+    )
     const targetChanged = fallbackTarget !== this.state.targetAgentId
+    const nextSubscribedAgentId =
+      this.state.subscribedAgentId && liveAgentIds.has(this.state.subscribedAgentId)
+        ? this.state.subscribedAgentId
+        : fallbackTarget ?? null
 
     const patch: Partial<ManagerWsState> = {
       agents,
@@ -483,9 +516,14 @@ export class ManagerWsClient {
     if (targetChanged) {
       patch.targetAgentId = fallbackTarget
       patch.messages = []
-      if (fallbackTarget) {
-        this.desiredAgentId = fallbackTarget
-      }
+    }
+
+    if (nextSubscribedAgentId !== this.state.subscribedAgentId) {
+      patch.subscribedAgentId = nextSubscribedAgentId
+    }
+
+    if (fallbackTarget) {
+      this.desiredAgentId = fallbackTarget
     }
 
     this.updateState(patch)
@@ -516,7 +554,7 @@ export class ManagerWsClient {
   private pushSystemMessage(text: string): void {
     const message: ConversationMessageEvent = {
       type: 'conversation_message',
-      agentId: this.state.targetAgentId ?? 'manager',
+      agentId: (this.state.targetAgentId ?? this.state.subscribedAgentId ?? this.desiredAgentId) || 'system',
       role: 'system',
       text,
       timestamp: new Date().toISOString(),

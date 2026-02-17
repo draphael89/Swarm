@@ -139,7 +139,7 @@ export class SwarmWebSocketServer {
       this.send(socket, {
         type: "ready",
         serverTime: new Date().toISOString(),
-        subscribedAgentId: this.subscriptions.get(socket) ?? this.swarmManager.getConfig().managerId
+        subscribedAgentId: this.subscriptions.get(socket) ?? this.resolveDefaultSubscriptionAgentId()
       });
       return;
     }
@@ -344,7 +344,8 @@ export class SwarmWebSocketServer {
 
   private async handleSubscribe(socket: WebSocket, requestedAgentId?: string): Promise<void> {
     const managerId = this.swarmManager.getConfig().managerId;
-    const targetAgentId = requestedAgentId ?? managerId;
+    const targetAgentId =
+      requestedAgentId ?? this.resolvePreferredManagerSubscriptionId() ?? this.resolveDefaultSubscriptionAgentId();
 
     if (!this.allowNonManagerSubscriptions && targetAgentId !== managerId) {
       this.send(socket, {
@@ -356,7 +357,10 @@ export class SwarmWebSocketServer {
     }
 
     const targetDescriptor = this.swarmManager.getAgent(targetAgentId);
-    if (!targetDescriptor) {
+    const canBootstrapSubscription =
+      !targetDescriptor && requestedAgentId === managerId && !this.hasRunningManagers();
+
+    if (!targetDescriptor && requestedAgentId && !canBootstrapSubscription) {
       this.send(socket, {
         type: "error",
         code: "UNKNOWN_AGENT",
@@ -366,7 +370,60 @@ export class SwarmWebSocketServer {
     }
 
     this.subscriptions.set(socket, targetAgentId);
+    this.sendSubscriptionBootstrap(socket, targetAgentId);
+  }
 
+  private resolveSubscribedAgentId(socket: WebSocket): string | undefined {
+    const subscribedAgentId = this.subscriptions.get(socket);
+    if (!subscribedAgentId) {
+      return undefined;
+    }
+
+    if (this.swarmManager.getAgent(subscribedAgentId)) {
+      return subscribedAgentId;
+    }
+
+    const fallbackAgentId = this.resolvePreferredManagerSubscriptionId();
+    if (!fallbackAgentId) {
+      return subscribedAgentId;
+    }
+
+    this.subscriptions.set(socket, fallbackAgentId);
+    this.sendSubscriptionBootstrap(socket, fallbackAgentId);
+
+    return fallbackAgentId;
+  }
+
+  private resolveManagerContextAgentId(subscribedAgentId: string): string | undefined {
+    const descriptor = this.swarmManager.getAgent(subscribedAgentId);
+    if (!descriptor) {
+      if (!this.hasRunningManagers()) {
+        return this.swarmManager.getConfig().managerId;
+      }
+      return undefined;
+    }
+
+    return descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId;
+  }
+
+  private handleDeletedAgentSubscriptions(deletedAgentIds: Set<string>): void {
+    for (const [socket, subscribedAgentId] of this.subscriptions.entries()) {
+      if (!deletedAgentIds.has(subscribedAgentId)) {
+        continue;
+      }
+
+      const fallbackAgentId = this.resolvePreferredManagerSubscriptionId();
+      if (!fallbackAgentId) {
+        this.subscriptions.set(socket, this.resolveDefaultSubscriptionAgentId());
+        continue;
+      }
+
+      this.subscriptions.set(socket, fallbackAgentId);
+      this.sendSubscriptionBootstrap(socket, fallbackAgentId);
+    }
+  }
+
+  private sendSubscriptionBootstrap(socket: WebSocket, targetAgentId: string): void {
     this.send(socket, {
       type: "ready",
       serverTime: new Date().toISOString(),
@@ -383,66 +440,32 @@ export class SwarmWebSocketServer {
     });
   }
 
-  private resolveSubscribedAgentId(socket: WebSocket): string | undefined {
-    const subscribedAgentId = this.subscriptions.get(socket);
-    if (!subscribedAgentId) {
-      return undefined;
-    }
-
-    if (this.swarmManager.getAgent(subscribedAgentId)) {
-      return subscribedAgentId;
-    }
-
-    const fallbackManagerId = this.swarmManager.getConfig().managerId;
-    this.subscriptions.set(socket, fallbackManagerId);
-
-    this.send(socket, {
-      type: "ready",
-      serverTime: new Date().toISOString(),
-      subscribedAgentId: fallbackManagerId
-    });
-    this.send(socket, {
-      type: "agents_snapshot",
-      agents: this.swarmManager.listAgents()
-    });
-    this.send(socket, {
-      type: "conversation_history",
-      agentId: fallbackManagerId,
-      messages: this.swarmManager.getConversationHistory(fallbackManagerId)
-    });
-
-    return fallbackManagerId;
+  private resolveDefaultSubscriptionAgentId(): string {
+    return this.resolvePreferredManagerSubscriptionId() ?? this.swarmManager.getConfig().managerId;
   }
 
-  private resolveManagerContextAgentId(subscribedAgentId: string): string | undefined {
-    const descriptor = this.swarmManager.getAgent(subscribedAgentId);
-    if (!descriptor) {
-      return undefined;
+  private resolvePreferredManagerSubscriptionId(): string | undefined {
+    const managerId = this.swarmManager.getConfig().managerId;
+    const configuredManager = this.swarmManager.getAgent(managerId);
+    if (configuredManager && this.isSubscribable(configuredManager.status)) {
+      return managerId;
     }
 
-    return descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId;
+    const firstManager = this.swarmManager
+      .listAgents()
+      .find((agent) => agent.role === "manager" && this.isSubscribable(agent.status));
+
+    return firstManager?.agentId;
   }
 
-  private handleDeletedAgentSubscriptions(deletedAgentIds: Set<string>): void {
-    const fallbackManagerId = this.swarmManager.getConfig().managerId;
+  private hasRunningManagers(): boolean {
+    return this.swarmManager
+      .listAgents()
+      .some((agent) => agent.role === "manager" && this.isSubscribable(agent.status));
+  }
 
-    for (const [socket, subscribedAgentId] of this.subscriptions.entries()) {
-      if (!deletedAgentIds.has(subscribedAgentId)) {
-        continue;
-      }
-
-      this.subscriptions.set(socket, fallbackManagerId);
-      this.send(socket, {
-        type: "ready",
-        serverTime: new Date().toISOString(),
-        subscribedAgentId: fallbackManagerId
-      });
-      this.send(socket, {
-        type: "conversation_history",
-        agentId: fallbackManagerId,
-        messages: this.swarmManager.getConversationHistory(fallbackManagerId)
-      });
-    }
+  private isSubscribable(status: string): boolean {
+    return status === "idle" || status === "streaming";
   }
 
   private extractRequestId(command: ClientCommand): string | undefined {

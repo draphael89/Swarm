@@ -503,7 +503,7 @@ describe('SwarmWebSocketServer', () => {
     await server.stop()
   })
 
-  it('deletes non-primary managers over websocket and emits manager_deleted', async () => {
+  it('deletes managers over websocket and emits manager_deleted', async () => {
     const port = await getAvailablePort()
     const config = await makeTempConfig(port, true)
 
@@ -548,6 +548,67 @@ describe('SwarmWebSocketServer', () => {
 
     expect(manager.listAgents().some((agent) => agent.agentId === secondary.agentId)).toBe(false)
     expect(manager.listAgents().some((agent) => agent.agentId === ownedWorker.agentId)).toBe(false)
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
+  it('supports deleting the selected last manager and creating a replacement manager', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port, true)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe', agentId: 'manager' }))
+    await waitForEvent(events, (event) => event.type === 'ready' && event.subscribedAgentId === 'manager')
+
+    client.send(JSON.stringify({ type: 'delete_manager', managerId: 'manager' }))
+
+    const deletedEvent = await waitForEvent(
+      events,
+      (event) => event.type === 'manager_deleted' && event.managerId === 'manager',
+    )
+    expect(deletedEvent.type).toBe('manager_deleted')
+
+    const emptySnapshot = await waitForEvent(
+      events,
+      (event) => event.type === 'agents_snapshot' && event.agents.length === 0,
+    )
+    expect(emptySnapshot.type).toBe('agents_snapshot')
+
+    client.send(
+      JSON.stringify({
+        type: 'create_manager',
+        name: 'Recovered Manager',
+        cwd: config.defaultCwd,
+      }),
+    )
+
+    const recreatedEvent = await waitForEvent(
+      events,
+      (event) => event.type === 'manager_created' && event.manager.agentId === 'recovered-manager',
+    )
+    expect(recreatedEvent.type).toBe('manager_created')
+
+    expect(manager.listAgents().some((agent) => agent.agentId === 'recovered-manager')).toBe(true)
 
     client.close()
     await once(client, 'close')
@@ -695,7 +756,7 @@ describe('SwarmWebSocketServer', () => {
     const listed = await waitForEvent(events, (event) => event.type === 'directories_listed')
     expect(listed.type).toBe('directories_listed')
     if (listed.type === 'directories_listed') {
-      expect(listed.roots).toContain(expectedRoot)
+      expect(listed.roots).toEqual([])
       expect(listed.resolvedPath).toBe(expectedRoot)
     }
 
@@ -707,8 +768,9 @@ describe('SwarmWebSocketServer', () => {
     )
     expect(validated.type).toBe('directory_validated')
     if (validated.type === 'directory_validated') {
-      expect(validated.valid).toBe(false)
-      expect(validated.message).toContain('outside the allowed workspace roots')
+      expect(validated.valid).toBe(true)
+      expect(validated.message).toBeUndefined()
+      expect(validated.roots).toEqual([])
     }
 
     client.close()

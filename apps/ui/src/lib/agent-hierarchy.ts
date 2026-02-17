@@ -16,9 +16,6 @@ export function getPrimaryManagerId(agents: AgentDescriptor[]): string | null {
   const managers = agents.filter((agent) => agent.role === 'manager' && isActiveAgent(agent))
   if (managers.length === 0) return null
 
-  const selfOwnedManager = managers.find((manager) => manager.managerId === manager.agentId)
-  if (selfOwnedManager) return selfOwnedManager.agentId
-
   const legacyDefaultManager = managers.find((manager) => manager.agentId === 'manager')
   if (legacyDefaultManager) return legacyDefaultManager.agentId
 

@@ -505,13 +505,13 @@ describe('ManagerWsClient', () => {
 
     emitServerEvent(socket, {
       type: 'error',
-      code: 'DELETE_MANAGER_PROTECTED',
-      message: 'Primary manager cannot be deleted.',
+      code: 'DELETE_MANAGER_FAILED',
+      message: 'Delete failed for testing.',
       requestId: deletePayload.requestId,
     })
 
-    await expect(deletePromise).rejects.toThrow('DELETE_MANAGER_PROTECTED: Primary manager cannot be deleted.')
-    expect(client.getState().lastError).toBe('Primary manager cannot be deleted.')
+    await expect(deletePromise).rejects.toThrow('DELETE_MANAGER_FAILED: Delete failed for testing.')
+    expect(client.getState().lastError).toBe('Delete failed for testing.')
 
     client.destroy()
   })
@@ -581,6 +581,60 @@ describe('ManagerWsClient', () => {
       type: 'subscribe',
       agentId: 'manager',
     })
+
+    client.destroy()
+  })
+
+  it('clears selection when the last manager is deleted and blocks sends until a new agent exists', () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('open')
+
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
+    })
+
+    emitServerEvent(socket, {
+      type: 'agents_snapshot',
+      agents: [
+        {
+          agentId: 'manager',
+          managerId: 'manager',
+          displayName: 'Manager',
+          role: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: '/tmp',
+          model: {
+            provider: 'openai-codex',
+            modelId: 'gpt-5.3-codex',
+            thinkingLevel: 'medium',
+          },
+          sessionFile: '/tmp/manager.jsonl',
+        },
+      ],
+    })
+
+    emitServerEvent(socket, {
+      type: 'manager_deleted',
+      managerId: 'manager',
+    })
+
+    expect(client.getState().targetAgentId).toBeNull()
+    expect(client.getState().subscribedAgentId).toBeNull()
+
+    const sentCountBefore = socket.sentPayloads.length
+    client.sendUserMessage('hello?')
+
+    expect(socket.sentPayloads).toHaveLength(sentCountBefore)
+    expect(client.getState().lastError).toContain('No active agent selected')
 
     client.destroy()
   })

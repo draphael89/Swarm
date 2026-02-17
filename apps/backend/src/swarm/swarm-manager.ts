@@ -265,7 +265,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   async createManager(callerAgentId: string, input: { name: string; cwd: string }): Promise<AgentDescriptor> {
-    this.assertManager(callerAgentId, "create managers");
+    const callerDescriptor = this.descriptors.get(callerAgentId);
+    if (!callerDescriptor || callerDescriptor.role !== "manager") {
+      const canBootstrap = callerAgentId === this.config.managerId && !this.hasRunningManagers();
+      if (!canBootstrap) {
+        throw new Error("Only manager can create managers");
+      }
+    } else if (callerDescriptor.status === "terminated" || callerDescriptor.status === "stopped_on_restart") {
+      throw new Error(`Manager is not running: ${callerAgentId}`);
+    }
 
     const requestedName = input.name?.trim();
     if (!requestedName) {
@@ -329,10 +337,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     const target = this.descriptors.get(targetManagerId);
     if (!target || target.role !== "manager") {
       throw new Error(`Unknown manager: ${targetManagerId}`);
-    }
-
-    if (target.agentId === this.config.managerId) {
-      throw new Error(`Manager ${targetManagerId} is protected and cannot be deleted`);
     }
 
     const terminatedWorkerIds: string[] = [];
@@ -974,6 +978,22 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     return descriptor;
+  }
+
+  private hasRunningManagers(): boolean {
+    for (const descriptor of this.descriptors.values()) {
+      if (descriptor.role !== "manager") {
+        continue;
+      }
+
+      if (descriptor.status === "terminated" || descriptor.status === "stopped_on_restart") {
+        continue;
+      }
+
+      return true;
+    }
+
+    return false;
   }
 
   private getPendingUserReplies(managerId: string): number {

@@ -6,7 +6,7 @@ import { MessageInput, type MessageInputHandle } from '@/components/chat/Message
 import { MessageList } from '@/components/chat/MessageList'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { chooseFallbackAgentId, getPrimaryManagerId } from '@/lib/agent-hierarchy'
+import { chooseFallbackAgentId } from '@/lib/agent-hierarchy'
 import { ManagerWsClient, type ManagerWsState } from '@/lib/ws-client'
 import type { AgentDescriptor } from '@/lib/ws-types'
 
@@ -21,7 +21,7 @@ function IndexPage() {
 
   const [state, setState] = useState<ManagerWsState>({
     connected: false,
-    targetAgentId: 'manager',
+    targetAgentId: null,
     subscribedAgentId: null,
     messages: [],
     agents: [],
@@ -65,18 +65,21 @@ function IndexPage() {
     }
   }, [wsUrl])
 
-  const primaryManagerId = useMemo(() => getPrimaryManagerId(state.agents), [state.agents])
-
-  const activeAgentId = state.targetAgentId ?? state.subscribedAgentId ?? primaryManagerId ?? 'manager'
+  const activeAgentId = useMemo(() => {
+    return state.targetAgentId ?? state.subscribedAgentId ?? chooseFallbackAgentId(state.agents)
+  }, [state.agents, state.subscribedAgentId, state.targetAgentId])
 
   const activeAgent = useMemo(() => {
+    if (!activeAgentId) return null
     return state.agents.find((agent) => agent.agentId === activeAgentId) ?? null
   }, [activeAgentId, state.agents])
 
-  const activeAgentLabel = activeAgent?.displayName ?? activeAgentId
-  const isActiveManager = activeAgent?.role === 'manager' || (!activeAgent && activeAgentId === 'manager')
+  const activeAgentLabel = activeAgent?.displayName ?? activeAgentId ?? 'No active agent'
+  const isActiveManager = activeAgent?.role === 'manager'
 
   const isLoading = useMemo(() => {
+    if (!activeAgentId) return false
+
     const fromStatuses = state.statuses[activeAgentId]?.status
     if (fromStatuses) return fromStatuses === 'streaming'
 
@@ -85,6 +88,8 @@ function IndexPage() {
   }, [activeAgentId, state.agents, state.statuses])
 
   const handleSend = (text: string) => {
+    if (!activeAgentId) return
+
     clientRef.current?.sendUserMessage(text, {
       agentId: activeAgentId,
       delivery: isActiveManager ? 'steer' : isLoading ? 'steer' : 'auto',
@@ -92,7 +97,7 @@ function IndexPage() {
   }
 
   const handleNewChat = () => {
-    if (!isActiveManager) return
+    if (!isActiveManager || !activeAgentId) return
     clientRef.current?.sendUserMessage('/new', { agentId: activeAgentId, delivery: 'steer' })
   }
 
@@ -106,7 +111,7 @@ function IndexPage() {
 
     if (activeAgentId === agentId) {
       const remainingAgents = state.agents.filter((entry) => entry.agentId !== agentId)
-      const fallbackAgentId = chooseFallbackAgentId(remainingAgents, primaryManagerId)
+      const fallbackAgentId = chooseFallbackAgentId(remainingAgents)
       if (fallbackAgentId) {
         clientRef.current?.subscribeToAgent(fallbackAgentId)
       }
@@ -137,7 +142,7 @@ function IndexPage() {
         const remainingAgents = state.agents.filter(
           (agent) => agent.agentId !== manager.agentId && agent.managerId !== manager.agentId,
         )
-        const fallbackAgentId = chooseFallbackAgentId(remainingAgents, primaryManagerId)
+        const fallbackAgentId = chooseFallbackAgentId(remainingAgents)
         if (fallbackAgentId) {
           clientRef.current.subscribeToAgent(fallbackAgentId)
         }
@@ -251,7 +256,6 @@ function IndexPage() {
           agents={state.agents}
           statuses={state.statuses}
           selectedAgentId={activeAgentId}
-          primaryManagerId={primaryManagerId}
           onAddManager={handleOpenCreateManagerDialog}
           onSelectAgent={handleSelectAgent}
           onDeleteAgent={handleDeleteAgent}
@@ -284,7 +288,7 @@ function IndexPage() {
             ref={messageInputRef}
             onSend={handleSend}
             isLoading={isLoading}
-            disabled={!state.connected}
+            disabled={!state.connected || !activeAgentId}
             allowWhileLoading
             agentLabel={activeAgentLabel}
           />

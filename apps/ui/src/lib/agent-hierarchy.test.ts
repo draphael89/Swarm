@@ -60,9 +60,14 @@ describe('agent-hierarchy', () => {
     expect(orphanWorkers.map((entry) => entry.agentId)).toEqual(['worker-orphan'])
   })
 
-  it('detects the primary manager from self-ownership', () => {
+  it('prefers the legacy default manager id when choosing a primary manager', () => {
     const agents: AgentDescriptor[] = [manager('manager'), manager('manager-2', 'manager')]
     expect(getPrimaryManagerId(agents)).toBe('manager')
+  })
+
+  it('falls back to created-order manager selection when no legacy manager id exists', () => {
+    const agents: AgentDescriptor[] = [manager('beta'), manager('alpha')]
+    expect(getPrimaryManagerId(agents)).toBe('alpha')
   })
 
   it('chooses fallback target preferring a primary manager', () => {

@@ -1,12 +1,11 @@
 import { realpathSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { basename, resolve, sep } from "node:path";
+import { basename, resolve } from "node:path";
 
 const CWD_ERROR_MESSAGES = {
   REQUIRED: "Directory path must be a non-empty string.",
   NOT_FOUND: "Directory does not exist.",
   NOT_DIRECTORY: "Path is not a directory.",
-  OUTSIDE_ALLOWLIST: "Directory is outside the allowed workspace roots.",
   LIST_FAILED: "Unable to list directories for the requested path."
 } as const;
 
@@ -14,7 +13,6 @@ export type DirectoryValidationErrorCode =
   | "DIRECTORY_REQUIRED"
   | "DIRECTORY_NOT_FOUND"
   | "DIRECTORY_NOT_DIRECTORY"
-  | "DIRECTORY_OUTSIDE_ALLOWLIST"
   | "DIRECTORY_LIST_FAILED";
 
 export class DirectoryValidationError extends Error {
@@ -80,16 +78,7 @@ export async function validateDirectoryPath(input: string, policy: CwdPolicy): P
   let stats;
   try {
     stats = await stat(resolved);
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error &&
-      "code" in error &&
-      (error as { code?: string }).code === "ENOENT"
-    ) {
-      throw new DirectoryValidationError("DIRECTORY_NOT_FOUND", CWD_ERROR_MESSAGES.NOT_FOUND);
-    }
-
+  } catch {
     throw new DirectoryValidationError("DIRECTORY_NOT_FOUND", CWD_ERROR_MESSAGES.NOT_FOUND);
   }
 
@@ -97,14 +86,7 @@ export async function validateDirectoryPath(input: string, policy: CwdPolicy): P
     throw new DirectoryValidationError("DIRECTORY_NOT_DIRECTORY", CWD_ERROR_MESSAGES.NOT_DIRECTORY);
   }
 
-  const candidate = resolveToRealPath(resolved);
-  const allowlistRoots = normalizeAllowlistRoots(policy.allowlistRoots);
-
-  if (!isPathAllowed(candidate, allowlistRoots)) {
-    throw new DirectoryValidationError("DIRECTORY_OUTSIDE_ALLOWLIST", CWD_ERROR_MESSAGES.OUTSIDE_ALLOWLIST);
-  }
-
-  return candidate;
+  return resolveToRealPath(resolved);
 }
 
 export async function listDirectories(
@@ -113,7 +95,7 @@ export async function listDirectories(
 ): Promise<DirectoryListingResult> {
   const baseInput = requestedPath?.trim().length ? requestedPath : policy.rootDir;
   const resolvedPath = await validateDirectoryPath(baseInput, policy);
-  const roots = normalizeAllowlistRoots(policy.allowlistRoots);
+  const roots: string[] = [];
 
   try {
     const entries = await readdir(resolvedPath, { withFileTypes: true });
@@ -125,10 +107,6 @@ export async function listDirectories(
       }
 
       const candidatePath = resolveToRealPath(resolve(resolvedPath, entry.name));
-      if (!isPathAllowed(candidatePath, roots)) {
-        continue;
-      }
-
       directories.push({
         name: entry.name,
         path: candidatePath
@@ -152,7 +130,7 @@ export async function validateDirectory(
   requestedPath: string,
   policy: CwdPolicy
 ): Promise<DirectoryValidationResult> {
-  const roots = normalizeAllowlistRoots(policy.allowlistRoots);
+  const roots: string[] = [];
 
   try {
     const resolvedPath = await validateDirectoryPath(requestedPath, policy);
@@ -179,19 +157,6 @@ export async function validateDirectory(
       message: CWD_ERROR_MESSAGES.NOT_FOUND
     };
   }
-}
-
-export function isPathAllowed(candidatePath: string, roots: string[]): boolean {
-  return roots.some((root) => isPathWithinRoot(candidatePath, root));
-}
-
-function isPathWithinRoot(candidatePath: string, root: string): boolean {
-  if (candidatePath === root) {
-    return true;
-  }
-
-  const rootWithSep = root.endsWith(sep) ? root : `${root}${sep}`;
-  return candidatePath.startsWith(rootWithSep);
 }
 
 function resolveToRealPath(pathValue: string): string {

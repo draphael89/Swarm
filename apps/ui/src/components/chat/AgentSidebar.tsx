@@ -7,8 +7,7 @@ interface AgentSidebarProps {
   connected: boolean
   agents: AgentDescriptor[]
   statuses: Record<string, { status: AgentStatus; pendingCount: number }>
-  selectedAgentId: string
-  primaryManagerId: string | null
+  selectedAgentId: string | null
   onAddManager: () => void
   onSelectAgent: (agentId: string) => void
   onDeleteAgent: (agentId: string) => void
@@ -24,7 +23,6 @@ export function AgentSidebar({
   agents,
   statuses,
   selectedAgentId,
-  primaryManagerId,
   onAddManager,
   onSelectAgent,
   onDeleteAgent,
@@ -62,7 +60,6 @@ export function AgentSidebar({
               const managerLiveStatus = statuses[manager.agentId]?.status ?? manager.status
               const managerIsWorking = isWorkingStatus(managerLiveStatus)
               const managerIsSelected = selectedAgentId === manager.agentId
-              const isProtectedManager = manager.agentId === primaryManagerId
 
               return (
                 <li key={manager.agentId} className="space-y-1">
@@ -71,8 +68,7 @@ export function AgentSidebar({
                       type="button"
                       onClick={() => onSelectAgent(manager.agentId)}
                       className={cn(
-                        'w-full rounded-md px-2 py-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-                        !isProtectedManager && 'pr-9',
+                        'w-full rounded-md px-2 py-1.5 pr-9 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                         managerIsSelected ? 'bg-primary/10' : 'hover:bg-accent/60',
                       )}
                     >
@@ -84,27 +80,22 @@ export function AgentSidebar({
                         <span className="min-w-0 flex-1 truncate font-mono text-[11px] font-semibold">
                           {manager.agentId}
                         </span>
-                        {isProtectedManager ? (
-                          <span className="shrink-0 text-[10px] uppercase tracking-wide text-muted-foreground/70">protected</span>
-                        ) : null}
                       </div>
                     </button>
 
-                    {!isProtectedManager ? (
-                      <button
-                        type="button"
-                        onClick={() => onDeleteManager(manager.agentId)}
-                        aria-label={`Delete manager ${manager.agentId}`}
-                        className={cn(
-                          'absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/70 transition',
-                          'opacity-0 hover:bg-destructive/10 hover:text-destructive',
-                          'group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
-                        )}
-                      >
-                        <Trash2 aria-hidden="true" className="size-3.5" />
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => onDeleteManager(manager.agentId)}
+                      aria-label={`Delete manager ${manager.agentId}`}
+                      className={cn(
+                        'absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/70 transition',
+                        'opacity-0 hover:bg-destructive/10 hover:text-destructive',
+                        'group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                      )}
+                    >
+                      <Trash2 aria-hidden="true" className="size-3.5" />
+                    </button>
                   </div>
 
                   {workers.length > 0 ? (
