@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ConversationEntry } from '@/lib/ws-types'
+import { MarkdownMessage } from './MarkdownMessage'
 
 interface MessageListProps {
   messages: ConversationEntry[]
@@ -408,12 +409,18 @@ function ConversationMessage({
     )
   }
 
+  const shouldRenderMarkdown = message.source === 'speak_to_user'
+
   return (
     <div className="text-foreground">
       <div className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
         {activeAgentLabel} • {formatTimestamp(message.timestamp)} • {message.source}
       </div>
-      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>
+      {shouldRenderMarkdown ? (
+        <MarkdownMessage content={message.text} />
+      ) : (
+        <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>
+      )}
     </div>
   )
 }
