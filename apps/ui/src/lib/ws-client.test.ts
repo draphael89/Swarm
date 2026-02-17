@@ -39,6 +39,12 @@ class FakeWebSocket {
   }
 }
 
+function emitServerEvent(socket: FakeWebSocket, event: unknown): void {
+  socket.emit('message', {
+    data: JSON.stringify(event),
+  })
+}
+
 describe('ManagerWsClient', () => {
   const originalWebSocket = globalThis.WebSocket
   const originalWindow = (globalThis as any).window
@@ -74,12 +80,10 @@ describe('ManagerWsClient', () => {
     expect(socket.sentPayloads).toHaveLength(1)
     expect(JSON.parse(socket.sentPayloads[0])).toEqual({ type: 'subscribe', agentId: 'manager' })
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'ready',
-        serverTime: new Date().toISOString(),
-        subscribedAgentId: 'manager',
-      }),
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
     })
 
     client.sendUserMessage('hello manager')
@@ -90,15 +94,13 @@ describe('ManagerWsClient', () => {
       agentId: 'manager',
     })
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'conversation_message',
-        agentId: 'manager',
-        role: 'assistant',
-        text: 'hello from manager',
-        timestamp: new Date().toISOString(),
-        source: 'speak_to_user',
-      }),
+    emitServerEvent(socket, {
+      type: 'conversation_message',
+      agentId: 'manager',
+      role: 'assistant',
+      text: 'hello from manager',
+      timestamp: new Date().toISOString(),
+      source: 'speak_to_user',
     })
 
     expect(snapshots.at(-1)?.messages.at(-1)?.text).toBe('hello from manager')
@@ -120,12 +122,10 @@ describe('ManagerWsClient', () => {
     const socket = FakeWebSocket.instances[0]
     socket.emit('open')
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'ready',
-        serverTime: new Date().toISOString(),
-        subscribedAgentId: 'manager',
-      }),
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
     })
 
     client.subscribeToAgent('worker-1')
@@ -135,20 +135,16 @@ describe('ManagerWsClient', () => {
       agentId: 'worker-1',
     })
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'ready',
-        serverTime: new Date().toISOString(),
-        subscribedAgentId: 'worker-1',
-      }),
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'worker-1',
     })
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'conversation_history',
-        agentId: 'worker-1',
-        messages: [],
-      }),
+    emitServerEvent(socket, {
+      type: 'conversation_history',
+      agentId: 'worker-1',
+      messages: [],
     })
 
     client.sendUserMessage('hello worker')
@@ -159,28 +155,24 @@ describe('ManagerWsClient', () => {
       agentId: 'worker-1',
     })
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'conversation_message',
-        agentId: 'manager',
-        role: 'assistant',
-        text: 'manager output',
-        timestamp: new Date().toISOString(),
-        source: 'speak_to_user',
-      }),
+    emitServerEvent(socket, {
+      type: 'conversation_message',
+      agentId: 'manager',
+      role: 'assistant',
+      text: 'manager output',
+      timestamp: new Date().toISOString(),
+      source: 'speak_to_user',
     })
 
     expect(snapshots.at(-1)?.messages.some((message) => message.text === 'manager output')).toBe(false)
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'conversation_message',
-        agentId: 'worker-1',
-        role: 'assistant',
-        text: 'worker output',
-        timestamp: new Date().toISOString(),
-        source: 'system',
-      }),
+    emitServerEvent(socket, {
+      type: 'conversation_message',
+      agentId: 'worker-1',
+      role: 'assistant',
+      text: 'worker output',
+      timestamp: new Date().toISOString(),
+      source: 'system',
     })
 
     expect(snapshots.at(-1)?.messages.at(-1)?.text).toBe('worker output')
@@ -199,41 +191,35 @@ describe('ManagerWsClient', () => {
     const socket = FakeWebSocket.instances[0]
     socket.emit('open')
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'ready',
-        serverTime: new Date().toISOString(),
-        subscribedAgentId: 'worker-1',
-      }),
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'worker-1',
     })
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'conversation_log',
-        agentId: 'manager',
-        timestamp: new Date().toISOString(),
-        source: 'runtime_log',
-        kind: 'tool_execution_start',
-        toolName: 'read',
-        toolCallId: 'call-1',
-        text: '{"path":"README.md"}',
-      }),
+    emitServerEvent(socket, {
+      type: 'conversation_log',
+      agentId: 'manager',
+      timestamp: new Date().toISOString(),
+      source: 'runtime_log',
+      kind: 'tool_execution_start',
+      toolName: 'read',
+      toolCallId: 'call-1',
+      text: '{"path":"README.md"}',
     })
 
     expect(client.getState().messages).toHaveLength(0)
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'conversation_log',
-        agentId: 'worker-1',
-        timestamp: new Date().toISOString(),
-        source: 'runtime_log',
-        kind: 'tool_execution_end',
-        toolName: 'read',
-        toolCallId: 'call-1',
-        text: '{"ok":true}',
-        isError: false,
-      }),
+    emitServerEvent(socket, {
+      type: 'conversation_log',
+      agentId: 'worker-1',
+      timestamp: new Date().toISOString(),
+      source: 'runtime_log',
+      kind: 'tool_execution_end',
+      toolName: 'read',
+      toolCallId: 'call-1',
+      text: '{"ok":true}',
+      isError: false,
     })
 
     const lastMessage = client.getState().messages.at(-1)
@@ -255,12 +241,10 @@ describe('ManagerWsClient', () => {
     const socket = FakeWebSocket.instances[0]
     socket.emit('open')
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'ready',
-        serverTime: new Date().toISOString(),
-        subscribedAgentId: 'worker-1',
-      }),
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'worker-1',
     })
 
     client.sendUserMessage('queued update', { agentId: 'worker-1', delivery: 'followUp' })
@@ -284,12 +268,10 @@ describe('ManagerWsClient', () => {
     const socket = FakeWebSocket.instances[0]
     socket.emit('open')
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'ready',
-        serverTime: new Date().toISOString(),
-        subscribedAgentId: 'manager',
-      }),
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
     })
 
     client.deleteAgent('worker-2')
@@ -316,63 +298,54 @@ describe('ManagerWsClient', () => {
     const socket = FakeWebSocket.instances[0]
     socket.emit('open')
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'ready',
-        serverTime: new Date().toISOString(),
-        subscribedAgentId: 'manager',
-      }),
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
     })
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'agents_snapshot',
-        agents: [
-          {
-            agentId: 'manager',
-            displayName: 'Manager',
-            role: 'manager',
-            status: 'idle',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            cwd: '/tmp',
-            model: {
-              provider: 'openai-codex',
-              modelId: 'gpt-5.3-codex',
-              thinkingLevel: 'xhigh',
-            },
-            sessionFile: '/tmp/manager.jsonl',
+    emitServerEvent(socket, {
+      type: 'agents_snapshot',
+      agents: [
+        {
+          agentId: 'manager',
+          managerId: 'manager',
+          displayName: 'Manager',
+          role: 'manager',
+          status: 'idle',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          cwd: '/tmp',
+          model: {
+            provider: 'openai-codex',
+            modelId: 'gpt-5.3-codex',
+            thinkingLevel: 'xhigh',
           },
-        ],
-      }),
+          sessionFile: '/tmp/manager.jsonl',
+        },
+      ],
     })
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'agent_status',
-        agentId: 'manager',
-        status: 'streaming',
-        pendingCount: 2,
-      }),
+    emitServerEvent(socket, {
+      type: 'agent_status',
+      agentId: 'manager',
+      status: 'streaming',
+      pendingCount: 2,
     })
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'conversation_message',
-        agentId: 'manager',
-        role: 'assistant',
-        text: 'working...',
-        timestamp: new Date().toISOString(),
-        source: 'speak_to_user',
-      }),
+    emitServerEvent(socket, {
+      type: 'conversation_message',
+      agentId: 'manager',
+      role: 'assistant',
+      text: 'working...',
+      timestamp: new Date().toISOString(),
+      source: 'speak_to_user',
     })
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'error',
-        code: 'TEST_ERROR',
-        message: 'transient error',
-      }),
+    emitServerEvent(socket, {
+      type: 'error',
+      code: 'TEST_ERROR',
+      message: 'transient error',
     })
 
     const beforeReset = snapshots.at(-1)
@@ -381,13 +354,11 @@ describe('ManagerWsClient', () => {
     expect(Object.keys(beforeReset?.statuses ?? {})).toContain('manager')
     expect(beforeReset?.lastError).toBe('transient error')
 
-    socket.emit('message', {
-      data: JSON.stringify({
-        type: 'conversation_reset',
-        agentId: 'manager',
-        timestamp: new Date().toISOString(),
-        reason: 'user_new_command',
-      }),
+    emitServerEvent(socket, {
+      type: 'conversation_reset',
+      agentId: 'manager',
+      timestamp: new Date().toISOString(),
+      reason: 'user_new_command',
     })
 
     const afterReset = snapshots.at(-1)
@@ -397,6 +368,219 @@ describe('ManagerWsClient', () => {
     expect(afterReset?.agents).toHaveLength(1)
     expect(Object.keys(afterReset?.statuses ?? {})).toContain('manager')
     expect(afterReset?.lastError).toBeNull()
+
+    client.destroy()
+  })
+
+  it('sends create_manager and resolves with manager_created event', async () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('open')
+
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
+    })
+
+    const creationPromise = client.createManager({
+      name: 'release-manager',
+      cwd: '/tmp/release',
+    })
+
+    const sentCreatePayload = JSON.parse(socket.sentPayloads.at(-1) ?? '{}')
+    expect(sentCreatePayload.type).toBe('create_manager')
+    expect(sentCreatePayload.name).toBe('release-manager')
+    expect(sentCreatePayload.cwd).toBe('/tmp/release')
+    expect(typeof sentCreatePayload.requestId).toBe('string')
+
+    emitServerEvent(socket, {
+      type: 'manager_created',
+      requestId: sentCreatePayload.requestId,
+      manager: {
+        agentId: 'release-manager',
+        managerId: 'manager',
+        displayName: 'Release Manager',
+        role: 'manager',
+        status: 'idle',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        cwd: '/tmp/release',
+        model: {
+          provider: 'openai-codex',
+          modelId: 'gpt-5.3-codex',
+          thinkingLevel: 'high',
+        },
+        sessionFile: '/tmp/release-manager.jsonl',
+      },
+    })
+
+    await expect(creationPromise).resolves.toMatchObject({ agentId: 'release-manager' })
+    expect(client.getState().agents.some((agent) => agent.agentId === 'release-manager')).toBe(true)
+
+    client.destroy()
+  })
+
+  it('sends list_directories and validate_directory commands and resolves response events', async () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('open')
+
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
+    })
+
+    const listPromise = client.listDirectories('/tmp')
+    const listPayload = JSON.parse(socket.sentPayloads.at(-1) ?? '{}')
+
+    expect(listPayload).toMatchObject({
+      type: 'list_directories',
+      path: '/tmp',
+    })
+    expect(typeof listPayload.requestId).toBe('string')
+
+    emitServerEvent(socket, {
+      type: 'directories_listed',
+      requestId: listPayload.requestId,
+      path: '/tmp',
+      directories: ['/tmp/a', '/tmp/b'],
+    })
+
+    await expect(listPromise).resolves.toEqual({
+      path: '/tmp',
+      directories: ['/tmp/a', '/tmp/b'],
+    })
+
+    const validatePromise = client.validateDirectory('/tmp/a')
+    const validatePayload = JSON.parse(socket.sentPayloads.at(-1) ?? '{}')
+
+    expect(validatePayload).toMatchObject({
+      type: 'validate_directory',
+      path: '/tmp/a',
+    })
+
+    emitServerEvent(socket, {
+      type: 'directory_validated',
+      requestId: validatePayload.requestId,
+      path: '/tmp/a',
+      valid: true,
+    })
+
+    await expect(validatePromise).resolves.toEqual({
+      path: '/tmp/a',
+      valid: true,
+      message: null,
+    })
+
+    client.destroy()
+  })
+
+  it('rejects delete_manager when backend returns an error', async () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('open')
+
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
+    })
+
+    const deletePromise = client.deleteManager('manager')
+    const deletePayload = JSON.parse(socket.sentPayloads.at(-1) ?? '{}')
+
+    emitServerEvent(socket, {
+      type: 'error',
+      code: 'DELETE_MANAGER_PROTECTED',
+      message: 'Primary manager cannot be deleted.',
+      requestId: deletePayload.requestId,
+    })
+
+    await expect(deletePromise).rejects.toThrow('DELETE_MANAGER_PROTECTED: Primary manager cannot be deleted.')
+    expect(client.getState().lastError).toBe('Primary manager cannot be deleted.')
+
+    client.destroy()
+  })
+
+  it('falls back to the primary manager when selected manager is deleted', () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('open')
+
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager-2',
+    })
+
+    emitServerEvent(socket, {
+      type: 'agents_snapshot',
+      agents: [
+        {
+          agentId: 'manager',
+          managerId: 'manager',
+          displayName: 'Primary Manager',
+          role: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: '/tmp',
+          model: {
+            provider: 'openai-codex',
+            modelId: 'gpt-5.3-codex',
+            thinkingLevel: 'medium',
+          },
+          sessionFile: '/tmp/manager.jsonl',
+        },
+        {
+          agentId: 'manager-2',
+          managerId: 'manager',
+          displayName: 'Manager 2',
+          role: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:01:00.000Z',
+          updatedAt: '2026-01-01T00:01:00.000Z',
+          cwd: '/tmp/secondary',
+          model: {
+            provider: 'openai-codex',
+            modelId: 'gpt-5.3-codex',
+            thinkingLevel: 'medium',
+          },
+          sessionFile: '/tmp/manager-2.jsonl',
+        },
+      ],
+    })
+
+    emitServerEvent(socket, {
+      type: 'manager_deleted',
+      managerId: 'manager-2',
+    })
+
+    expect(client.getState().targetAgentId).toBe('manager')
+
+    const subscribePayload = JSON.parse(socket.sentPayloads.at(-1) ?? '{}')
+    expect(subscribePayload).toMatchObject({
+      type: 'subscribe',
+      agentId: 'manager',
+    })
 
     client.destroy()
   })

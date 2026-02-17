@@ -2,6 +2,7 @@ export type AgentStatus = 'idle' | 'streaming' | 'terminated' | 'stopped_on_rest
 
 export interface AgentDescriptor {
   agentId: string
+  managerId: string
   displayName: string
   role: 'manager' | 'worker'
   status: AgentStatus
@@ -16,10 +17,16 @@ export interface AgentDescriptor {
   sessionFile: string
 }
 
+export type DeliveryMode = 'auto' | 'followUp' | 'steer'
+
 export type ClientCommand =
   | { type: 'subscribe'; agentId?: string }
-  | { type: 'user_message'; text: string; agentId?: string; delivery?: 'auto' | 'followUp' | 'steer' }
+  | { type: 'user_message'; text: string; agentId?: string; delivery?: DeliveryMode }
   | { type: 'kill_agent'; agentId: string }
+  | { type: 'create_manager'; name: string; cwd: string; requestId?: string }
+  | { type: 'delete_manager'; managerId: string; requestId?: string }
+  | { type: 'list_directories'; path?: string; requestId?: string }
+  | { type: 'validate_directory'; path: string; requestId?: string }
   | { type: 'ping' }
 
 export interface ConversationMessageEvent {
@@ -51,6 +58,33 @@ export interface ConversationLogEvent {
   isError?: boolean
 }
 
+export interface ManagerCreatedEvent {
+  type: 'manager_created'
+  manager: AgentDescriptor
+  requestId?: string
+}
+
+export interface ManagerDeletedEvent {
+  type: 'manager_deleted'
+  managerId: string
+  requestId?: string
+}
+
+export interface DirectoriesListedEvent {
+  type: 'directories_listed'
+  path: string
+  directories: string[]
+  requestId?: string
+}
+
+export interface DirectoryValidatedEvent {
+  type: 'directory_validated'
+  path: string
+  valid: boolean
+  message?: string
+  requestId?: string
+}
+
 export type ConversationEntry = ConversationMessageEvent | ConversationLogEvent
 
 export type ServerEvent =
@@ -65,4 +99,8 @@ export type ServerEvent =
   | ConversationLogEvent
   | { type: 'agent_status'; agentId: string; status: AgentStatus; pendingCount: number }
   | { type: 'agents_snapshot'; agents: AgentDescriptor[] }
-  | { type: 'error'; code: string; message: string }
+  | ManagerCreatedEvent
+  | ManagerDeletedEvent
+  | DirectoriesListedEvent
+  | DirectoryValidatedEvent
+  | { type: 'error'; code: string; message: string; requestId?: string }

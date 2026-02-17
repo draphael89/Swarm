@@ -39,7 +39,7 @@ export function ChatHeader({ connected, activeAgentId, activeAgentLabel, showNew
         </Badge>
 
         {showNewChat ? (
-          <Button variant="ghost" size="icon" className="size-8" onClick={onNewChat} title="Start new manager chat">
+          <Button variant="ghost" size="icon" className="size-8" onClick={onNewChat} title="Start new chat">
             <Plus className="size-4" />
           </Button>
         ) : null}
