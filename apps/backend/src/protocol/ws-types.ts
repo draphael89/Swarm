@@ -14,10 +14,10 @@ export type ClientCommand =
   | { type: "subscribe"; agentId?: string }
   | { type: "user_message"; text: string; agentId?: string; delivery?: "auto" | "followUp" | "steer" }
   | { type: "kill_agent"; agentId: string }
-  | { type: "create_manager"; name: string; cwd: string }
-  | { type: "delete_manager"; managerId: string }
-  | { type: "list_directories"; path?: string }
-  | { type: "validate_directory"; path: string }
+  | { type: "create_manager"; name: string; cwd: string; requestId?: string }
+  | { type: "delete_manager"; managerId: string; requestId?: string }
+  | { type: "list_directories"; path?: string; requestId?: string }
+  | { type: "validate_directory"; path: string; requestId?: string }
   | { type: "ping" };
 
 export type ServerEvent =
@@ -37,21 +37,26 @@ export type ServerEvent =
       pendingCount: number;
     }
   | { type: "agents_snapshot"; agents: AgentDescriptor[] }
-  | { type: "manager_created"; manager: AgentDescriptor }
-  | { type: "manager_deleted"; managerId: string; terminatedWorkerIds: string[] }
+  | { type: "manager_created"; manager: AgentDescriptor; requestId?: string }
+  | { type: "manager_deleted"; managerId: string; terminatedWorkerIds: string[]; requestId?: string }
   | {
       type: "directories_listed";
+      path: string;
+      directories: string[];
+      requestId?: string;
       requestedPath?: string;
       resolvedPath: string;
       roots: string[];
-      directories: DirectoryItem[];
+      entries: DirectoryItem[];
     }
   | {
       type: "directory_validated";
-      requestedPath: string;
+      path: string;
       valid: boolean;
+      message?: string;
+      requestId?: string;
+      requestedPath: string;
       roots: string[];
       resolvedPath?: string;
-      message?: string;
     }
-  | { type: "error"; code: string; message: string };
+  | { type: "error"; code: string; message: string; requestId?: string };

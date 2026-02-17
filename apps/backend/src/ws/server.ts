@@ -154,7 +154,8 @@ export class SwarmWebSocketServer {
       this.send(socket, {
         type: "error",
         code: "NOT_SUBSCRIBED",
-        message: `Send subscribe before ${command.type}.`
+        message: `Send subscribe before ${command.type}.`,
+        requestId: this.extractRequestId(command)
       });
       return;
     }
@@ -188,7 +189,8 @@ export class SwarmWebSocketServer {
         this.send(socket, {
           type: "error",
           code: "UNKNOWN_AGENT",
-          message: `Agent ${subscribedAgentId} does not exist.`
+          message: `Agent ${subscribedAgentId} does not exist.`,
+          requestId: command.requestId
         });
         return;
       }
@@ -201,13 +203,15 @@ export class SwarmWebSocketServer {
 
         this.broadcastToSubscribed({
           type: "manager_created",
-          manager
+          manager,
+          requestId: command.requestId
         });
       } catch (error) {
         this.send(socket, {
           type: "error",
           code: "CREATE_MANAGER_FAILED",
-          message: error instanceof Error ? error.message : String(error)
+          message: error instanceof Error ? error.message : String(error),
+          requestId: command.requestId
         });
       }
       return;
@@ -219,7 +223,8 @@ export class SwarmWebSocketServer {
         this.send(socket, {
           type: "error",
           code: "UNKNOWN_AGENT",
-          message: `Agent ${subscribedAgentId} does not exist.`
+          message: `Agent ${subscribedAgentId} does not exist.`,
+          requestId: command.requestId
         });
         return;
       }
@@ -231,13 +236,15 @@ export class SwarmWebSocketServer {
         this.broadcastToSubscribed({
           type: "manager_deleted",
           managerId: deleted.managerId,
-          terminatedWorkerIds: deleted.terminatedWorkerIds
+          terminatedWorkerIds: deleted.terminatedWorkerIds,
+          requestId: command.requestId
         });
       } catch (error) {
         this.send(socket, {
           type: "error",
           code: "DELETE_MANAGER_FAILED",
-          message: error instanceof Error ? error.message : String(error)
+          message: error instanceof Error ? error.message : String(error),
+          requestId: command.requestId
         });
       }
       return;
@@ -248,16 +255,20 @@ export class SwarmWebSocketServer {
         const listed = await this.swarmManager.listDirectories(command.path);
         this.send(socket, {
           type: "directories_listed",
+          path: listed.resolvedPath,
+          directories: listed.directories.map((entry) => entry.path),
+          requestId: command.requestId,
           requestedPath: listed.requestedPath,
           resolvedPath: listed.resolvedPath,
           roots: listed.roots,
-          directories: listed.directories
+          entries: listed.directories
         });
       } catch (error) {
         this.send(socket, {
           type: "error",
           code: "LIST_DIRECTORIES_FAILED",
-          message: error instanceof Error ? error.message : String(error)
+          message: error instanceof Error ? error.message : String(error),
+          requestId: command.requestId
         });
       }
       return;
@@ -268,17 +279,20 @@ export class SwarmWebSocketServer {
         const validation = await this.swarmManager.validateDirectory(command.path);
         this.send(socket, {
           type: "directory_validated",
-          requestedPath: validation.requestedPath,
+          path: validation.requestedPath,
           valid: validation.valid,
+          message: validation.message,
+          requestId: command.requestId,
+          requestedPath: validation.requestedPath,
           roots: validation.roots,
-          resolvedPath: validation.resolvedPath,
-          message: validation.message
+          resolvedPath: validation.resolvedPath
         });
       } catch (error) {
         this.send(socket, {
           type: "error",
           code: "VALIDATE_DIRECTORY_FAILED",
-          message: error instanceof Error ? error.message : String(error)
+          message: error instanceof Error ? error.message : String(error),
+          requestId: command.requestId
         });
       }
       return;
@@ -431,6 +445,22 @@ export class SwarmWebSocketServer {
     }
   }
 
+  private extractRequestId(command: ClientCommand): string | undefined {
+    switch (command.type) {
+      case "create_manager":
+      case "delete_manager":
+      case "list_directories":
+      case "validate_directory":
+        return command.requestId;
+
+      case "subscribe":
+      case "user_message":
+      case "kill_agent":
+      case "ping":
+        return undefined;
+    }
+  }
+
   private broadcastToSubscribed(event: ServerEvent): void {
     if (!this.wss) return;
 
@@ -505,6 +535,7 @@ export class SwarmWebSocketServer {
     if (maybe.type === "create_manager") {
       const name = (maybe as { name?: unknown }).name;
       const cwd = (maybe as { cwd?: unknown }).cwd;
+      const requestId = (maybe as { requestId?: unknown }).requestId;
 
       if (typeof name !== "string" || name.trim().length === 0) {
         return { ok: false, error: "create_manager.name must be a non-empty string" };
@@ -512,58 +543,80 @@ export class SwarmWebSocketServer {
       if (typeof cwd !== "string" || cwd.trim().length === 0) {
         return { ok: false, error: "create_manager.cwd must be a non-empty string" };
       }
+      if (requestId !== undefined && typeof requestId !== "string") {
+        return { ok: false, error: "create_manager.requestId must be a string when provided" };
+      }
 
       return {
         ok: true,
         command: {
           type: "create_manager",
           name: name.trim(),
-          cwd
+          cwd,
+          requestId
         }
       };
     }
 
     if (maybe.type === "delete_manager") {
       const managerId = (maybe as { managerId?: unknown }).managerId;
+      const requestId = (maybe as { requestId?: unknown }).requestId;
+
       if (typeof managerId !== "string" || managerId.trim().length === 0) {
         return { ok: false, error: "delete_manager.managerId must be a non-empty string" };
+      }
+      if (requestId !== undefined && typeof requestId !== "string") {
+        return { ok: false, error: "delete_manager.requestId must be a string when provided" };
       }
 
       return {
         ok: true,
         command: {
           type: "delete_manager",
-          managerId: managerId.trim()
+          managerId: managerId.trim(),
+          requestId
         }
       };
     }
 
     if (maybe.type === "list_directories") {
       const path = (maybe as { path?: unknown }).path;
+      const requestId = (maybe as { requestId?: unknown }).requestId;
+
       if (path !== undefined && typeof path !== "string") {
         return { ok: false, error: "list_directories.path must be a string when provided" };
+      }
+      if (requestId !== undefined && typeof requestId !== "string") {
+        return { ok: false, error: "list_directories.requestId must be a string when provided" };
       }
 
       return {
         ok: true,
         command: {
           type: "list_directories",
-          path
+          path,
+          requestId
         }
       };
     }
 
     if (maybe.type === "validate_directory") {
       const path = (maybe as { path?: unknown }).path;
+      const requestId = (maybe as { requestId?: unknown }).requestId;
+
       if (typeof path !== "string" || path.trim().length === 0) {
         return { ok: false, error: "validate_directory.path must be a non-empty string" };
+      }
+      if (requestId !== undefined && typeof requestId !== "string") {
+        return { ok: false, error: "validate_directory.requestId must be a string when provided" };
       }
 
       return {
         ok: true,
         command: {
           type: "validate_directory",
-          path
+          path,
+          requestId
         }
       };
     }
