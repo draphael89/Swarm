@@ -59,10 +59,10 @@ export function AgentSidebar({ connected, agents, statuses, selectedAgentId, onS
                         {isWorking ? <CircleDashed aria-hidden="true" className="size-3 animate-spin" /> : <span aria-hidden="true" className="size-3" />}
                         <span className="sr-only">{isWorking ? 'Working' : 'Idle'}</span>
                       </span>
+                      {isWorker ? <span aria-hidden="true" className="shrink-0 text-[10px] text-muted-foreground/70">↳</span> : null}
                       <span className={cn('min-w-0 flex-1 truncate font-mono text-[11px]', isWorker ? 'text-muted-foreground' : 'font-semibold')}>
                         {agent.agentId}
                       </span>
-                      {isWorker ? <span aria-hidden="true" className="text-[10px] text-muted-foreground/70">↳</span> : null}
                     </div>
                   </button>
                 </li>
