@@ -16,6 +16,7 @@ const MANAGED_ENV_KEYS = [
   'SWARM_MODEL_PROVIDER',
   'SWARM_MODEL_ID',
   'SWARM_THINKING_LEVEL',
+  'SWARM_CWD_ALLOWLIST_ROOTS',
 ] as const
 
 async function withEnv(overrides: Partial<Record<(typeof MANAGED_ENV_KEYS)[number], string>>, run: () => Promise<void> | void) {
@@ -60,6 +61,8 @@ describe('createConfig', () => {
       expect(config.paths.repoArchetypesDir).toBe(resolve(config.paths.rootDir, '.swarm', 'archetypes'))
       expect(config.paths.memoryFile).toBe(resolve(homedir(), '.swarm-dev', 'MEMORY.md'))
       expect(config.paths.repoMemorySkillFile).toBe(resolve(config.paths.rootDir, '.swarm', 'skills', 'memory', 'SKILL.md'))
+      expect(config.cwdAllowlistRoots).toContain(config.paths.rootDir)
+      expect(config.cwdAllowlistRoots).toContain(resolve(homedir(), 'worktrees'))
     })
   })
 
@@ -97,6 +100,15 @@ describe('createConfig', () => {
       const config = createConfig()
 
       expect(config.paths.dataDir).toBe(resolve(homedir(), '.swarm-custom'))
+    })
+  })
+
+  it('extends cwd allowlist roots from SWARM_CWD_ALLOWLIST_ROOTS', async () => {
+    await withEnv({ SWARM_CWD_ALLOWLIST_ROOTS: './sandbox,/tmp/custom-root' }, () => {
+      const config = createConfig()
+
+      expect(config.cwdAllowlistRoots).toContain(resolve(config.paths.rootDir, 'sandbox'))
+      expect(config.cwdAllowlistRoots).toContain(resolve('/tmp/custom-root'))
     })
   })
 })

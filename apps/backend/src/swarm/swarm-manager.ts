@@ -20,6 +20,14 @@ import {
   type ArchetypePromptRegistry
 } from "./archetypes/archetype-prompt-registry.js";
 import { AgentRuntime } from "./agent-runtime.js";
+import {
+  listDirectories,
+  normalizeAllowlistRoots,
+  validateDirectory as validateDirectoryInput,
+  validateDirectoryPath,
+  type DirectoryListingResult,
+  type DirectoryValidationResult
+} from "./cwd-policy.js";
 import { buildSwarmTools, type SwarmToolHost } from "./swarm-tools.js";
 import type {
   AcceptedDeliveryMode,
@@ -100,9 +108,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private readonly descriptors = new Map<string, AgentDescriptor>();
   private readonly runtimes = new Map<string, AgentRuntime>();
   private readonly conversationEntriesByAgentId = new Map<string, ConversationEntryEvent[]>();
+  private readonly pendingUserRepliesByManagerId = new Map<string, number>();
 
   private archetypePromptRegistry: ArchetypePromptRegistry = createEmptyArchetypePromptRegistry();
-  private managerPendingUserReplies = 0;
 
   constructor(config: SwarmConfig, options?: { now?: () => string }) {
     super();
@@ -121,6 +129,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     await this.ensureDirectories();
     await this.ensureMemoryFile();
 
+    try {
+      this.config.defaultCwd = await this.resolveAndValidateCwd(this.config.defaultCwd);
+    } catch (error) {
+      if (error instanceof Error) {
+        throw new Error(`Invalid SWARM_DEFAULT_CWD: ${error.message}`);
+      }
+      throw error;
+    }
+
     this.archetypePromptRegistry = await loadArchetypePromptRegistry({
       repoOverridesDir: this.config.paths.repoArchetypesDir
     });
@@ -136,7 +153,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.loadConversationHistoriesFromStore();
     await this.restoreRuntimesForBoot();
 
-    const managerDescriptor = this.getManagerDescriptor();
+    const managerDescriptor = this.getPrimaryManagerDescriptor();
     this.emitAgentsSnapshot();
 
     this.logDebug("boot:ready", {
@@ -160,30 +177,29 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   async spawnAgent(callerAgentId: string, input: SpawnAgentInput): Promise<AgentDescriptor> {
-    this.assertManager(callerAgentId, "spawn agents");
+    const manager = this.assertManager(callerAgentId, "spawn agents");
 
     const requestedAgentId = input.agentId?.trim();
     if (!requestedAgentId) {
       throw new Error("spawn_agent requires a non-empty agentId");
     }
 
-    const manager = this.getManagerDescriptor();
     const agentId = this.generateUniqueAgentId(requestedAgentId);
     const createdAt = this.now();
 
     const model = this.resolveSpawnModel(input.model, manager.model);
-
     const archetypeId = this.resolveSpawnWorkerArchetypeId(input, agentId);
 
     const descriptor: AgentDescriptor = {
       agentId,
       displayName: agentId,
       role: "worker",
+      managerId: manager.agentId,
       archetypeId,
       status: "idle",
       createdAt,
       updatedAt: createdAt,
-      cwd: input.cwd ? this.normalizeCwd(input.cwd) : manager.cwd,
+      cwd: input.cwd ? await this.resolveAndValidateCwd(input.cwd) : manager.cwd,
       model,
       sessionFile: join(this.config.paths.sessionsDir, `${agentId}.jsonl`)
     };
@@ -194,6 +210,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.logDebug("agent:spawn", {
       callerAgentId,
       agentId,
+      managerId: descriptor.managerId,
       displayName: descriptor.displayName,
       archetypeId: descriptor.archetypeId,
       model: descriptor.model,
@@ -220,7 +237,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   async killAgent(callerAgentId: string, targetAgentId: string): Promise<void> {
-    this.assertManager(callerAgentId, "kill agents");
+    const manager = this.assertManager(callerAgentId, "kill agents");
 
     const target = this.descriptors.get(targetAgentId);
     if (!target) {
@@ -230,24 +247,142 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error("Manager cannot be killed");
     }
 
-    const runtime = this.runtimes.get(targetAgentId);
-    if (runtime) {
-      await runtime.terminate({ abort: true });
-      this.runtimes.delete(targetAgentId);
+    if (target.managerId !== manager.agentId) {
+      throw new Error(`Only owning manager can kill agent ${targetAgentId}`);
     }
 
-    target.status = "terminated";
-    target.updatedAt = this.now();
-    this.descriptors.set(targetAgentId, target);
+    await this.terminateDescriptor(target, { abort: true, emitStatus: false });
     await this.saveStore();
 
     this.logDebug("agent:kill", {
       callerAgentId,
-      targetAgentId
+      targetAgentId,
+      managerId: manager.agentId
     });
 
     this.emitStatus(targetAgentId, target.status, 0);
     this.emitAgentsSnapshot();
+  }
+
+  async createManager(callerAgentId: string, input: { name: string; cwd: string }): Promise<AgentDescriptor> {
+    this.assertManager(callerAgentId, "create managers");
+
+    const requestedName = input.name?.trim();
+    if (!requestedName) {
+      throw new Error("create_manager requires a non-empty name");
+    }
+
+    const managerId = this.generateUniqueManagerId(requestedName);
+    const createdAt = this.now();
+    const cwd = await this.resolveAndValidateCwd(input.cwd);
+
+    const descriptor: AgentDescriptor = {
+      agentId: managerId,
+      displayName: managerId,
+      role: "manager",
+      managerId,
+      archetypeId: MANAGER_ARCHETYPE_ID,
+      status: "idle",
+      createdAt,
+      updatedAt: createdAt,
+      cwd,
+      model: { ...this.config.defaultModel },
+      sessionFile: join(this.config.paths.sessionsDir, `${managerId}.jsonl`)
+    };
+
+    this.descriptors.set(descriptor.agentId, descriptor);
+    this.pendingUserRepliesByManagerId.set(managerId, 0);
+
+    let runtime: AgentRuntime;
+    try {
+      runtime = await this.createRuntimeForDescriptor(
+        descriptor,
+        this.resolveSystemPromptForDescriptor(descriptor)
+      );
+    } catch (error) {
+      this.descriptors.delete(descriptor.agentId);
+      this.pendingUserRepliesByManagerId.delete(managerId);
+      throw error;
+    }
+
+    this.runtimes.set(managerId, runtime);
+    await this.saveStore();
+
+    this.emitStatus(managerId, descriptor.status, runtime.getPendingCount());
+    this.emitAgentsSnapshot();
+
+    this.logDebug("manager:create", {
+      callerAgentId,
+      managerId,
+      cwd: descriptor.cwd
+    });
+
+    return { ...descriptor, model: { ...descriptor.model } };
+  }
+
+  async deleteManager(
+    callerAgentId: string,
+    targetManagerId: string
+  ): Promise<{ managerId: string; terminatedWorkerIds: string[] }> {
+    this.assertManager(callerAgentId, "delete managers");
+
+    const target = this.descriptors.get(targetManagerId);
+    if (!target || target.role !== "manager") {
+      throw new Error(`Unknown manager: ${targetManagerId}`);
+    }
+
+    if (target.agentId === this.config.managerId) {
+      throw new Error(`Manager ${targetManagerId} is protected and cannot be deleted`);
+    }
+
+    const terminatedWorkerIds: string[] = [];
+
+    for (const descriptor of Array.from(this.descriptors.values())) {
+      if (descriptor.role !== "worker") {
+        continue;
+      }
+      if (descriptor.managerId !== targetManagerId) {
+        continue;
+      }
+
+      terminatedWorkerIds.push(descriptor.agentId);
+      await this.terminateDescriptor(descriptor, { abort: true, emitStatus: true });
+      this.descriptors.delete(descriptor.agentId);
+      this.conversationEntriesByAgentId.delete(descriptor.agentId);
+    }
+
+    await this.terminateDescriptor(target, { abort: true, emitStatus: true });
+    this.descriptors.delete(targetManagerId);
+    this.conversationEntriesByAgentId.delete(targetManagerId);
+    this.pendingUserRepliesByManagerId.delete(targetManagerId);
+
+    await this.saveStore();
+    this.emitAgentsSnapshot();
+
+    this.logDebug("manager:delete", {
+      callerAgentId,
+      targetManagerId,
+      terminatedWorkerIds
+    });
+
+    return { managerId: targetManagerId, terminatedWorkerIds };
+  }
+
+  getAgent(agentId: string): AgentDescriptor | undefined {
+    const descriptor = this.descriptors.get(agentId);
+    if (!descriptor) {
+      return undefined;
+    }
+
+    return { ...descriptor, model: { ...descriptor.model } };
+  }
+
+  async listDirectories(path?: string): Promise<DirectoryListingResult> {
+    return listDirectories(path, this.getCwdPolicy());
+  }
+
+  async validateDirectory(path: string): Promise<DirectoryValidationResult> {
+    return validateDirectoryInput(path, this.getCwdPolicy());
   }
 
   async sendMessage(
@@ -268,6 +403,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
     if (target.status === "terminated" || target.status === "stopped_on_restart") {
       throw new Error(`Target agent is not running: ${targetAgentId}`);
+    }
+
+    if (sender.role === "manager" && target.role === "worker" && target.managerId !== sender.agentId) {
+      throw new Error(`Manager ${sender.agentId} does not own worker ${targetAgentId}`);
     }
 
     const runtime = this.runtimes.get(targetAgentId);
@@ -309,12 +448,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   async publishToUser(agentId: string, text: string, source: "speak_to_user" | "system" = "speak_to_user"): Promise<void> {
-    const pendingBefore = this.managerPendingUserReplies;
+    const pendingBefore = this.getPendingUserReplies(agentId);
     if (source === "speak_to_user") {
       this.assertManager(agentId, "speak to user");
-      if (this.managerPendingUserReplies > 0) {
-        this.managerPendingUserReplies -= 1;
-      }
+      this.decrementPendingUserReplies(agentId);
     }
 
     const payload: ConversationMessageEvent = {
@@ -331,7 +468,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       source,
       agentId,
       pendingBefore,
-      pendingAfter: this.managerPendingUserReplies,
+      pendingAfter: this.getPendingUserReplies(agentId),
       textPreview: previewForLog(text)
     });
   }
@@ -352,10 +489,13 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error(`Target agent is not running: ${targetAgentId}`);
     }
 
+    const managerContextId = target.role === "manager" ? target.agentId : target.managerId;
+
     this.logDebug("manager:user_message_received", {
       targetAgentId,
+      managerContextId,
       textPreview: previewForLog(trimmed),
-      pendingBefore: this.managerPendingUserReplies
+      pendingBefore: this.getPendingUserReplies(managerContextId)
     });
 
     const userEvent: ConversationMessageEvent = {
@@ -368,32 +508,39 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     };
     this.emitConversationMessage(userEvent);
 
-    if (targetAgentId !== this.config.managerId) {
-      await this.sendMessage(this.config.managerId, targetAgentId, trimmed, options?.delivery ?? "auto", {
+    if (target.role !== "manager") {
+      await this.sendMessage(managerContextId, targetAgentId, trimmed, options?.delivery ?? "auto", {
         origin: "user"
       });
       return;
     }
 
-    this.managerPendingUserReplies += 1;
+    this.incrementPendingUserReplies(managerContextId);
     this.logDebug("manager:user_message_dispatched", {
-      pendingAfter: this.managerPendingUserReplies
+      managerContextId,
+      pendingAfter: this.getPendingUserReplies(managerContextId)
     });
 
-    const managerRuntime = this.runtimes.get(this.config.managerId);
+    const managerRuntime = this.runtimes.get(managerContextId);
     if (!managerRuntime) {
-      throw new Error("Manager runtime is not initialized");
+      throw new Error(`Manager runtime is not initialized: ${managerContextId}`);
     }
 
-    // User messages to manager should always steer in-flight work.
+    // User messages to managers should always steer in-flight work.
     await managerRuntime.sendMessage(trimmed, "steer");
   }
 
-  async resetManagerSession(reason: "user_new_command" | "api_reset" = "api_reset"): Promise<void> {
-    const managerId = this.config.managerId;
-    const managerDescriptor = this.getManagerDescriptor();
+  async resetManagerSession(
+    managerIdOrReason: string | "user_new_command" | "api_reset" = "api_reset",
+    maybeReason?: "user_new_command" | "api_reset"
+  ): Promise<void> {
+    const parsed = this.parseResetManagerSessionArgs(managerIdOrReason, maybeReason);
+    const managerId = parsed.managerId;
+    const reason = parsed.reason;
+    const managerDescriptor = this.getRequiredManagerDescriptor(managerId);
 
     this.logDebug("manager:reset:start", {
+      managerId,
       reason,
       sessionFile: managerDescriptor.sessionFile
     });
@@ -404,7 +551,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       this.runtimes.delete(managerId);
     }
 
-    this.managerPendingUserReplies = 0;
+    this.pendingUserRepliesByManagerId.set(managerId, 0);
     this.conversationEntriesByAgentId.set(managerId, []);
     await this.deleteManagerSessionFile(managerDescriptor.sessionFile);
 
@@ -424,6 +571,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.emitAgentsSnapshot();
 
     this.logDebug("manager:reset:ready", {
+      managerId,
       reason,
       sessionFile: managerDescriptor.sessionFile
     });
@@ -492,7 +640,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return Array.from(this.descriptors.values()).sort((a, b) => {
       if (a.agentId === this.config.managerId) return -1;
       if (b.agentId === this.config.managerId) return 1;
-      return a.createdAt.localeCompare(b.createdAt);
+
+      if (a.role === "manager" && b.role !== "manager") return -1;
+      if (b.role === "manager" && a.role !== "manager") return 1;
+
+      if (a.createdAt !== b.createdAt) {
+        return a.createdAt.localeCompare(b.createdAt);
+      }
+
+      return a.agentId.localeCompare(b.agentId);
     });
   }
 
@@ -511,7 +667,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         this.runtimes.set(descriptor.agentId, runtime);
         this.emitStatus(descriptor.agentId, descriptor.status, runtime.getPendingCount());
       } catch (error) {
-        if (descriptor.role === "manager") {
+        if (descriptor.role === "manager" && descriptor.agentId === this.config.managerId) {
           throw error;
         }
 
@@ -521,8 +677,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         shouldPersist = true;
 
         this.emitStatus(descriptor.agentId, descriptor.status, 0);
-        this.logDebug("boot:restore_worker:error", {
+        this.logDebug("boot:restore_runtime:error", {
           agentId: descriptor.agentId,
+          role: descriptor.role,
           message: error instanceof Error ? error.message : String(error)
         });
       }
@@ -533,34 +690,87 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     if (!this.runtimes.has(this.config.managerId)) {
-      throw new Error("Manager runtime is not initialized");
+      throw new Error("Primary manager runtime is not initialized");
     }
   }
 
   private prepareDescriptorsForBoot(): void {
-    const existingManager = this.descriptors.get(this.config.managerId);
     const now = this.now();
 
     for (const descriptor of this.descriptors.values()) {
-      if (descriptor.role !== "worker") {
-        continue;
+      let touched = false;
+
+      descriptor.sessionFile = join(this.config.paths.sessionsDir, `${descriptor.agentId}.jsonl`);
+
+      if (!descriptor.cwd) {
+        descriptor.cwd = this.config.defaultCwd;
+        touched = true;
       }
 
-      if (descriptor.status === "terminated") {
-        continue;
+      if (!descriptor.model) {
+        descriptor.model = { ...this.config.defaultModel };
+        touched = true;
+      } else {
+        const provider = descriptor.model.provider?.trim() || this.config.defaultModel.provider;
+        const modelId = descriptor.model.modelId?.trim() || this.config.defaultModel.modelId;
+        const normalizedThinking = normalizeThinkingLevel(
+          descriptor.model.thinkingLevel ?? this.config.defaultModel.thinkingLevel
+        );
+
+        if (
+          provider !== descriptor.model.provider ||
+          modelId !== descriptor.model.modelId ||
+          normalizedThinking !== descriptor.model.thinkingLevel
+        ) {
+          descriptor.model = {
+            provider,
+            modelId,
+            thinkingLevel: normalizedThinking
+          };
+          touched = true;
+        }
       }
 
-      if (descriptor.status !== "idle") {
-        descriptor.status = "idle";
+      if (descriptor.role === "manager") {
+        if (descriptor.managerId !== descriptor.agentId) {
+          descriptor.managerId = descriptor.agentId;
+          touched = true;
+        }
+
+        if (descriptor.archetypeId !== MANAGER_ARCHETYPE_ID) {
+          descriptor.archetypeId = MANAGER_ARCHETYPE_ID;
+          touched = true;
+        }
+
+        if (descriptor.status !== "terminated" && descriptor.status !== "idle") {
+          descriptor.status = "idle";
+          touched = true;
+        }
+      } else {
+        const maybeManagerId = typeof descriptor.managerId === "string" ? descriptor.managerId.trim() : "";
+        if (!maybeManagerId) {
+          descriptor.managerId = this.config.managerId;
+          touched = true;
+        }
+
+        if (descriptor.status !== "terminated" && descriptor.status !== "idle") {
+          descriptor.status = "idle";
+          touched = true;
+        }
+      }
+
+      if (touched) {
         descriptor.updatedAt = now;
       }
     }
 
-    if (!existingManager) {
-      const managerDescriptor: AgentDescriptor = {
+    let primaryManager = this.descriptors.get(this.config.managerId);
+    if (!primaryManager) {
+      primaryManager = {
         agentId: this.config.managerId,
         displayName: this.config.managerDisplayName,
         role: "manager",
+        managerId: this.config.managerId,
         archetypeId: MANAGER_ARCHETYPE_ID,
         status: "idle",
         createdAt: now,
@@ -569,45 +779,72 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         model: { ...this.config.defaultModel },
         sessionFile: join(this.config.paths.sessionsDir, `${this.config.managerId}.jsonl`)
       };
-      this.descriptors.set(managerDescriptor.agentId, managerDescriptor);
-      return;
+      this.descriptors.set(primaryManager.agentId, primaryManager);
+    } else {
+      primaryManager.role = "manager";
+      primaryManager.managerId = primaryManager.agentId;
+      primaryManager.archetypeId = MANAGER_ARCHETYPE_ID;
+      primaryManager.status = "idle";
+      primaryManager.sessionFile = join(this.config.paths.sessionsDir, `${primaryManager.agentId}.jsonl`);
+      primaryManager.updatedAt = now;
+
+      if (!primaryManager.cwd) {
+        primaryManager.cwd = this.config.defaultCwd;
+      }
+
+      if (!primaryManager.model) {
+        primaryManager.model = { ...this.config.defaultModel };
+      }
+
+      // Migrate the historical default manager model to the current default.
+      if (
+        primaryManager.model.provider === "openai-codex" &&
+        primaryManager.model.modelId === "gpt-5.3-codex" &&
+        primaryManager.model.thinkingLevel === "medium"
+      ) {
+        primaryManager.model = { ...this.config.defaultModel };
+      }
     }
 
-    existingManager.status = "idle";
-    existingManager.archetypeId = MANAGER_ARCHETYPE_ID;
-    existingManager.updatedAt = now;
-    existingManager.sessionFile = join(this.config.paths.sessionsDir, `${this.config.managerId}.jsonl`);
-    if (!existingManager.cwd) {
-      existingManager.cwd = this.config.defaultCwd;
-    }
-    if (!existingManager.model) {
-      existingManager.model = { ...this.config.defaultModel };
-      return;
+    const liveManagerIds = new Set(
+      Array.from(this.descriptors.values())
+        .filter((descriptor) => descriptor.role === "manager" && descriptor.status !== "terminated")
+        .map((descriptor) => descriptor.agentId)
+    );
+
+    for (const descriptor of this.descriptors.values()) {
+      if (descriptor.role !== "worker") {
+        continue;
+      }
+
+      if (!liveManagerIds.has(descriptor.managerId)) {
+        descriptor.managerId = this.config.managerId;
+        descriptor.updatedAt = now;
+      }
     }
 
-    const normalizedExistingThinking = normalizeThinkingLevel(existingManager.model.thinkingLevel);
-    if (normalizedExistingThinking !== existingManager.model.thinkingLevel) {
-      existingManager.model = {
-        ...existingManager.model,
-        thinkingLevel: normalizedExistingThinking
-      };
-    }
-
-    // Migrate the historical default manager model to the current default.
-    if (
-      existingManager.model.provider === "openai-codex" &&
-      existingManager.model.modelId === "gpt-5.3-codex" &&
-      existingManager.model.thinkingLevel === "medium"
-    ) {
-      existingManager.model = { ...this.config.defaultModel };
+    this.pendingUserRepliesByManagerId.clear();
+    for (const descriptor of this.descriptors.values()) {
+      if (descriptor.role === "manager" && descriptor.status !== "terminated") {
+        this.pendingUserRepliesByManagerId.set(descriptor.agentId, 0);
+      }
     }
   }
 
-  private getManagerDescriptor(): AgentDescriptor {
+  private getPrimaryManagerDescriptor(): AgentDescriptor {
     const descriptor = this.descriptors.get(this.config.managerId);
-    if (!descriptor) {
-      throw new Error("Manager descriptor is missing");
+    if (!descriptor || descriptor.role !== "manager") {
+      throw new Error("Primary manager descriptor is missing");
     }
+    return descriptor;
+  }
+
+  private getRequiredManagerDescriptor(managerId: string): AgentDescriptor {
+    const descriptor = this.descriptors.get(managerId);
+    if (!descriptor || descriptor.role !== "manager") {
+      throw new Error(`Unknown manager: ${managerId}`);
+    }
+
     return descriptor;
   }
 
@@ -674,9 +911,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return prompt;
   }
 
-  private normalizeCwd(cwd: string): string {
-    if (cwd.startsWith("/")) return cwd;
-    return join(this.config.paths.rootDir, cwd);
+  private async resolveAndValidateCwd(cwd: string): Promise<string> {
+    return validateDirectoryPath(cwd, this.getCwdPolicy());
+  }
+
+  private getCwdPolicy(): { rootDir: string; allowlistRoots: string[] } {
+    return {
+      rootDir: this.config.paths.rootDir,
+      allowlistRoots: normalizeAllowlistRoots(this.config.cwdAllowlistRoots)
+    };
   }
 
   private generateUniqueAgentId(source: string): string {
@@ -702,10 +945,88 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return `${base}-${index}`;
   }
 
-  private assertManager(agentId: string, action: string): void {
+  private generateUniqueManagerId(source: string): string {
+    const base = normalizeAgentId(source);
+    if (!base) {
+      throw new Error("create_manager name must include at least one letter or number");
+    }
+
+    if (!this.descriptors.has(base)) {
+      return base;
+    }
+
+    let index = 2;
+    while (this.descriptors.has(`${base}-${index}`)) {
+      index += 1;
+    }
+
+    return `${base}-${index}`;
+  }
+
+  private assertManager(agentId: string, action: string): AgentDescriptor {
     const descriptor = this.descriptors.get(agentId);
     if (!descriptor || descriptor.role !== "manager") {
       throw new Error(`Only manager can ${action}`);
+    }
+
+    if (descriptor.status === "terminated" || descriptor.status === "stopped_on_restart") {
+      throw new Error(`Manager is not running: ${agentId}`);
+    }
+
+    return descriptor;
+  }
+
+  private getPendingUserReplies(managerId: string): number {
+    return this.pendingUserRepliesByManagerId.get(managerId) ?? 0;
+  }
+
+  private incrementPendingUserReplies(managerId: string): void {
+    this.pendingUserRepliesByManagerId.set(managerId, this.getPendingUserReplies(managerId) + 1);
+  }
+
+  private decrementPendingUserReplies(managerId: string): void {
+    const current = this.getPendingUserReplies(managerId);
+    if (current <= 0) {
+      this.pendingUserRepliesByManagerId.set(managerId, 0);
+      return;
+    }
+
+    this.pendingUserRepliesByManagerId.set(managerId, current - 1);
+  }
+
+  private parseResetManagerSessionArgs(
+    managerIdOrReason: string | "user_new_command" | "api_reset",
+    maybeReason?: "user_new_command" | "api_reset"
+  ): { managerId: string; reason: "user_new_command" | "api_reset" } {
+    if (managerIdOrReason === "user_new_command" || managerIdOrReason === "api_reset") {
+      return {
+        managerId: this.config.managerId,
+        reason: managerIdOrReason
+      };
+    }
+
+    return {
+      managerId: managerIdOrReason,
+      reason: maybeReason ?? "api_reset"
+    };
+  }
+
+  private async terminateDescriptor(
+    descriptor: AgentDescriptor,
+    options: { abort: boolean; emitStatus: boolean }
+  ): Promise<void> {
+    const runtime = this.runtimes.get(descriptor.agentId);
+    if (runtime) {
+      await runtime.terminate({ abort: options.abort });
+      this.runtimes.delete(descriptor.agentId);
+    }
+
+    descriptor.status = "terminated";
+    descriptor.updatedAt = this.now();
+    this.descriptors.set(descriptor.agentId, descriptor);
+
+    if (options.emitStatus) {
+      this.emitStatus(descriptor.agentId, descriptor.status, 0);
     }
   }
 
@@ -892,7 +1213,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.captureConversationEventFromRuntime(agentId, event);
 
     if (!this.config.debug) return;
-    if (agentId !== this.config.managerId) return;
+
+    const descriptor = this.descriptors.get(agentId);
+    if (!descriptor || descriptor.role !== "manager") {
+      return;
+    }
 
     switch (event.type) {
       case "agent_start":
@@ -943,7 +1268,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   private captureConversationEventFromRuntime(agentId: string, event: AgentSessionEvent): void {
-    if (agentId === this.config.managerId) {
+    const descriptor = this.descriptors.get(agentId);
+    if (descriptor?.role === "manager") {
       return;
     }
 
@@ -1074,24 +1400,28 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   private async handleRuntimeAgentEnd(agentId: string): Promise<void> {
-    if (agentId !== this.config.managerId) {
+    const descriptor = this.descriptors.get(agentId);
+    if (!descriptor || descriptor.role !== "manager") {
       return;
     }
 
-    if (this.managerPendingUserReplies > 0) {
-      const pending = this.managerPendingUserReplies;
-      this.managerPendingUserReplies = 0;
-
-      this.logDebug("manager:missing_speak_to_user", {
-        pending
-      });
-
-      await this.publishToUser(
-        this.config.managerId,
-        `Manager finished without speak_to_user for ${pending} pending user message(s).`,
-        "system"
-      );
+    const pending = this.getPendingUserReplies(agentId);
+    if (pending <= 0) {
+      return;
     }
+
+    this.pendingUserRepliesByManagerId.set(agentId, 0);
+
+    this.logDebug("manager:missing_speak_to_user", {
+      agentId,
+      pending
+    });
+
+    await this.publishToUser(
+      agentId,
+      `Manager finished without speak_to_user for ${pending} pending user message(s).`,
+      "system"
+    );
   }
 
   private async ensureDirectories(): Promise<void> {

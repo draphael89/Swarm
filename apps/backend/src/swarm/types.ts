@@ -14,6 +14,7 @@ export interface AgentDescriptor {
   agentId: string;
   displayName: string;
   role: AgentRole;
+  managerId: string;
   archetypeId?: AgentArchetypeId;
   status: AgentStatus;
   createdAt: string;
@@ -74,6 +75,7 @@ export interface SwarmConfig {
   managerDisplayName: string;
   defaultModel: AgentModelDescriptor;
   defaultCwd: string;
+  cwdAllowlistRoots: string[];
   paths: SwarmPaths;
 }
 

@@ -1,6 +1,7 @@
 import { isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
 import { existsSync } from "node:fs";
+import { normalizeAllowlistRoots } from "./swarm/cwd-policy.js";
 import type { SwarmConfig } from "./swarm/types.js";
 
 export function createConfig(): SwarmConfig {
@@ -34,6 +35,19 @@ export function createConfig(): SwarmConfig {
   const repoArchetypesDir = resolve(rootDir, ".swarm", "archetypes");
   const memoryFile = resolve(dataDir, "MEMORY.md");
   const repoMemorySkillFile = resolve(rootDir, ".swarm", "skills", "memory", "SKILL.md");
+  const defaultCwd = process.env.SWARM_DEFAULT_CWD ? resolve(process.env.SWARM_DEFAULT_CWD) : rootDir;
+
+  const configuredAllowlistRoots = (process.env.SWARM_CWD_ALLOWLIST_ROOTS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .map((value) => resolvePathLike(rootDir, value));
+
+  const cwdAllowlistRoots = normalizeAllowlistRoots([
+    rootDir,
+    resolve(homedir(), "worktrees"),
+    ...configuredAllowlistRoots
+  ]);
 
   return {
     host: process.env.SWARM_HOST ?? "127.0.0.1",
@@ -47,7 +61,8 @@ export function createConfig(): SwarmConfig {
       modelId: process.env.SWARM_MODEL_ID ?? "gpt-5.3-codex",
       thinkingLevel: process.env.SWARM_THINKING_LEVEL ?? "xhigh"
     },
-    defaultCwd: process.env.SWARM_DEFAULT_CWD ? resolve(process.env.SWARM_DEFAULT_CWD) : rootDir,
+    defaultCwd,
+    cwdAllowlistRoots,
     paths: {
       rootDir,
       dataDir,
@@ -66,17 +81,21 @@ export function createConfig(): SwarmConfig {
 }
 
 function resolveDataDir(rootDir: string, dataDirEnv: string): string {
-  if (dataDirEnv === "~") {
+  return resolvePathLike(rootDir, dataDirEnv);
+}
+
+function resolvePathLike(rootDir: string, rawPath: string): string {
+  if (rawPath === "~") {
     return homedir();
   }
 
-  if (dataDirEnv.startsWith("~/")) {
-    return resolve(homedir(), dataDirEnv.slice(2));
+  if (rawPath.startsWith("~/")) {
+    return resolve(homedir(), rawPath.slice(2));
   }
 
-  if (isAbsolute(dataDirEnv)) {
-    return resolve(dataDirEnv);
+  if (isAbsolute(rawPath)) {
+    return resolve(rawPath);
   }
 
-  return resolve(rootDir, dataDirEnv);
+  return resolve(rootDir, rawPath);
 }

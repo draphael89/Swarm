@@ -1,0 +1,208 @@
+import { realpathSync } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
+import { basename, resolve, sep } from "node:path";
+
+const CWD_ERROR_MESSAGES = {
+  REQUIRED: "Directory path must be a non-empty string.",
+  NOT_FOUND: "Directory does not exist.",
+  NOT_DIRECTORY: "Path is not a directory.",
+  OUTSIDE_ALLOWLIST: "Directory is outside the allowed workspace roots.",
+  LIST_FAILED: "Unable to list directories for the requested path."
+} as const;
+
+export type DirectoryValidationErrorCode =
+  | "DIRECTORY_REQUIRED"
+  | "DIRECTORY_NOT_FOUND"
+  | "DIRECTORY_NOT_DIRECTORY"
+  | "DIRECTORY_OUTSIDE_ALLOWLIST"
+  | "DIRECTORY_LIST_FAILED";
+
+export class DirectoryValidationError extends Error {
+  readonly code: DirectoryValidationErrorCode;
+
+  constructor(code: DirectoryValidationErrorCode, message: string) {
+    super(message);
+    this.name = "DirectoryValidationError";
+    this.code = code;
+  }
+}
+
+export interface CwdPolicy {
+  rootDir: string;
+  allowlistRoots: string[];
+}
+
+export interface DirectorySummary {
+  name: string;
+  path: string;
+}
+
+export interface DirectoryListingResult {
+  requestedPath?: string;
+  resolvedPath: string;
+  roots: string[];
+  directories: DirectorySummary[];
+}
+
+export interface DirectoryValidationResult {
+  requestedPath: string;
+  roots: string[];
+  valid: boolean;
+  resolvedPath?: string;
+  message?: string;
+}
+
+export function normalizeAllowlistRoots(roots: string[]): string[] {
+  const normalized = new Set<string>();
+
+  for (const root of roots) {
+    const trimmed = root.trim();
+    if (!trimmed) continue;
+
+    normalized.add(resolveToRealPath(resolve(trimmed)));
+  }
+
+  return Array.from(normalized).sort((a, b) => a.localeCompare(b));
+}
+
+export function resolveDirectoryPath(input: string, rootDir: string): string {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new DirectoryValidationError("DIRECTORY_REQUIRED", CWD_ERROR_MESSAGES.REQUIRED);
+  }
+
+  return trimmed.startsWith("/") ? resolve(trimmed) : resolve(rootDir, trimmed);
+}
+
+export async function validateDirectoryPath(input: string, policy: CwdPolicy): Promise<string> {
+  const resolved = resolveDirectoryPath(input, policy.rootDir);
+
+  let stats;
+  try {
+    stats = await stat(resolved);
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error &&
+      "code" in error &&
+      (error as { code?: string }).code === "ENOENT"
+    ) {
+      throw new DirectoryValidationError("DIRECTORY_NOT_FOUND", CWD_ERROR_MESSAGES.NOT_FOUND);
+    }
+
+    throw new DirectoryValidationError("DIRECTORY_NOT_FOUND", CWD_ERROR_MESSAGES.NOT_FOUND);
+  }
+
+  if (!stats.isDirectory()) {
+    throw new DirectoryValidationError("DIRECTORY_NOT_DIRECTORY", CWD_ERROR_MESSAGES.NOT_DIRECTORY);
+  }
+
+  const candidate = resolveToRealPath(resolved);
+  const allowlistRoots = normalizeAllowlistRoots(policy.allowlistRoots);
+
+  if (!isPathAllowed(candidate, allowlistRoots)) {
+    throw new DirectoryValidationError("DIRECTORY_OUTSIDE_ALLOWLIST", CWD_ERROR_MESSAGES.OUTSIDE_ALLOWLIST);
+  }
+
+  return candidate;
+}
+
+export async function listDirectories(
+  requestedPath: string | undefined,
+  policy: CwdPolicy
+): Promise<DirectoryListingResult> {
+  const baseInput = requestedPath?.trim().length ? requestedPath : policy.rootDir;
+  const resolvedPath = await validateDirectoryPath(baseInput, policy);
+  const roots = normalizeAllowlistRoots(policy.allowlistRoots);
+
+  try {
+    const entries = await readdir(resolvedPath, { withFileTypes: true });
+    const directories: DirectorySummary[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const candidatePath = resolveToRealPath(resolve(resolvedPath, entry.name));
+      if (!isPathAllowed(candidatePath, roots)) {
+        continue;
+      }
+
+      directories.push({
+        name: entry.name,
+        path: candidatePath
+      });
+    }
+
+    directories.sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      requestedPath,
+      resolvedPath,
+      roots,
+      directories
+    };
+  } catch {
+    throw new DirectoryValidationError("DIRECTORY_LIST_FAILED", CWD_ERROR_MESSAGES.LIST_FAILED);
+  }
+}
+
+export async function validateDirectory(
+  requestedPath: string,
+  policy: CwdPolicy
+): Promise<DirectoryValidationResult> {
+  const roots = normalizeAllowlistRoots(policy.allowlistRoots);
+
+  try {
+    const resolvedPath = await validateDirectoryPath(requestedPath, policy);
+    return {
+      requestedPath,
+      roots,
+      valid: true,
+      resolvedPath
+    };
+  } catch (error) {
+    if (error instanceof DirectoryValidationError) {
+      return {
+        requestedPath,
+        roots,
+        valid: false,
+        message: error.message
+      };
+    }
+
+    return {
+      requestedPath,
+      roots,
+      valid: false,
+      message: CWD_ERROR_MESSAGES.NOT_FOUND
+    };
+  }
+}
+
+export function isPathAllowed(candidatePath: string, roots: string[]): boolean {
+  return roots.some((root) => isPathWithinRoot(candidatePath, root));
+}
+
+function isPathWithinRoot(candidatePath: string, root: string): boolean {
+  if (candidatePath === root) {
+    return true;
+  }
+
+  const rootWithSep = root.endsWith(sep) ? root : `${root}${sep}`;
+  return candidatePath.startsWith(rootWithSep);
+}
+
+function resolveToRealPath(pathValue: string): string {
+  try {
+    return resolve(realpathSync(pathValue));
+  } catch {
+    return resolve(pathValue);
+  }
+}
+
+export function toDirectoryName(pathValue: string): string {
+  const normalized = resolve(pathValue);
+  return basename(normalized);
+}

@@ -111,6 +111,7 @@ async function makeTempConfig(port: number, allowNonManagerSubscriptions = false
       thinkingLevel: 'medium',
     },
     defaultCwd: root,
+    cwdAllowlistRoots: [root, join(root, 'worktrees')],
     paths: {
       rootDir: root,
       dataDir,
@@ -450,6 +451,265 @@ describe('SwarmWebSocketServer', () => {
 
     const descriptor = manager.listAgents().find((agent) => agent.agentId === worker.agentId)
     expect(descriptor?.status).toBe('terminated')
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
+  it('creates managers over websocket and broadcasts manager_created', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port, true)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe' }))
+    await waitForEvent(events, (event) => event.type === 'ready')
+
+    client.send(
+      JSON.stringify({
+        type: 'create_manager',
+        name: 'Review Manager',
+        cwd: config.defaultCwd,
+      }),
+    )
+
+    const createdEvent = await waitForEvent(events, (event) => event.type === 'manager_created')
+    expect(createdEvent.type).toBe('manager_created')
+    if (createdEvent.type === 'manager_created') {
+      expect(createdEvent.manager.role).toBe('manager')
+      expect(createdEvent.manager.managerId).toBe(createdEvent.manager.agentId)
+    }
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
+  it('deletes non-primary managers over websocket and emits manager_deleted', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port, true)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const secondary = await manager.createManager('manager', {
+      name: 'Delete Me Manager',
+      cwd: config.defaultCwd,
+    })
+    const ownedWorker = await manager.spawnAgent(secondary.agentId, { agentId: 'Delete Me Worker' })
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe' }))
+    await waitForEvent(events, (event) => event.type === 'ready')
+
+    client.send(JSON.stringify({ type: 'delete_manager', managerId: secondary.agentId }))
+
+    const deletedEvent = await waitForEvent(
+      events,
+      (event) => event.type === 'manager_deleted' && event.managerId === secondary.agentId,
+    )
+    expect(deletedEvent.type).toBe('manager_deleted')
+    if (deletedEvent.type === 'manager_deleted') {
+      expect(deletedEvent.terminatedWorkerIds).toContain(ownedWorker.agentId)
+    }
+
+    expect(manager.listAgents().some((agent) => agent.agentId === secondary.agentId)).toBe(false)
+    expect(manager.listAgents().some((agent) => agent.agentId === ownedWorker.agentId)).toBe(false)
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
+  it('enforces strict ownership for kill_agent based on selected manager context', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port, true)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const secondary = await manager.createManager('manager', {
+      name: 'Owner Manager',
+      cwd: config.defaultCwd,
+    })
+    const ownedWorker = await manager.spawnAgent(secondary.agentId, { agentId: 'Owned Worker' })
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe', agentId: 'manager' }))
+    await waitForEvent(events, (event) => event.type === 'ready')
+
+    client.send(JSON.stringify({ type: 'kill_agent', agentId: ownedWorker.agentId }))
+
+    const denied = await waitForEvent(
+      events,
+      (event) => event.type === 'error' && event.code === 'KILL_AGENT_FAILED',
+    )
+    expect(denied.type).toBe('error')
+
+    client.send(JSON.stringify({ type: 'subscribe', agentId: secondary.agentId }))
+    await waitForEvent(
+      events,
+      (event) => event.type === 'ready' && event.subscribedAgentId === secondary.agentId,
+    )
+
+    client.send(JSON.stringify({ type: 'kill_agent', agentId: ownedWorker.agentId }))
+
+    const statusEvent = await waitForEvent(
+      events,
+      (event) => event.type === 'agent_status' && event.agentId === ownedWorker.agentId && event.status === 'terminated',
+    )
+    expect(statusEvent.type).toBe('agent_status')
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
+  it('/new resets the currently selected manager session only', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port, true)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const secondary = await manager.createManager('manager', {
+      name: 'Resettable Manager',
+      cwd: config.defaultCwd,
+    })
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe', agentId: secondary.agentId }))
+    await waitForEvent(
+      events,
+      (event) => event.type === 'ready' && event.subscribedAgentId === secondary.agentId,
+    )
+
+    client.send(JSON.stringify({ type: 'user_message', text: '/new' }))
+
+    const resetEvent = await waitForEvent(
+      events,
+      (event) => event.type === 'conversation_reset' && event.agentId === secondary.agentId,
+    )
+    expect(resetEvent.type).toBe('conversation_reset')
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
+  it('supports directory picker protocol commands', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port, true)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const outsideDir = await mkdtemp(join(tmpdir(), 'ws-outside-allowlist-'))
+    const rootValidation = await manager.validateDirectory(config.paths.rootDir)
+    const expectedRoot = rootValidation.resolvedPath ?? config.paths.rootDir
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe' }))
+    await waitForEvent(events, (event) => event.type === 'ready')
+
+    client.send(JSON.stringify({ type: 'list_directories', path: config.paths.rootDir }))
+
+    const listed = await waitForEvent(events, (event) => event.type === 'directories_listed')
+    expect(listed.type).toBe('directories_listed')
+    if (listed.type === 'directories_listed') {
+      expect(listed.roots).toContain(expectedRoot)
+      expect(listed.resolvedPath).toBe(expectedRoot)
+    }
+
+    client.send(JSON.stringify({ type: 'validate_directory', path: outsideDir }))
+
+    const validated = await waitForEvent(
+      events,
+      (event) => event.type === 'directory_validated' && event.requestedPath === outsideDir,
+    )
+    expect(validated.type).toBe('directory_validated')
+    if (validated.type === 'directory_validated') {
+      expect(validated.valid).toBe(false)
+      expect(validated.message).toContain('outside the allowed workspace roots')
+    }
 
     client.close()
     await once(client, 'close')

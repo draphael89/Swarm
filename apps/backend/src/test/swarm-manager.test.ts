@@ -112,6 +112,7 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
       thinkingLevel: 'medium',
     },
     defaultCwd: root,
+    cwdAllowlistRoots: [root, join(root, 'worktrees')],
     paths: {
       rootDir: root,
       dataDir,
@@ -460,6 +461,7 @@ describe('SwarmManager', () => {
           agentId: 'manager',
           displayName: 'Manager',
           role: 'manager',
+          managerId: 'manager',
           status: 'idle',
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
@@ -471,6 +473,7 @@ describe('SwarmManager', () => {
           agentId: 'worker-a',
           displayName: 'Worker A',
           role: 'worker',
+          managerId: 'manager',
           status: 'streaming',
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
@@ -568,5 +571,147 @@ describe('SwarmManager', () => {
     const rebooted = new TestSwarmManager(config)
     await rebooted.boot()
     expect(rebooted.getConversationHistory('manager')).toHaveLength(0)
+  })
+
+  it('migrates legacy descriptors missing managerId on boot', async () => {
+    const config = await makeTempConfig()
+
+    const seedAgents = {
+      agents: [
+        {
+          agentId: 'manager',
+          displayName: 'Manager',
+          role: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'manager.jsonl'),
+        },
+        {
+          agentId: 'legacy-worker',
+          displayName: 'Legacy Worker',
+          role: 'worker',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'legacy-worker.jsonl'),
+        },
+      ],
+    }
+
+    await writeFile(config.paths.agentsStoreFile, JSON.stringify(seedAgents, null, 2), 'utf8')
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const restoredManager = manager.listAgents().find((agent) => agent.agentId === 'manager')
+    const restoredWorker = manager.listAgents().find((agent) => agent.agentId === 'legacy-worker')
+
+    expect(restoredManager?.managerId).toBe('manager')
+    expect(restoredWorker?.managerId).toBe('manager')
+  })
+
+  it('creates secondary managers and deletes them with owned worker cascade', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const secondary = await manager.createManager('manager', {
+      name: 'Ops Manager',
+      cwd: config.defaultCwd,
+    })
+
+    expect(secondary.role).toBe('manager')
+    expect(secondary.managerId).toBe(secondary.agentId)
+
+    const ownedWorker = await manager.spawnAgent(secondary.agentId, { agentId: 'Owned Worker' })
+    expect(ownedWorker.managerId).toBe(secondary.agentId)
+
+    const deleted = await manager.deleteManager('manager', secondary.agentId)
+
+    expect(deleted.managerId).toBe(secondary.agentId)
+    expect(deleted.terminatedWorkerIds).toContain(ownedWorker.agentId)
+    expect(manager.listAgents().some((agent) => agent.agentId === secondary.agentId)).toBe(false)
+    expect(manager.listAgents().some((agent) => agent.agentId === ownedWorker.agentId)).toBe(false)
+  })
+
+  it('protects the primary manager from deletion', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await expect(manager.deleteManager('manager', 'manager')).rejects.toThrow(
+      'Manager manager is protected and cannot be deleted',
+    )
+  })
+
+  it('enforces strict manager ownership for worker control operations', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const secondary = await manager.createManager('manager', {
+      name: 'Delivery Manager',
+      cwd: config.defaultCwd,
+    })
+    const worker = await manager.spawnAgent(secondary.agentId, { agentId: 'Delivery Worker' })
+
+    await expect(manager.killAgent('manager', worker.agentId)).rejects.toThrow(
+      `Only owning manager can kill agent ${worker.agentId}`,
+    )
+    await expect(manager.sendMessage('manager', worker.agentId, 'cross-manager control')).rejects.toThrow(
+      `Manager manager does not own worker ${worker.agentId}`,
+    )
+
+    await manager.killAgent(secondary.agentId, worker.agentId)
+    const descriptor = manager.listAgents().find((agent) => agent.agentId === worker.agentId)
+    expect(descriptor?.status).toBe('terminated')
+  })
+
+  it('routes user-to-worker delivery through the owning manager context', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const secondary = await manager.createManager('manager', {
+      name: 'Routing Manager',
+      cwd: config.defaultCwd,
+    })
+    const worker = await manager.spawnAgent(secondary.agentId, { agentId: 'Routing Worker' })
+
+    await manager.handleUserMessage('hello owned worker', { targetAgentId: worker.agentId })
+
+    const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
+    expect(workerRuntime?.sendCalls.at(-1)?.message).toBe('hello owned worker')
+  })
+
+  it('enforces cwd allowlist restrictions for manager and worker creation', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const outsideDir = await mkdtemp(join(tmpdir(), 'outside-allowlist-'))
+
+    await expect(
+      manager.createManager('manager', {
+        name: 'Blocked Manager',
+        cwd: outsideDir,
+      }),
+    ).rejects.toThrow('outside the allowed workspace roots')
+
+    await expect(
+      manager.spawnAgent('manager', {
+        agentId: 'Blocked Worker',
+        cwd: outsideDir,
+      }),
+    ).rejects.toThrow('outside the allowed workspace roots')
+
+    const validation = await manager.validateDirectory(outsideDir)
+    expect(validation.valid).toBe(false)
+    expect(validation.message).toContain('outside the allowed workspace roots')
   })
 })
