@@ -1,4 +1,5 @@
-import { CircleDashed, Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, CircleDashed, Plus, Trash2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { buildManagerTreeRows } from '@/lib/agent-hierarchy'
 import { cn } from '@/lib/utils'
 import type { AgentDescriptor, AgentStatus } from '@/lib/ws-types'
@@ -29,6 +30,41 @@ export function AgentSidebar({
   onDeleteManager,
 }: AgentSidebarProps) {
   const { managerRows, orphanWorkers } = buildManagerTreeRows(agents)
+  const [collapsedManagerIds, setCollapsedManagerIds] = useState<Set<string>>(() => new Set())
+
+  useEffect(() => {
+    const managerIds = new Set(managerRows.map(({ manager }) => manager.agentId))
+
+    setCollapsedManagerIds((previous) => {
+      let hasRemovedManagers = false
+      const next = new Set<string>()
+
+      for (const managerId of previous) {
+        if (managerIds.has(managerId)) {
+          next.add(managerId)
+          continue
+        }
+
+        hasRemovedManagers = true
+      }
+
+      return hasRemovedManagers ? next : previous
+    })
+  }, [managerRows])
+
+  const toggleManagerCollapsed = (managerId: string) => {
+    setCollapsedManagerIds((previous) => {
+      const next = new Set(previous)
+
+      if (next.has(managerId)) {
+        next.delete(managerId)
+      } else {
+        next.add(managerId)
+      }
+
+      return next
+    })
+  }
 
   return (
     <aside className="w-48 shrink-0 bg-muted/20 sm:w-56 md:w-64 lg:w-72">
@@ -60,6 +96,7 @@ export function AgentSidebar({
               const managerLiveStatus = statuses[manager.agentId]?.status ?? manager.status
               const managerIsWorking = isWorkingStatus(managerLiveStatus)
               const managerIsSelected = selectedAgentId === manager.agentId
+              const managerIsCollapsed = collapsedManagerIds.has(manager.agentId)
 
               return (
                 <li key={manager.agentId} className="space-y-1">
@@ -68,7 +105,7 @@ export function AgentSidebar({
                       type="button"
                       onClick={() => onSelectAgent(manager.agentId)}
                       className={cn(
-                        'w-full rounded-md px-2 py-1.5 pr-9 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                        'w-full rounded-md py-1.5 pl-8 pr-9 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
                         managerIsSelected ? 'bg-primary/10' : 'hover:bg-accent/60',
                       )}
                     >
@@ -81,6 +118,23 @@ export function AgentSidebar({
                           {manager.agentId}
                         </span>
                       </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleManagerCollapsed(manager.agentId)}
+                      aria-label={`${managerIsCollapsed ? 'Expand' : 'Collapse'} manager ${manager.agentId}`}
+                      aria-expanded={!managerIsCollapsed}
+                      className={cn(
+                        'absolute left-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/80 transition',
+                        'hover:bg-accent/70 hover:text-foreground',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+                      )}
+                    >
+                      <ChevronRight
+                        aria-hidden="true"
+                        className={cn('size-3.5 transition-transform', !managerIsCollapsed && 'rotate-90')}
+                      />
                     </button>
 
                     <button
@@ -98,7 +152,7 @@ export function AgentSidebar({
                     </button>
                   </div>
 
-                  {workers.length > 0 ? (
+                  {workers.length > 0 && !managerIsCollapsed ? (
                     <ul className="space-y-1 pl-2">
                       {workers.map((worker) => {
                         const workerLiveStatus = statuses[worker.agentId]?.status ?? worker.status
