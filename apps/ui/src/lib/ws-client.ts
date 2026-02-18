@@ -1,12 +1,14 @@
 import { chooseFallbackAgentId } from './agent-hierarchy'
-import type {
-  AgentDescriptor,
-  AgentStatus,
-  ClientCommand,
-  ConversationEntry,
-  ConversationMessageEvent,
-  DeliveryMode,
-  ServerEvent,
+import {
+  MANAGER_MODEL_PRESETS,
+  type AgentDescriptor,
+  type AgentStatus,
+  type ClientCommand,
+  type ConversationEntry,
+  type ConversationMessageEvent,
+  type DeliveryMode,
+  type ManagerModelPreset,
+  type ServerEvent,
 } from './ws-types'
 
 const INITIAL_CONNECT_DELAY_MS = 50
@@ -208,9 +210,10 @@ export class ManagerWsClient {
     })
   }
 
-  async createManager(input: { name: string; cwd: string }): Promise<AgentDescriptor> {
+  async createManager(input: { name: string; cwd: string; model: ManagerModelPreset }): Promise<AgentDescriptor> {
     const name = input.name.trim()
     const cwd = input.cwd.trim()
+    const model = input.model
 
     if (!name) {
       throw new Error('Manager name is required.')
@@ -218,6 +221,10 @@ export class ManagerWsClient {
 
     if (!cwd) {
       throw new Error('Manager working directory is required.')
+    }
+
+    if (!MANAGER_MODEL_PRESETS.includes(model)) {
+      throw new Error('Manager model is required.')
     }
 
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
@@ -233,6 +240,7 @@ export class ManagerWsClient {
         type: 'create_manager',
         name,
         cwd,
+        model,
         requestId,
       })
 

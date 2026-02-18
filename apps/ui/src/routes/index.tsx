@@ -8,13 +8,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { chooseFallbackAgentId } from '@/lib/agent-hierarchy'
 import { ManagerWsClient, type ManagerWsState } from '@/lib/ws-client'
-import type { AgentDescriptor } from '@/lib/ws-types'
+import { MANAGER_MODEL_PRESETS, type AgentDescriptor, type ManagerModelPreset } from '@/lib/ws-types'
 
 export const Route = createFileRoute('/')({
   component: IndexPage,
 })
 
-function IndexPage() {
+const DEFAULT_MANAGER_MODEL: ManagerModelPreset = 'codex-5.3'
+
+export function IndexPage() {
   const wsUrl = import.meta.env.VITE_SWARM_WS_URL ?? 'ws://127.0.0.1:47187'
   const clientRef = useRef<ManagerWsClient | null>(null)
   const messageInputRef = useRef<MessageInputHandle | null>(null)
@@ -32,6 +34,7 @@ function IndexPage() {
   const [isCreateManagerDialogOpen, setIsCreateManagerDialogOpen] = useState(false)
   const [newManagerName, setNewManagerName] = useState('')
   const [newManagerCwd, setNewManagerCwd] = useState('')
+  const [newManagerModel, setNewManagerModel] = useState<ManagerModelPreset>(DEFAULT_MANAGER_MODEL)
   const [createManagerError, setCreateManagerError] = useState<string | null>(null)
   const [isCreatingManager, setIsCreatingManager] = useState(false)
   const [isValidatingDirectory, setIsValidatingDirectory] = useState(false)
@@ -163,6 +166,7 @@ function IndexPage() {
 
     setNewManagerName('')
     setNewManagerCwd(defaultCwd)
+    setNewManagerModel(DEFAULT_MANAGER_MODEL)
     setBrowseError(null)
     setCreateManagerError(null)
     setIsCreateManagerDialogOpen(true)
@@ -225,12 +229,14 @@ function IndexPage() {
       const manager = await client.createManager({
         name,
         cwd: validation.path || cwd,
+        model: newManagerModel,
       })
 
       client.subscribeToAgent(manager.agentId)
       setIsCreateManagerDialogOpen(false)
       setNewManagerName('')
       setNewManagerCwd('')
+      setNewManagerModel(DEFAULT_MANAGER_MODEL)
       setBrowseError(null)
       setCreateManagerError(null)
     } catch (error) {
@@ -342,6 +348,26 @@ function IndexPage() {
             <p className="text-[11px] text-muted-foreground">
               Use Browse to open the native folder picker, or enter a path manually.
             </p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="manager-model" className="text-xs font-medium text-muted-foreground">Model</label>
+            <select
+              id="manager-model"
+              value={newManagerModel}
+              onChange={(event) => {
+                setNewManagerModel(event.target.value as ManagerModelPreset)
+                setCreateManagerError(null)
+              }}
+              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isCreatingManager || isPickingDirectory}
+            >
+              {MANAGER_MODEL_PRESETS.map((modelPreset) => (
+                <option key={modelPreset} value={modelPreset}>
+                  {modelPreset}
+                </option>
+              ))}
+            </select>
           </div>
 
           {createManagerError ? (
