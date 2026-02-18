@@ -1,13 +1,13 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
+  Check,
   ChevronRight,
   FileText,
   Loader2,
   MessageSquare,
   Terminal,
   Users,
-  Wrench,
   X,
   type LucideIcon,
 } from 'lucide-react'
@@ -18,12 +18,12 @@ import { MarkdownMessage } from './MarkdownMessage'
 interface MessageListProps {
   messages: ConversationEntry[]
   isLoading: boolean
-  activeAgentLabel: string
   onSuggestionClick?: (suggestion: string) => void
 }
 
 const suggestions = ['Plan a swarm workflow', 'Debug manager state', 'Summarize latest run']
 
+type ConversationMessageEntry = Extract<ConversationEntry, { type: 'conversation_message' }>
 type ConversationLogEntry = Extract<ConversationEntry, { type: 'conversation_log' }>
 type ToolExecutionLogEntry = ConversationLogEntry & {
   kind: 'tool_execution_start' | 'tool_execution_update' | 'tool_execution_end'
@@ -39,6 +39,35 @@ type ToolConfig = {
   icon?: LucideIcon
   getDetail?: (input: Record<string, unknown>) => string | null
 }
+
+interface ToolExecutionDisplayEntry {
+  id: string
+  toolName?: string
+  toolCallId?: string
+  inputPayload?: string
+  latestPayload?: string
+  outputPayload?: string
+  timestamp: string
+  latestKind: ToolExecutionLogEntry['kind']
+  isError?: boolean
+}
+
+type DisplayEntry =
+  | {
+      type: 'conversation_message'
+      id: string
+      message: ConversationMessageEntry
+    }
+  | {
+      type: 'tool_execution'
+      id: string
+      entry: ToolExecutionDisplayEntry
+    }
+  | {
+      type: 'runtime_error_log'
+      id: string
+      entry: ConversationLogEntry
+    }
 
 const TOOL_CONFIG: Record<string, ToolConfig> = {
   bash: {
@@ -122,6 +151,7 @@ function pickString(record: Record<string, unknown>, keys: string[]): string | n
       return value.trim()
     }
   }
+
   return null
 }
 
@@ -163,8 +193,8 @@ function isToolExecutionLog(entry: ConversationLogEntry): entry is ToolExecution
   )
 }
 
-function mapToolStatus(entry: ToolExecutionLogEntry): ToolDisplayStatus {
-  if (entry.kind !== 'tool_execution_end') {
+function mapToolStatus(entry: ToolExecutionDisplayEntry): ToolDisplayStatus {
+  if (entry.latestKind !== 'tool_execution_end') {
     return 'pending'
   }
 
@@ -172,7 +202,7 @@ function mapToolStatus(entry: ToolExecutionLogEntry): ToolDisplayStatus {
     return 'completed'
   }
 
-  const lowered = entry.text.toLowerCase()
+  const lowered = (entry.outputPayload ?? entry.latestPayload ?? '').toLowerCase()
   if (lowered.includes('[aborted]') || lowered.includes('cancel')) {
     return 'cancelled'
   }
@@ -185,11 +215,12 @@ function getFriendlyToolMessage(
   input: Record<string, unknown>,
   status: ToolDisplayStatus,
 ): string {
-  const normalizedToolName = (toolName ?? '').trim() || 'tool'
-  const config = TOOL_CONFIG[normalizedToolName]
+  const normalizedToolName = (toolName ?? '').trim()
+  const config = normalizedToolName ? TOOL_CONFIG[normalizedToolName] : undefined
 
   if (!config) {
-    const friendlyName = humanizeToolName(normalizedToolName)
+    const friendlyName = humanizeToolName(normalizedToolName) || 'tool'
+
     if (status === 'completed') return `Ran ${friendlyName}`
     if (status === 'cancelled') return `Cancelled ${friendlyName}`
     if (status === 'error') return `${friendlyName} failed`
@@ -209,27 +240,103 @@ function getFriendlyToolMessage(
   return detail ? `${baseLabel}: ${detail}` : baseLabel
 }
 
-function statusChipClass(status: ToolDisplayStatus): string {
-  if (status === 'completed') {
-    return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+function hydrateToolDisplayEntry(displayEntry: ToolExecutionDisplayEntry, event: ToolExecutionLogEntry): void {
+  displayEntry.toolName = event.toolName ?? displayEntry.toolName
+  displayEntry.toolCallId = event.toolCallId ?? displayEntry.toolCallId
+  displayEntry.timestamp = event.timestamp
+  displayEntry.latestKind = event.kind
+
+  if (event.kind === 'tool_execution_start') {
+    displayEntry.inputPayload = event.text
+    displayEntry.latestPayload = event.text
+    displayEntry.outputPayload = undefined
+    displayEntry.isError = false
+    return
   }
-  if (status === 'cancelled') {
-    return 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300'
+
+  if (event.kind === 'tool_execution_update') {
+    displayEntry.latestPayload = event.text
+    return
   }
-  if (status === 'error') {
-    return 'border-destructive/35 bg-destructive/10 text-destructive'
-  }
-  return 'border-border/70 bg-muted/40 text-muted-foreground'
+
+  displayEntry.outputPayload = event.text
+  displayEntry.latestPayload = event.text
+  displayEntry.isError = event.isError
 }
 
-function statusLabel(status: ToolDisplayStatus): string {
-  if (status === 'completed') return 'Done'
-  if (status === 'cancelled') return 'Cancelled'
-  if (status === 'error') return 'Failed'
-  return 'Running'
+function buildDisplayEntries(messages: ConversationEntry[]): DisplayEntry[] {
+  const displayEntries: DisplayEntry[] = []
+  const toolEntriesByCallId = new Map<string, ToolExecutionDisplayEntry>()
+
+  for (const [index, message] of messages.entries()) {
+    if (message.type === 'conversation_message') {
+      displayEntries.push({
+        type: 'conversation_message',
+        id: `message-${message.timestamp}-${index}`,
+        message,
+      })
+      continue
+    }
+
+    if (isToolExecutionLog(message)) {
+      const callId = message.toolCallId?.trim()
+      if (callId) {
+        let displayEntry = toolEntriesByCallId.get(callId)
+
+        if (!displayEntry) {
+          displayEntry = {
+            id: `tool-${callId}`,
+            toolName: message.toolName,
+            toolCallId: callId,
+            timestamp: message.timestamp,
+            latestKind: message.kind,
+          }
+
+          displayEntries.push({
+            type: 'tool_execution',
+            id: displayEntry.id,
+            entry: displayEntry,
+          })
+
+          toolEntriesByCallId.set(callId, displayEntry)
+        }
+
+        hydrateToolDisplayEntry(displayEntry, message)
+        continue
+      }
+
+      const displayEntry: ToolExecutionDisplayEntry = {
+        id: `tool-${message.timestamp}-${index}`,
+        toolName: message.toolName,
+        toolCallId: message.toolCallId,
+        timestamp: message.timestamp,
+        latestKind: message.kind,
+      }
+
+      hydrateToolDisplayEntry(displayEntry, message)
+
+      displayEntries.push({
+        type: 'tool_execution',
+        id: displayEntry.id,
+        entry: displayEntry,
+      })
+
+      continue
+    }
+
+    if (message.isError) {
+      displayEntries.push({
+        type: 'runtime_error_log',
+        id: `runtime-log-${message.timestamp}-${index}`,
+        entry: message,
+      })
+    }
+  }
+
+  return displayEntries
 }
 
-function ToolOutputBlock({
+function ToolPayloadBlock({
   label,
   value,
   tone,
@@ -243,7 +350,7 @@ function ToolOutputBlock({
       <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
       <pre
         className={cn(
-          'w-full max-h-64 overflow-auto rounded-md border p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words',
+          'max-h-64 w-full overflow-auto rounded-md border p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words',
           tone === 'error'
             ? 'border-destructive/30 bg-destructive/10 text-destructive'
             : tone === 'cancelled'
@@ -257,28 +364,29 @@ function ToolOutputBlock({
   )
 }
 
-function ToolExecutionLog({ entry, inputPayload }: { entry: ToolExecutionLogEntry; inputPayload?: string }) {
+function ToolExecutionRow({ entry }: { entry: ToolExecutionDisplayEntry }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const contentId = useId()
 
   const displayStatus = mapToolStatus(entry)
-  const baseInputPayload = entry.kind === 'tool_execution_start' ? entry.text : inputPayload
-  const inputRecord = parseJsonRecord(baseInputPayload)
+  const inputRecord = parseJsonRecord(entry.inputPayload ?? entry.latestPayload)
   const friendlyMessage = getFriendlyToolMessage(entry.toolName, inputRecord, displayStatus)
 
-  const toolConfig = entry.toolName ? TOOL_CONFIG[entry.toolName] : undefined
-  const ToolIcon = toolConfig?.icon ?? Wrench
+  const config = entry.toolName ? TOOL_CONFIG[entry.toolName] : undefined
+  const ToolIcon = config?.icon
+
+  const outputPayload =
+    entry.outputPayload ??
+    (entry.latestPayload && entry.latestPayload !== entry.inputPayload ? entry.latestPayload : undefined)
 
   const outputLabel =
-    entry.kind === 'tool_execution_start'
-      ? 'Input'
-      : entry.kind === 'tool_execution_update'
-        ? 'Update'
-        : displayStatus === 'cancelled'
-          ? 'Cancelled'
-          : displayStatus === 'error'
-            ? 'Error'
-            : 'Result'
+    displayStatus === 'pending'
+      ? 'Update'
+      : displayStatus === 'cancelled'
+        ? 'Cancelled'
+        : displayStatus === 'error'
+          ? 'Error'
+          : 'Result'
 
   return (
     <div className="rounded-md">
@@ -286,16 +394,20 @@ function ToolExecutionLog({ entry, inputPayload }: { entry: ToolExecutionLogEntr
         type="button"
         className={cn(
           'group flex w-full items-start gap-1.5 rounded-md px-1 py-1 text-left text-sm text-foreground/70 italic transition-colors',
-          'hover:bg-muted/35 hover:text-foreground',
+          'hover:text-foreground',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
         )}
         aria-expanded={isExpanded}
         aria-controls={contentId}
-        onClick={() => setIsExpanded((prev) => !prev)}
+        onClick={() => setIsExpanded((previous) => !previous)}
       >
         <span className="mt-0.5 inline-flex size-4 shrink-0 items-center justify-center">
           {displayStatus === 'completed' ? (
-            <ToolIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+            ToolIcon ? (
+              <ToolIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+            ) : (
+              <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+            )
           ) : displayStatus === 'cancelled' ? (
             <X className="size-3.5 text-rose-500 dark:text-rose-400" aria-hidden="true" />
           ) : displayStatus === 'error' ? (
@@ -307,18 +419,9 @@ function ToolExecutionLog({ entry, inputPayload }: { entry: ToolExecutionLogEntr
 
         <span className="min-w-0 flex-1 break-words">{friendlyMessage}</span>
 
-        <span
-          className={cn(
-            'mt-0.5 inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[10px] not-italic font-medium uppercase tracking-wide',
-            statusChipClass(displayStatus),
-          )}
-        >
-          {statusLabel(displayStatus)}
-        </span>
-
         <ChevronRight
           className={cn(
-            'mt-0.5 size-3.5 shrink-0 text-muted-foreground/80 transition-transform',
+            'mt-0.5 size-3.5 shrink-0 text-muted-foreground/80 opacity-0 transition-all group-hover:opacity-100',
             isExpanded && 'rotate-90',
           )}
           aria-hidden="true"
@@ -334,11 +437,14 @@ function ToolExecutionLog({ entry, inputPayload }: { entry: ToolExecutionLogEntr
       >
         <div className="overflow-hidden">
           <div className="ml-6 mt-1 space-y-2 pb-1">
-            {entry.kind !== 'tool_execution_start' && inputPayload ? (
-              <ToolOutputBlock label="Input" value={inputPayload} tone="neutral" />
+            {entry.inputPayload ? <ToolPayloadBlock label="Input" value={entry.inputPayload} tone="neutral" /> : null}
+            {outputPayload ? (
+              <ToolPayloadBlock
+                label={outputLabel}
+                value={outputPayload}
+                tone={displayStatus === 'pending' ? 'neutral' : displayStatus}
+              />
             ) : null}
-
-            <ToolOutputBlock label={outputLabel} value={entry.text} tone={displayStatus} />
 
             <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
               <span>{formatTimestamp(entry.timestamp)}</span>
@@ -347,6 +453,59 @@ function ToolExecutionLog({ entry, inputPayload }: { entry: ToolExecutionLogEntr
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function RuntimeErrorLog({ entry }: { entry: ConversationLogEntry }) {
+  return (
+    <div className="rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+      <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-destructive/80">Runtime error</div>
+      <p className="whitespace-pre-wrap break-words leading-relaxed">{entry.text}</p>
+    </div>
+  )
+}
+
+function ConversationMessage({ message }: { message: ConversationMessageEntry }) {
+  const normalizedText = message.text.trim()
+  if (!normalizedText || normalizedText === '.') {
+    return null
+  }
+
+  if (message.role === 'system') {
+    return (
+      <div className="rounded-lg border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-sm text-amber-950 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300/90">System</div>
+        <p className="mt-1 whitespace-pre-wrap break-words leading-relaxed">{normalizedText}</p>
+      </div>
+    )
+  }
+
+  if (message.role === 'user') {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[85%] rounded-lg rounded-tr-sm bg-primary px-3 py-2 text-primary-foreground">
+          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="text-foreground">
+      <MarkdownMessage content={normalizedText} />
+    </div>
+  )
+}
+
+function LoadingIndicator() {
+  return (
+    <div className="flex justify-start" role="status" aria-live="polite" aria-label="Assistant is working">
+      <div className="flex items-center gap-0.5">
+        <div className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-duration:900ms]" />
+        <div className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:150ms] [animation-duration:900ms]" />
+        <div className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:300ms] [animation-duration:900ms]" />
       </div>
     </div>
   )
@@ -375,149 +534,42 @@ function EmptyState({ onSuggestionClick }: { onSuggestionClick?: (suggestion: st
   )
 }
 
-function ConversationMessage({
-  message,
-  activeAgentLabel,
-}: {
-  message: Extract<ConversationEntry, { type: 'conversation_message' }>
-  activeAgentLabel: string
-}) {
-  const isUser = message.role === 'user'
-  const isSystem = message.role === 'system'
-
-  if (isSystem) {
-    return (
-      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-        <div className="mb-1 text-[11px] uppercase tracking-wide text-amber-700">System • {formatTimestamp(message.timestamp)}</div>
-        <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>
-      </div>
-    )
-  }
-
-  if (isUser) {
-    const fromUser = message.source === 'user_input'
-
-    return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg rounded-tr-sm bg-primary px-3 py-2 text-primary-foreground">
-          <div className="mb-1 text-[11px] uppercase tracking-wide text-primary-foreground/80">
-            {fromUser ? 'You' : 'Input'} • {formatTimestamp(message.timestamp)}
-          </div>
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>
-        </div>
-      </div>
-    )
-  }
-
-  const shouldRenderMarkdown = message.source === 'speak_to_user'
-
-  return (
-    <div className="text-foreground">
-      <div className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-        {activeAgentLabel} • {formatTimestamp(message.timestamp)} • {message.source}
-      </div>
-      {shouldRenderMarkdown ? (
-        <MarkdownMessage content={message.text} />
-      ) : (
-        <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>
-      )}
-    </div>
-  )
-}
-
-function ConversationLog({
-  entry,
-  toolInputsByCallId,
-}: {
-  entry: ConversationLogEntry
-  toolInputsByCallId: Map<string, string>
-}) {
-  if (isToolExecutionLog(entry)) {
-    const inputPayload = entry.toolCallId ? toolInputsByCallId.get(entry.toolCallId) : undefined
-    return <ToolExecutionLog entry={entry} inputPayload={inputPayload} />
-  }
-
-  const label = entry.kind === 'message_start' ? 'Message start' : 'Message end'
-
-  return (
-    <div
-      className={cn(
-        'rounded-lg border px-3 py-2 text-xs font-mono',
-        entry.isError
-          ? 'border-destructive/30 bg-destructive/10 text-destructive'
-          : 'border-border/70 bg-muted/40 text-muted-foreground',
-      )}
-    >
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] uppercase tracking-wide">
-        <span>{label}</span>
-        <span>• {formatTimestamp(entry.timestamp)}</span>
-        {entry.role ? <span>• {entry.role}</span> : null}
-        {entry.isError ? <span>• error</span> : null}
-      </div>
-      <p className="mt-1 whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">{entry.text}</p>
-    </div>
-  )
-}
-
-function Message({
-  message,
-  activeAgentLabel,
-  toolInputsByCallId,
-}: {
-  message: ConversationEntry
-  activeAgentLabel: string
-  toolInputsByCallId: Map<string, string>
-}) {
-  if (message.type === 'conversation_log') {
-    return <ConversationLog entry={message} toolInputsByCallId={toolInputsByCallId} />
-  }
-
-  return <ConversationMessage message={message} activeAgentLabel={activeAgentLabel} />
-}
-
-export function MessageList({ messages, isLoading, activeAgentLabel, onSuggestionClick }: MessageListProps) {
+export function MessageList({ messages, isLoading, onSuggestionClick }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
-  const toolInputsByCallId = useMemo(() => {
-    const inputMap = new Map<string, string>()
-
-    for (const entry of messages) {
-      if (entry.type !== 'conversation_log') continue
-      if (entry.kind !== 'tool_execution_start') continue
-      if (!entry.toolCallId) continue
-      inputMap.set(entry.toolCallId, entry.text)
-    }
-
-    return inputMap
-  }, [messages])
+  const displayEntries = useMemo(() => buildDisplayEntries(messages), [messages])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [messages, isLoading])
+  }, [displayEntries, isLoading])
 
-  if (messages.length === 0 && !isLoading) {
+  if (displayEntries.length === 0 && !isLoading) {
     return <EmptyState onSuggestionClick={onSuggestionClick} />
   }
 
   return (
     <div
       className={cn(
-        'flex-1 min-h-0 overflow-y-auto',
+        'min-h-0 flex-1 overflow-y-auto',
         '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent',
         '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent',
         '[scrollbar-width:thin] [scrollbar-color:transparent_transparent]',
         'hover:[&::-webkit-scrollbar-thumb]:bg-border hover:[scrollbar-color:var(--color-border)_transparent]',
       )}
     >
-      <div className={cn('space-y-2 px-3 py-3 sm:px-4 lg:px-5')}>
-        {messages.map((message, index) => (
-          <Message
-            key={`${message.type}-${message.timestamp}-${index}`}
-            message={message}
-            activeAgentLabel={activeAgentLabel}
-            toolInputsByCallId={toolInputsByCallId}
-          />
-        ))}
+      <div className="space-y-2 p-3">
+        {displayEntries.map((entry) => {
+          if (entry.type === 'conversation_message') {
+            return <ConversationMessage key={entry.id} message={entry.message} />
+          }
+
+          if (entry.type === 'tool_execution') {
+            return <ToolExecutionRow key={entry.id} entry={entry.entry} />
+          }
+
+          return <RuntimeErrorLog key={entry.id} entry={entry.entry} />
+        })}
+        {isLoading ? <LoadingIndicator /> : null}
         <div ref={bottomRef} />
       </div>
     </div>

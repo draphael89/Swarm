@@ -283,7 +283,6 @@ export function IndexPage() {
           <MessageList
             messages={state.messages}
             isLoading={isLoading}
-            activeAgentLabel={activeAgentLabel}
             onSuggestionClick={handleSuggestionClick}
           />
 
