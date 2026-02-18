@@ -5,6 +5,7 @@ import {
   type AgentStatus,
   type ClientCommand,
   type ConversationEntry,
+  type ConversationImageAttachment,
   type ConversationMessageEvent,
   type DeliveryMode,
   type ManagerModelPreset,
@@ -144,10 +145,11 @@ export class ManagerWsClient {
 
   sendUserMessage(
     text: string,
-    options?: { agentId?: string; delivery?: DeliveryMode },
+    options?: { agentId?: string; delivery?: DeliveryMode; attachments?: ConversationImageAttachment[] },
   ): void {
     const trimmed = text.trim()
-    if (!trimmed) return
+    const attachments = normalizeConversationImageAttachments(options?.attachments)
+    if (!trimmed && attachments.length === 0) return
 
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       this.updateState({
@@ -188,6 +190,7 @@ export class ManagerWsClient {
     this.send({
       type: 'user_message',
       text: trimmed,
+      attachments: attachments.length > 0 ? attachments : undefined,
       agentId,
       delivery: options?.delivery,
     })
@@ -801,4 +804,36 @@ export class ManagerWsClient {
       pendingMap.delete(requestId)
     }
   }
+}
+
+function normalizeConversationImageAttachments(
+  attachments: ConversationImageAttachment[] | undefined,
+): ConversationImageAttachment[] {
+  if (!attachments || attachments.length === 0) {
+    return []
+  }
+
+  const normalized: ConversationImageAttachment[] = []
+
+  for (const attachment of attachments) {
+    if (!attachment || typeof attachment !== 'object') {
+      continue
+    }
+
+    const mimeType = typeof attachment.mimeType === 'string' ? attachment.mimeType.trim() : ''
+    const data = typeof attachment.data === 'string' ? attachment.data.trim() : ''
+    const fileName = typeof attachment.fileName === 'string' ? attachment.fileName.trim() : ''
+
+    if (!mimeType || !mimeType.startsWith('image/') || !data) {
+      continue
+    }
+
+    normalized.push({
+      mimeType,
+      data,
+      fileName: fileName || undefined,
+    })
+  }
+
+  return normalized
 }

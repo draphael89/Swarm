@@ -350,7 +350,8 @@ export class SwarmWebSocketServer {
 
         await this.swarmManager.handleUserMessage(command.text, {
           targetAgentId,
-          delivery: command.delivery
+          delivery: command.delivery,
+          attachments: command.attachments
         });
       } catch (error) {
         this.send(socket, {
@@ -696,8 +697,24 @@ export class SwarmWebSocketServer {
     }
 
     if (maybe.type === "user_message") {
-      if (typeof maybe.text !== "string" || maybe.text.trim().length === 0) {
-        return { ok: false, error: "user_message.text must be a non-empty string" };
+      if (typeof maybe.text !== "string") {
+        return { ok: false, error: "user_message.text must be a string" };
+      }
+
+      const normalizedText = maybe.text.trim();
+      const parsedAttachments = parseConversationImageAttachments(
+        (maybe as { attachments?: unknown }).attachments,
+        "user_message.attachments"
+      );
+      if (!parsedAttachments.ok) {
+        return { ok: false, error: parsedAttachments.error };
+      }
+
+      if (!normalizedText && parsedAttachments.attachments.length === 0) {
+        return {
+          ok: false,
+          error: "user_message must include non-empty text or at least one image attachment"
+        };
       }
 
       if (maybe.agentId !== undefined && typeof maybe.agentId !== "string") {
@@ -717,7 +734,8 @@ export class SwarmWebSocketServer {
         ok: true,
         command: {
           type: "user_message",
-          text: maybe.text,
+          text: normalizedText,
+          attachments: parsedAttachments.attachments.length > 0 ? parsedAttachments.attachments : undefined,
           agentId: maybe.agentId,
           delivery: maybe.delivery
         }
@@ -726,4 +744,56 @@ export class SwarmWebSocketServer {
 
     return { ok: false, error: "Unknown command type" };
   }
+}
+
+function parseConversationImageAttachments(
+  value: unknown,
+  fieldName: string
+):
+  | { ok: true; attachments: Array<{ mimeType: string; data: string; fileName?: string }> }
+  | { ok: false; error: string } {
+  if (value === undefined) {
+    return { ok: true, attachments: [] };
+  }
+
+  if (!Array.isArray(value)) {
+    return { ok: false, error: `${fieldName} must be an array when provided` };
+  }
+
+  const attachments: Array<{ mimeType: string; data: string; fileName?: string }> = [];
+
+  for (let index = 0; index < value.length; index += 1) {
+    const item = value[index];
+    if (!item || typeof item !== "object") {
+      return { ok: false, error: `${fieldName}[${index}] must be an object` };
+    }
+
+    const maybe = item as { mimeType?: unknown; data?: unknown; fileName?: unknown };
+
+    if (typeof maybe.mimeType !== "string" || maybe.mimeType.trim().length === 0) {
+      return { ok: false, error: `${fieldName}[${index}].mimeType must be a non-empty string` };
+    }
+
+    if (!maybe.mimeType.startsWith("image/")) {
+      return { ok: false, error: `${fieldName}[${index}].mimeType must start with image/` };
+    }
+
+    if (typeof maybe.data !== "string" || maybe.data.trim().length === 0) {
+      return { ok: false, error: `${fieldName}[${index}].data must be a non-empty base64 string` };
+    }
+
+    if (maybe.fileName !== undefined && typeof maybe.fileName !== "string") {
+      return { ok: false, error: `${fieldName}[${index}].fileName must be a string when provided` };
+    }
+
+    const fileName = typeof maybe.fileName === "string" ? maybe.fileName.trim() : "";
+
+    attachments.push({
+      mimeType: maybe.mimeType.trim(),
+      data: maybe.data.trim(),
+      fileName: fileName || undefined
+    });
+  }
+
+  return { ok: true, attachments };
 }

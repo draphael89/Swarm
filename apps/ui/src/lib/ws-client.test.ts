@@ -108,6 +108,47 @@ describe('ManagerWsClient', () => {
     client.destroy()
   })
 
+  it('sends attachment-only user messages when images are provided', () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('open')
+
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
+    })
+
+    client.sendUserMessage('', {
+      attachments: [
+        {
+          mimeType: 'image/png',
+          data: 'aGVsbG8=',
+          fileName: 'diagram.png',
+        },
+      ],
+    })
+
+    expect(JSON.parse(socket.sentPayloads.at(-1) ?? '')).toEqual({
+      type: 'user_message',
+      text: '',
+      attachments: [
+        {
+          mimeType: 'image/png',
+          data: 'aGVsbG8=',
+          fileName: 'diagram.png',
+        },
+      ],
+      agentId: 'manager',
+    })
+
+    client.destroy()
+  })
+
   it('can switch subscriptions and route outgoing/incoming messages by selected agent', () => {
     const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
     const snapshots: ReturnType<typeof client.getState>[] = []

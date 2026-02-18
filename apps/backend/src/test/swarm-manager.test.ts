@@ -5,13 +5,13 @@ import { describe, expect, it } from 'vitest'
 import { SessionManager } from '@mariozechner/pi-coding-agent'
 import { SwarmManager } from '../swarm/swarm-manager.js'
 import type { AgentDescriptor, RequestedDeliveryMode, SendMessageReceipt, SwarmConfig } from '../swarm/types.js'
-import type { AgentRuntime } from '../swarm/agent-runtime.js'
+import type { AgentRuntime, RuntimeUserMessage } from '../swarm/agent-runtime.js'
 
 class FakeRuntime {
   readonly descriptor: AgentDescriptor
   private readonly sessionManager: SessionManager
   terminateCalls: Array<{ abort?: boolean } | undefined> = []
-  sendCalls: Array<{ message: string; delivery: RequestedDeliveryMode }> = []
+  sendCalls: Array<{ message: string | RuntimeUserMessage; delivery: RequestedDeliveryMode }> = []
   nextDeliveryId = 0
   busy = false
 
@@ -24,7 +24,7 @@ class FakeRuntime {
     return this.busy ? 1 : 0
   }
 
-  async sendMessage(message: string, delivery: RequestedDeliveryMode = 'auto'): Promise<SendMessageReceipt> {
+  async sendMessage(message: string | RuntimeUserMessage, delivery: RequestedDeliveryMode = 'auto'): Promise<SendMessageReceipt> {
     this.sendCalls.push({ message, delivery })
     this.nextDeliveryId += 1
     this.sessionManager.appendMessage({
@@ -406,6 +406,57 @@ describe('SwarmManager', () => {
     const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
     expect(workerRuntime).toBeDefined()
     expect(workerRuntime?.sendCalls.at(-1)?.message).toBe('hello worker')
+  })
+
+  it('routes user image attachments to worker runtimes and conversation events', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', { agentId: 'Image Worker' })
+
+    await manager.handleUserMessage('', {
+      targetAgentId: worker.agentId,
+      attachments: [
+        {
+          mimeType: 'image/png',
+          data: 'aGVsbG8=',
+          fileName: 'diagram.png',
+        },
+      ],
+    })
+
+    const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
+    expect(workerRuntime).toBeDefined()
+
+    const sentMessage = workerRuntime?.sendCalls.at(-1)?.message
+    expect(typeof sentMessage).toBe('object')
+    if (sentMessage && typeof sentMessage !== 'string') {
+      expect(sentMessage.text).toBe('')
+      expect(sentMessage.images).toEqual([
+        {
+          mimeType: 'image/png',
+          data: 'aGVsbG8=',
+        },
+      ])
+    }
+
+    const history = manager.getConversationHistory(worker.agentId)
+    const userEvent = history.find(
+      (entry) => entry.type === 'conversation_message' && entry.role === 'user' && entry.source === 'user_input',
+    )
+
+    expect(userEvent).toBeDefined()
+    if (userEvent && userEvent.type === 'conversation_message') {
+      expect(userEvent.text).toBe('')
+      expect(userEvent.attachments).toEqual([
+        {
+          mimeType: 'image/png',
+          data: 'aGVsbG8=',
+          fileName: 'diagram.png',
+        },
+      ])
+    }
   })
 
   it('does not double-prefix internal messages that already start with SYSTEM:', async () => {

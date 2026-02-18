@@ -79,11 +79,18 @@ export interface SwarmConfig {
   paths: SwarmPaths;
 }
 
+export interface ConversationImageAttachment {
+  mimeType: string;
+  data: string;
+  fileName?: string;
+}
+
 export interface ConversationMessageEvent {
   type: "conversation_message";
   agentId: string;
   role: "user" | "assistant" | "system";
   text: string;
+  attachments?: ConversationImageAttachment[];
   timestamp: string;
   source: "user_input" | "speak_to_user" | "system";
 }

@@ -22,9 +22,21 @@ export interface AgentDescriptor {
 
 export type DeliveryMode = 'auto' | 'followUp' | 'steer'
 
+export interface ConversationImageAttachment {
+  mimeType: string
+  data: string
+  fileName?: string
+}
+
 export type ClientCommand =
   | { type: 'subscribe'; agentId?: string }
-  | { type: 'user_message'; text: string; agentId?: string; delivery?: DeliveryMode }
+  | {
+      type: 'user_message'
+      text: string
+      attachments?: ConversationImageAttachment[]
+      agentId?: string
+      delivery?: DeliveryMode
+    }
   | { type: 'kill_agent'; agentId: string }
   | { type: 'create_manager'; name: string; cwd: string; model: ManagerModelPreset; requestId?: string }
   | { type: 'delete_manager'; managerId: string; requestId?: string }
@@ -38,6 +50,7 @@ export interface ConversationMessageEvent {
   agentId: string
   role: 'user' | 'assistant' | 'system'
   text: string
+  attachments?: ConversationImageAttachment[]
   timestamp: string
   source: 'user_input' | 'speak_to_user' | 'system'
 }

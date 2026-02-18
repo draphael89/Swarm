@@ -5,22 +5,31 @@ import type { AgentDescriptor } from '../swarm/types.js'
 class FakeSession {
   isStreaming = false
   promptCalls: string[] = []
+  promptImageCounts: number[] = []
   followUpCalls: string[] = []
   steerCalls: string[] = []
+  steerImageCounts: number[] = []
+  userMessageCalls: Array<string | Array<{ type: string }>> = []
   abortCalls = 0
   disposeCalls = 0
   listener: ((event: any) => void) | undefined
 
-  async prompt(message: string): Promise<void> {
+  async prompt(message: string, options?: { images?: Array<{ type: string }> }): Promise<void> {
     this.promptCalls.push(message)
+    this.promptImageCounts.push(options?.images?.length ?? 0)
   }
 
   async followUp(message: string): Promise<void> {
     this.followUpCalls.push(message)
   }
 
-  async steer(message: string): Promise<void> {
+  async steer(message: string, images?: Array<{ type: string }>): Promise<void> {
     this.steerCalls.push(message)
+    this.steerImageCounts.push(images?.length ?? 0)
+  }
+
+  async sendUserMessage(content: string | Array<{ type: string }>): Promise<void> {
+    this.userMessageCalls.push(content)
   }
 
   async abort(): Promise<void> {
@@ -156,6 +165,48 @@ describe('AgentRuntime', () => {
 
     expect(runtime.getPendingCount()).toBe(0)
     expect(statuses.at(-1)).toBe(0)
+  })
+
+  it('passes image attachments through prompt options when text is present', async () => {
+    const session = new FakeSession()
+
+    const runtime = new AgentRuntime({
+      descriptor: makeDescriptor(),
+      session: session as any,
+      callbacks: {
+        onStatusChange: () => {},
+      },
+    })
+
+    await runtime.sendMessage({
+      text: 'describe this image',
+      images: [{ mimeType: 'image/png', data: 'aGVsbG8=' }],
+    })
+
+    expect(session.promptCalls).toEqual(['describe this image'])
+    expect(session.promptImageCounts).toEqual([1])
+    expect(session.userMessageCalls).toHaveLength(0)
+  })
+
+  it('uses sendUserMessage for image-only prompts', async () => {
+    const session = new FakeSession()
+
+    const runtime = new AgentRuntime({
+      descriptor: makeDescriptor(),
+      session: session as any,
+      callbacks: {
+        onStatusChange: () => {},
+      },
+    })
+
+    await runtime.sendMessage({
+      text: '',
+      images: [{ mimeType: 'image/png', data: 'aGVsbG8=' }],
+    })
+
+    expect(session.promptCalls).toHaveLength(0)
+    expect(session.userMessageCalls).toHaveLength(1)
+    expect(Array.isArray(session.userMessageCalls[0])).toBe(true)
   })
 
   it('terminates by aborting active session and marking status terminated', async () => {

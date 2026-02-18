@@ -19,7 +19,11 @@ import {
   normalizeArchetypeId,
   type ArchetypePromptRegistry
 } from "./archetypes/archetype-prompt-registry.js";
-import { AgentRuntime } from "./agent-runtime.js";
+import {
+  AgentRuntime,
+  type RuntimeImageAttachment,
+  type RuntimeUserMessage
+} from "./agent-runtime.js";
 import {
   listDirectories,
   normalizeAllowlistRoots,
@@ -46,6 +50,7 @@ import type {
   AgentsSnapshotEvent,
   AgentsStoreFile,
   ConversationEntryEvent,
+  ConversationImageAttachment,
   ConversationLogEvent,
   ConversationMessageEvent,
   RequestedDeliveryMode,
@@ -429,7 +434,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     targetAgentId: string,
     message: string,
     delivery: RequestedDeliveryMode = "auto",
-    options?: { origin?: "user" | "internal" }
+    options?: { origin?: "user" | "internal"; attachments?: ConversationImageAttachment[] }
   ): Promise<SendMessageReceipt> {
     const sender = this.descriptors.get(fromAgentId);
     if (!sender || sender.status === "terminated") {
@@ -454,7 +459,14 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     const origin = options?.origin ?? "internal";
-    const modelMessage = this.prepareModelInboundMessage(message, origin);
+    const attachments = normalizeConversationImageAttachments(options?.attachments);
+    const modelMessage = this.prepareModelInboundMessage(
+      {
+        text: message,
+        attachments
+      },
+      origin
+    );
     const receipt = await runtime.sendMessage(modelMessage, delivery);
 
     this.logDebug("agent:send_message", {
@@ -464,26 +476,34 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       requestedDelivery: delivery,
       acceptedMode: receipt.acceptedMode,
       textPreview: previewForLog(message),
-      modelTextPreview: previewForLog(modelMessage)
+      attachmentCount: attachments.length,
+      modelTextPreview: previewForLog(extractRuntimeMessageText(modelMessage))
     });
 
     return receipt;
   }
 
-  private prepareModelInboundMessage(message: string, origin: "user" | "internal"): string {
-    if (origin === "user") {
-      return message;
+  private prepareModelInboundMessage(
+    input: { text: string; attachments: ConversationImageAttachment[] },
+    origin: "user" | "internal"
+  ): string | RuntimeUserMessage {
+    let text = input.text;
+
+    if (origin !== "user") {
+      if (text.trim().length > 0 && !/^system:/i.test(text.trimStart())) {
+        text = `${INTERNAL_MODEL_MESSAGE_PREFIX}${text}`;
+      }
     }
 
-    if (message.trim().length === 0) {
-      return message;
+    const images = toRuntimeImageAttachments(input.attachments);
+    if (images.length === 0) {
+      return text;
     }
 
-    if (/^system:/i.test(message.trimStart())) {
-      return message;
-    }
-
-    return `${INTERNAL_MODEL_MESSAGE_PREFIX}${message}`;
+    return {
+      text,
+      images
+    };
   }
 
   async publishToUser(agentId: string, text: string, source: "speak_to_user" | "system" = "speak_to_user"): Promise<void> {
@@ -514,10 +534,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
   async handleUserMessage(
     text: string,
-    options?: { targetAgentId?: string; delivery?: RequestedDeliveryMode }
+    options?: {
+      targetAgentId?: string;
+      delivery?: RequestedDeliveryMode;
+      attachments?: ConversationImageAttachment[];
+    }
   ): Promise<void> {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    const attachments = normalizeConversationImageAttachments(options?.attachments);
+    if (!trimmed && attachments.length === 0) return;
 
     const targetAgentId = options?.targetAgentId ?? this.config.managerId;
     const target = this.descriptors.get(targetAgentId);
@@ -534,6 +559,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       targetAgentId,
       managerContextId,
       textPreview: previewForLog(trimmed),
+      attachmentCount: attachments.length,
       pendingBefore: this.getPendingUserReplies(managerContextId)
     });
 
@@ -542,6 +568,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       agentId: targetAgentId,
       role: "user",
       text: trimmed,
+      attachments: attachments.length > 0 ? attachments : undefined,
       timestamp: this.now(),
       source: "user_input"
     };
@@ -549,7 +576,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     if (target.role !== "manager") {
       await this.sendMessage(managerContextId, targetAgentId, trimmed, options?.delivery ?? "auto", {
-        origin: "user"
+        origin: "user",
+        attachments
       });
       return;
     }
@@ -566,7 +594,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     // User messages to managers should always steer in-flight work.
-    await managerRuntime.sendMessage(trimmed, "steer");
+    const runtimeMessage =
+      attachments.length > 0
+        ? {
+            text: trimmed,
+            images: toRuntimeImageAttachments(attachments)
+          }
+        : trimmed;
+
+    await managerRuntime.sendMessage(runtimeMessage, "steer");
   }
 
   async resetManagerSession(
@@ -1338,14 +1374,17 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
           return;
         }
 
-        const text = extractMessageText(event.message) ?? "(non-text message)";
+        const extractedText = extractMessageText(event.message);
+        const text = extractedText ?? "(non-text message)";
+        const attachments = extractMessageImageAttachments(event.message);
 
-        if ((role === "assistant" || role === "system") && text !== "(non-text message)") {
+        if ((role === "assistant" || role === "system") && (extractedText || attachments.length > 0)) {
           this.emitConversationMessage({
             type: "conversation_message",
             agentId,
             role,
-            text,
+            text: extractedText ?? "",
+            attachments: attachments.length > 0 ? attachments : undefined,
             timestamp,
             source: "system"
           });
@@ -1642,6 +1681,92 @@ function extractMessageText(message: unknown): string | undefined {
   return text.length > 0 ? text : undefined;
 }
 
+function extractMessageImageAttachments(message: unknown): ConversationImageAttachment[] {
+  if (!message || typeof message !== "object") {
+    return [];
+  }
+
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  const attachments: ConversationImageAttachment[] = [];
+
+  for (const item of content) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const maybeImage = item as { type?: unknown; data?: unknown; mimeType?: unknown };
+    if (maybeImage.type !== "image") {
+      continue;
+    }
+
+    if (typeof maybeImage.mimeType !== "string" || !maybeImage.mimeType.startsWith("image/")) {
+      continue;
+    }
+
+    if (typeof maybeImage.data !== "string" || maybeImage.data.length === 0) {
+      continue;
+    }
+
+    attachments.push({
+      mimeType: maybeImage.mimeType,
+      data: maybeImage.data
+    });
+  }
+
+  return attachments;
+}
+
+function normalizeConversationImageAttachments(
+  attachments: ConversationImageAttachment[] | undefined
+): ConversationImageAttachment[] {
+  if (!attachments || attachments.length === 0) {
+    return [];
+  }
+
+  const normalized: ConversationImageAttachment[] = [];
+
+  for (const attachment of attachments) {
+    if (!attachment || typeof attachment !== "object") {
+      continue;
+    }
+
+    const mimeType = typeof attachment.mimeType === "string" ? attachment.mimeType.trim() : "";
+    const data = typeof attachment.data === "string" ? attachment.data.trim() : "";
+    const fileName = typeof attachment.fileName === "string" ? attachment.fileName.trim() : "";
+
+    if (!mimeType || !mimeType.startsWith("image/") || !data) {
+      continue;
+    }
+
+    normalized.push({
+      mimeType,
+      data,
+      fileName: fileName || undefined
+    });
+  }
+
+  return normalized;
+}
+
+function toRuntimeImageAttachments(attachments: ConversationImageAttachment[]): RuntimeImageAttachment[] {
+  return attachments.map((attachment) => ({
+    mimeType: attachment.mimeType,
+    data: attachment.data
+  }));
+}
+
+function extractRuntimeMessageText(message: string | RuntimeUserMessage): string {
+  if (typeof message === "string") {
+    return message;
+  }
+
+  return message.text;
+}
+
 function normalizeThinkingLevel(level: string): string {
   return level === "x-high" ? "xhigh" : level;
 }
@@ -1660,6 +1785,39 @@ function isConversationMessageEvent(value: unknown): value is ConversationMessag
   if (typeof maybe.text !== "string") return false;
   if (typeof maybe.timestamp !== "string") return false;
   if (maybe.source !== "user_input" && maybe.source !== "speak_to_user" && maybe.source !== "system") return false;
+
+  if (maybe.attachments !== undefined) {
+    if (!Array.isArray(maybe.attachments)) {
+      return false;
+    }
+
+    for (const attachment of maybe.attachments) {
+      if (!isConversationImageAttachment(attachment)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+function isConversationImageAttachment(value: unknown): value is ConversationImageAttachment {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const maybe = value as Partial<ConversationImageAttachment>;
+  if (typeof maybe.mimeType !== "string" || !maybe.mimeType.startsWith("image/")) {
+    return false;
+  }
+
+  if (typeof maybe.data !== "string" || maybe.data.length === 0) {
+    return false;
+  }
+
+  if (maybe.fileName !== undefined && typeof maybe.fileName !== "string") {
+    return false;
+  }
 
   return true;
 }

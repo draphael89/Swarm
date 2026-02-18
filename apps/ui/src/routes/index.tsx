@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type FormEvent,
+  type ReactNode,
+} from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { AgentSidebar } from '@/components/chat/AgentSidebar'
 import { ChatHeader } from '@/components/chat/ChatHeader'
@@ -8,7 +17,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { chooseFallbackAgentId } from '@/lib/agent-hierarchy'
 import { ManagerWsClient, type ManagerWsState } from '@/lib/ws-client'
-import { MANAGER_MODEL_PRESETS, type AgentDescriptor, type ManagerModelPreset } from '@/lib/ws-types'
+import {
+  MANAGER_MODEL_PRESETS,
+  type AgentDescriptor,
+  type ConversationImageAttachment,
+  type ManagerModelPreset,
+} from '@/lib/ws-types'
 
 export const Route = createFileRoute('/')({
   component: IndexPage,
@@ -45,6 +59,9 @@ export function IndexPage() {
   const [managerToDelete, setManagerToDelete] = useState<AgentDescriptor | null>(null)
   const [deleteManagerError, setDeleteManagerError] = useState<string | null>(null)
   const [isDeletingManager, setIsDeletingManager] = useState(false)
+
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
+  const dragDepthRef = useRef(0)
 
   useEffect(() => {
     const client = new ManagerWsClient(wsUrl, 'manager')
@@ -88,12 +105,13 @@ export function IndexPage() {
     return fromAgents === 'streaming'
   }, [activeAgentId, state.agents, state.statuses])
 
-  const handleSend = (text: string) => {
+  const handleSend = (text: string, attachments?: ConversationImageAttachment[]) => {
     if (!activeAgentId) return
 
     clientRef.current?.sendUserMessage(text, {
       agentId: activeAgentId,
       delivery: isActiveManager ? 'steer' : isLoading ? 'steer' : 'auto',
+      attachments,
     })
   }
 
@@ -251,6 +269,42 @@ export function IndexPage() {
     messageInputRef.current?.setInput(prompt)
   }
 
+  const handleDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    dragDepthRef.current += 1
+    setIsDraggingFiles(true)
+  }, [])
+
+  const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+  }, [])
+
+  const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
+    if (dragDepthRef.current === 0) {
+      setIsDraggingFiles(false)
+    }
+  }, [])
+
+  const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (!event.dataTransfer?.types.includes('Files')) return
+    event.preventDefault()
+    dragDepthRef.current = 0
+    setIsDraggingFiles(false)
+
+    const files = Array.from(event.dataTransfer.files ?? [])
+    if (files.length === 0) {
+      return
+    }
+
+    void messageInputRef.current?.addFiles(files)
+  }, [])
+
   return (
     <main className="h-screen bg-background text-foreground">
       <div className="flex h-screen w-full min-w-0 overflow-hidden border-x border-border/60 bg-background shadow-sm">
@@ -265,7 +319,17 @@ export function IndexPage() {
           onDeleteManager={handleRequestDeleteManager}
         />
 
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div
+          className="relative flex min-w-0 flex-1 flex-col"
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {isDraggingFiles ? (
+            <div className="pointer-events-none absolute inset-2 z-50 rounded-lg border-2 border-dashed border-primary bg-primary/10" />
+          ) : null}
+
           <ChatHeader
             connected={state.connected}
             activeAgentId={activeAgentId}

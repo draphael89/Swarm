@@ -1,6 +1,7 @@
 import type {
   AgentDescriptor,
   ConversationEntryEvent,
+  ConversationImageAttachment,
   ConversationLogEvent,
   ConversationMessageEvent,
   SwarmModelPreset
@@ -13,7 +14,13 @@ export interface DirectoryItem {
 
 export type ClientCommand =
   | { type: "subscribe"; agentId?: string }
-  | { type: "user_message"; text: string; agentId?: string; delivery?: "auto" | "followUp" | "steer" }
+  | {
+      type: "user_message";
+      text: string;
+      attachments?: ConversationImageAttachment[];
+      agentId?: string;
+      delivery?: "auto" | "followUp" | "steer";
+    }
   | { type: "kill_agent"; agentId: string }
   | { type: "create_manager"; name: string; cwd: string; model?: SwarmModelPreset; requestId?: string }
   | { type: "delete_manager"; managerId: string; requestId?: string }
