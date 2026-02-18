@@ -169,15 +169,16 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.loadConversationHistoriesFromStore();
     await this.restoreRuntimesForBoot();
 
-    const managerDescriptor = this.getPrimaryManagerDescriptor();
+    const managerDescriptor = this.getBootLogManagerDescriptor();
     this.emitAgentsSnapshot();
 
     this.logDebug("boot:ready", {
-      managerStatus: managerDescriptor.status,
-      model: managerDescriptor.model,
-      cwd: managerDescriptor.cwd,
+      managerId: managerDescriptor?.agentId,
+      managerStatus: managerDescriptor?.status,
+      model: managerDescriptor?.model,
+      cwd: managerDescriptor?.cwd,
       managerAgentDir: this.config.paths.managerAgentDir,
-      managerSystemPromptSource: `archetype:${MANAGER_ARCHETYPE_ID}`,
+      managerSystemPromptSource: managerDescriptor ? `archetype:${MANAGER_ARCHETYPE_ID}` : undefined,
       loadedArchetypeIds: this.archetypePromptRegistry.listArchetypeIds(),
       restoredAgentIds: Array.from(this.runtimes.keys())
     });
@@ -728,7 +729,13 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       await this.saveStore();
     }
 
-    if (!this.runtimes.has(this.config.managerId)) {
+    const primaryManager = this.descriptors.get(this.config.managerId);
+    if (
+      primaryManager &&
+      primaryManager.role === "manager" &&
+      primaryManager.status !== "terminated" &&
+      !this.runtimes.has(this.config.managerId)
+    ) {
       throw new Error("Primary manager runtime is not initialized");
     }
   }
@@ -790,22 +797,28 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       }
     }
 
+    const hasOtherRunningAgents = Array.from(this.descriptors.values()).some(
+      (descriptor) => descriptor.status !== "terminated"
+    );
+
     let primaryManager = this.descriptors.get(this.config.managerId);
     if (!primaryManager) {
-      primaryManager = {
-        agentId: this.config.managerId,
-        displayName: this.config.managerDisplayName,
-        role: "manager",
-        managerId: this.config.managerId,
-        archetypeId: MANAGER_ARCHETYPE_ID,
-        status: "idle",
-        createdAt: now,
-        updatedAt: now,
-        cwd: this.config.defaultCwd,
-        model: this.resolveDefaultModelDescriptor(),
-        sessionFile: join(this.config.paths.sessionsDir, `${this.config.managerId}.jsonl`)
-      };
-      this.descriptors.set(primaryManager.agentId, primaryManager);
+      if (!hasOtherRunningAgents) {
+        primaryManager = {
+          agentId: this.config.managerId,
+          displayName: this.config.managerDisplayName,
+          role: "manager",
+          managerId: this.config.managerId,
+          archetypeId: MANAGER_ARCHETYPE_ID,
+          status: "idle",
+          createdAt: now,
+          updatedAt: now,
+          cwd: this.config.defaultCwd,
+          model: this.resolveDefaultModelDescriptor(),
+          sessionFile: join(this.config.paths.sessionsDir, `${this.config.managerId}.jsonl`)
+        };
+        this.descriptors.set(primaryManager.agentId, primaryManager);
+      }
     } else {
       primaryManager.role = "manager";
       primaryManager.managerId = primaryManager.agentId;
@@ -846,12 +859,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
   }
 
-  private getPrimaryManagerDescriptor(): AgentDescriptor {
-    const descriptor = this.descriptors.get(this.config.managerId);
-    if (!descriptor || descriptor.role !== "manager") {
-      throw new Error("Primary manager descriptor is missing");
+  private getBootLogManagerDescriptor(): AgentDescriptor | undefined {
+    const configuredManager = this.descriptors.get(this.config.managerId);
+    if (configuredManager && configuredManager.role === "manager" && configuredManager.status !== "terminated") {
+      return configuredManager;
     }
-    return descriptor;
+
+    return Array.from(this.descriptors.values()).find(
+      (descriptor) => descriptor.role === "manager" && descriptor.status !== "terminated"
+    );
   }
 
   private getRequiredManagerDescriptor(managerId: string): AgentDescriptor {
