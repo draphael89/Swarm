@@ -64,7 +64,7 @@ export function IndexPage() {
   const dragDepthRef = useRef(0)
 
   useEffect(() => {
-    const client = new ManagerWsClient(wsUrl, 'manager')
+    const client = new ManagerWsClient(wsUrl)
     clientRef.current = client
     setState(client.getState())
 

@@ -57,7 +57,7 @@ const initialState: ManagerWsState = {
 
 export class ManagerWsClient {
   private readonly url: string
-  private desiredAgentId: string
+  private desiredAgentId: string | null
 
   private socket: WebSocket | null = null
   private connectTimer: ReturnType<typeof setTimeout> | undefined
@@ -74,12 +74,13 @@ export class ManagerWsClient {
   private readonly pendingValidateDirectoryRequests = new Map<string, PendingRequest<DirectoryValidationResult>>()
   private readonly pendingPickDirectoryRequests = new Map<string, PendingRequest<string | null>>()
 
-  constructor(url: string, initialAgentId = 'manager') {
+  constructor(url: string, initialAgentId?: string | null) {
+    const normalizedInitialAgentId = normalizeAgentId(initialAgentId)
     this.url = url
-    this.desiredAgentId = initialAgentId
+    this.desiredAgentId = normalizedInitialAgentId
     this.state = {
       ...initialState,
-      targetAgentId: initialAgentId,
+      targetAgentId: normalizedInitialAgentId,
     }
   }
 
@@ -373,7 +374,7 @@ export class ManagerWsClient {
 
       this.send({
         type: 'subscribe',
-        agentId: this.desiredAgentId,
+        agentId: this.desiredAgentId ?? undefined,
       })
     })
 
@@ -547,7 +548,7 @@ export class ManagerWsClient {
 
     const fallbackTarget = chooseFallbackAgentId(
       agents,
-      this.state.targetAgentId ?? this.state.subscribedAgentId ?? this.desiredAgentId,
+      this.state.targetAgentId ?? this.state.subscribedAgentId ?? this.desiredAgentId ?? undefined,
     )
     const targetChanged = fallbackTarget !== this.state.targetAgentId
     const nextSubscribedAgentId =
@@ -569,9 +570,7 @@ export class ManagerWsClient {
       patch.subscribedAgentId = nextSubscribedAgentId
     }
 
-    if (fallbackTarget) {
-      this.desiredAgentId = fallbackTarget
-    }
+    this.desiredAgentId = fallbackTarget ?? null
 
     this.updateState(patch)
 
@@ -836,4 +835,9 @@ function normalizeConversationImageAttachments(
   }
 
   return normalized
+}
+
+function normalizeAgentId(agentId: string | null | undefined): string | null {
+  const trimmed = agentId?.trim()
+  return trimmed ? trimmed : null
 }

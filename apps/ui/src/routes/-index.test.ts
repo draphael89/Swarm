@@ -127,6 +127,7 @@ async function renderPage(): Promise<FakeWebSocket> {
   expect(socket).toBeDefined()
 
   socket.emit('open')
+  expect(JSON.parse(socket.sentPayloads.at(0) ?? '{}')).toEqual({ type: 'subscribe' })
   emitServerEvent(socket, {
     type: 'ready',
     serverTime: new Date().toISOString(),
