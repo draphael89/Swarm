@@ -203,6 +203,70 @@ describe('SwarmWebSocketServer', () => {
     await server.stop()
   })
 
+  it('accepts attachment-only user messages and broadcasts attachments', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+
+    client.send(JSON.stringify({ type: 'subscribe' }))
+    await waitForEvent(events, (event) => event.type === 'ready')
+
+    client.send(
+      JSON.stringify({
+        type: 'user_message',
+        text: '',
+        attachments: [
+          {
+            mimeType: 'image/png',
+            data: 'aGVsbG8=',
+            fileName: 'diagram.png',
+          },
+        ],
+      }),
+    )
+
+    const userEvent = await waitForEvent(
+      events,
+      (event) => event.type === 'conversation_message' && event.source === 'user_input',
+    )
+
+    expect(userEvent.type).toBe('conversation_message')
+    if (userEvent.type === 'conversation_message') {
+      expect(userEvent.text).toBe('')
+      expect(userEvent.attachments).toEqual([
+        {
+          mimeType: 'image/png',
+          data: 'aGVsbG8=',
+          fileName: 'diagram.png',
+        },
+      ])
+    }
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
   it('replays manager conversation history on reconnect', async () => {
     const port = await getAvailablePort()
     const config = await makeTempConfig(port)

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AgentSession, AgentSessionEvent } from "@mariozechner/pi-coding-agent";
+import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 import type {
   AgentDescriptor,
   AgentStatus,
@@ -7,9 +8,21 @@ import type {
   SendMessageReceipt
 } from "./types.js";
 
+export interface RuntimeImageAttachment {
+  mimeType: string;
+  data: string;
+}
+
+export interface RuntimeUserMessage {
+  text: string;
+  images?: RuntimeImageAttachment[];
+}
+
+type RuntimeUserMessageInput = string | RuntimeUserMessage;
+
 interface PendingDelivery {
   deliveryId: string;
-  message: string;
+  messageKey: string;
   mode: "steer";
 }
 
@@ -61,12 +74,13 @@ export class AgentRuntime {
   }
 
   async sendMessage(
-    message: string,
+    input: RuntimeUserMessageInput,
     _requestedMode: RequestedDeliveryMode = "auto"
   ): Promise<SendMessageReceipt> {
     this.ensureNotTerminated();
 
     const deliveryId = randomUUID();
+    const message = normalizeRuntimeUserMessage(input);
 
     if (this.session.isStreaming || this.promptDispatchPending) {
       const resolvedQueueMode = "steer";
@@ -125,11 +139,11 @@ export class AgentRuntime {
     this.session.sessionManager.appendCustomEntry(customType, data);
   }
 
-  private dispatchPrompt(message: string): void {
+  private dispatchPrompt(message: RuntimeUserMessage): void {
     this.promptDispatchPending = true;
 
-    const run = this.session
-      .prompt(message)
+    const images = toImageContent(message.images);
+    const run = this.sendToSession(message.text, images)
       .catch((error) => {
         // Avoid unhandled rejections for fire-and-forget delivery.
         // Runtime status updates still flow through AgentSession events.
@@ -146,12 +160,27 @@ export class AgentRuntime {
     this.inFlightPrompts.add(run);
   }
 
-  private async enqueueMessage(deliveryId: string, message: string): Promise<void> {
-    await this.session.steer(message);
+  private async sendToSession(text: string, images: ImageContent[]): Promise<void> {
+    if (text.trim().length === 0 && images.length > 0) {
+      await this.session.sendUserMessage(buildUserMessageContent(text, images));
+      return;
+    }
+
+    if (images.length > 0) {
+      await this.session.prompt(text, { images });
+      return;
+    }
+
+    await this.session.prompt(text);
+  }
+
+  private async enqueueMessage(deliveryId: string, message: RuntimeUserMessage): Promise<void> {
+    const images = toImageContent(message.images);
+    await this.session.steer(message.text, images.length > 0 ? images : undefined);
 
     this.pendingDeliveries.push({
       deliveryId,
-      message,
+      messageKey: buildRuntimeMessageKey(message),
       mode: "steer"
     });
   }
@@ -178,24 +207,24 @@ export class AgentRuntime {
     }
 
     if (event.type === "message_start" && event.message.role === "user") {
-      const text = extractMessageText(event.message.content);
-      if (text !== undefined) {
-        this.consumePendingMessage(text);
+      const key = extractMessageKeyFromContent(event.message.content);
+      if (key !== undefined) {
+        this.consumePendingMessage(key);
         await this.emitStatus();
       }
     }
   }
 
-  private consumePendingMessage(text: string): void {
+  private consumePendingMessage(messageKey: string): void {
     if (this.pendingDeliveries.length === 0) return;
 
     const first = this.pendingDeliveries[0];
-    if (first.message === text) {
+    if (first.messageKey === messageKey) {
       this.pendingDeliveries.shift();
       return;
     }
 
-    const index = this.pendingDeliveries.findIndex((item) => item.message === text);
+    const index = this.pendingDeliveries.findIndex((item) => item.messageKey === messageKey);
     if (index >= 0) {
       this.pendingDeliveries.splice(index, 1);
     }
@@ -224,20 +253,131 @@ export class AgentRuntime {
   }
 }
 
-function extractMessageText(content: unknown): string | undefined {
-  if (typeof content === "string") return content;
+function normalizeRuntimeUserMessage(input: RuntimeUserMessageInput): RuntimeUserMessage {
+  if (typeof input === "string") {
+    return {
+      text: input,
+      images: []
+    };
+  }
 
-  if (!Array.isArray(content)) return undefined;
+  const text = typeof input.text === "string" ? input.text : "";
 
-  const text = content
-    .map((item) => {
-      if (!item || typeof item !== "object") return "";
-      const maybeText = item as { type?: string; text?: string };
-      return maybeText.type === "text" && typeof maybeText.text === "string" ? maybeText.text : "";
-    })
-    .filter(Boolean)
-    .join("\n")
-    .trim();
+  return {
+    text,
+    images: normalizeRuntimeImageAttachments(input.images)
+  };
+}
 
-  return text.length > 0 ? text : undefined;
+function normalizeRuntimeImageAttachments(
+  images: RuntimeUserMessage["images"]
+): RuntimeImageAttachment[] {
+  if (!images || images.length === 0) {
+    return [];
+  }
+
+  const normalized: RuntimeImageAttachment[] = [];
+
+  for (const image of images) {
+    if (!image || typeof image !== "object") {
+      continue;
+    }
+
+    const mimeType = typeof image.mimeType === "string" ? image.mimeType.trim() : "";
+    const data = typeof image.data === "string" ? image.data.trim() : "";
+
+    if (!mimeType || !mimeType.startsWith("image/") || !data) {
+      continue;
+    }
+
+    normalized.push({
+      mimeType,
+      data
+    });
+  }
+
+  return normalized;
+}
+
+function toImageContent(images: RuntimeImageAttachment[] | undefined): ImageContent[] {
+  if (!images || images.length === 0) {
+    return [];
+  }
+
+  return images.map((image) => ({
+    type: "image",
+    mimeType: image.mimeType,
+    data: image.data
+  }));
+}
+
+function buildUserMessageContent(text: string, images: ImageContent[]): string | (TextContent | ImageContent)[] {
+  if (images.length === 0) {
+    return text;
+  }
+
+  const parts: (TextContent | ImageContent)[] = [];
+  if (text.length > 0) {
+    parts.push({
+      type: "text",
+      text
+    });
+  }
+
+  parts.push(...images);
+  return parts;
+}
+
+function buildRuntimeMessageKey(message: RuntimeUserMessage): string {
+  return buildMessageKey(message.text, message.images ?? []) ?? "text=|images=";
+}
+
+function extractMessageKeyFromContent(content: unknown): string | undefined {
+  if (typeof content === "string") {
+    return buildMessageKey(content, []);
+  }
+
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+
+  const textParts: string[] = [];
+  const images: RuntimeImageAttachment[] = [];
+
+  for (const item of content) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+
+    const maybe = item as { type?: unknown; text?: unknown; mimeType?: unknown; data?: unknown };
+    if (maybe.type === "text" && typeof maybe.text === "string") {
+      textParts.push(maybe.text);
+      continue;
+    }
+
+    if (maybe.type === "image") {
+      const mimeType = typeof maybe.mimeType === "string" ? maybe.mimeType : "";
+      const data = typeof maybe.data === "string" ? maybe.data : "";
+      if (mimeType && data) {
+        images.push({ mimeType, data });
+      }
+    }
+  }
+
+  return buildMessageKey(textParts.join("\n"), images);
+}
+
+function buildMessageKey(text: string, images: RuntimeImageAttachment[]): string | undefined {
+  const normalizedText = text.trim();
+  const normalizedImages = normalizeRuntimeImageAttachments(images);
+
+  if (!normalizedText && normalizedImages.length === 0) {
+    return undefined;
+  }
+
+  const imageKey = normalizedImages
+    .map((image) => `${image.mimeType}:${image.data.length}:${image.data.slice(0, 24)}`)
+    .join(",");
+
+  return `text=${normalizedText}|images=${imageKey}`;
 }

@@ -12,7 +12,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { ConversationEntry } from '@/lib/ws-types'
+import type { ConversationEntry, ConversationImageAttachment } from '@/lib/ws-types'
 import { MarkdownMessage } from './MarkdownMessage'
 
 interface MessageListProps {
@@ -467,9 +467,45 @@ function RuntimeErrorLog({ entry }: { entry: ConversationLogEntry }) {
   )
 }
 
+function MessageImageAttachments({
+  attachments,
+  isUser,
+}: {
+  attachments: ConversationImageAttachment[]
+  isUser: boolean
+}) {
+  if (attachments.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {attachments.map((attachment, index) => {
+        const src = `data:${attachment.mimeType};base64,${attachment.data}`
+        return (
+          <img
+            key={`${attachment.mimeType}-${attachment.data.slice(0, 32)}-${index}`}
+            src={src}
+            alt={attachment.fileName || `Attached image ${index + 1}`}
+            className={cn(
+              'max-h-56 w-full rounded-lg object-cover',
+              isUser ? 'border border-primary-foreground/25' : 'border border-border',
+            )}
+            loading="lazy"
+          />
+        )
+      })}
+    </div>
+  )
+}
+
 function ConversationMessage({ message }: { message: ConversationMessageEntry }) {
   const normalizedText = message.text.trim()
-  if (!normalizedText || normalizedText === '.') {
+  const hasText = normalizedText.length > 0 && normalizedText !== '.'
+  const attachments = message.attachments ?? []
+  const hasAttachments = attachments.length > 0
+
+  if (!hasText && !hasAttachments) {
     return null
   }
 
@@ -479,7 +515,10 @@ function ConversationMessage({ message }: { message: ConversationMessageEntry })
     return (
       <div className="rounded-lg border border-amber-300/70 bg-amber-50/70 px-3 py-2 text-sm text-amber-950 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-100">
         <div className="text-[11px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300/90">System</div>
-        <p className="mt-1 whitespace-pre-wrap break-words leading-relaxed">{normalizedText}</p>
+        <div className="mt-1 space-y-2">
+          {hasText ? <p className="whitespace-pre-wrap break-words leading-relaxed">{normalizedText}</p> : null}
+          <MessageImageAttachments attachments={attachments} isUser={false} />
+        </div>
         {timestampLabel ? (
           <div className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/80">{timestampLabel}</div>
         ) : null}
@@ -491,7 +530,10 @@ function ConversationMessage({ message }: { message: ConversationMessageEntry })
     return (
       <div className="flex justify-end">
         <div className="max-w-[85%] rounded-lg rounded-tr-sm bg-primary px-3 py-2 text-primary-foreground">
-          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{message.text}</p>
+          <div className="space-y-2">
+            <MessageImageAttachments attachments={attachments} isUser />
+            {hasText ? <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{normalizedText}</p> : null}
+          </div>
           {timestampLabel ? (
             <p className="mt-1 text-right text-[10px] leading-none text-primary-foreground/70">{timestampLabel}</p>
           ) : null}
@@ -501,9 +543,10 @@ function ConversationMessage({ message }: { message: ConversationMessageEntry })
   }
 
   return (
-    <div className="text-foreground">
-      <MarkdownMessage content={normalizedText} />
-      {timestampLabel ? <p className="mt-1 text-[11px] leading-none text-muted-foreground/70">{timestampLabel}</p> : null}
+    <div className="space-y-2 text-foreground">
+      {hasText ? <MarkdownMessage content={normalizedText} /> : null}
+      <MessageImageAttachments attachments={attachments} isUser={false} />
+      {timestampLabel ? <p className="text-[11px] leading-none text-muted-foreground/70">{timestampLabel}</p> : null}
     </div>
   )
 }
