@@ -465,7 +465,7 @@ describe('SwarmWebSocketServer', () => {
     await server.stop()
   })
 
-  it('creates managers over websocket and broadcasts manager_created', async () => {
+  it('creates managers over websocket with model presets and broadcasts manager_created', async () => {
     const port = await getAvailablePort()
     const config = await makeTempConfig(port, true)
 
@@ -496,6 +496,7 @@ describe('SwarmWebSocketServer', () => {
         type: 'create_manager',
         name: 'Review Manager',
         cwd: config.defaultCwd,
+        model: 'opus-4.6',
       }),
     )
 
@@ -504,7 +505,62 @@ describe('SwarmWebSocketServer', () => {
     if (createdEvent.type === 'manager_created') {
       expect(createdEvent.manager.role).toBe('manager')
       expect(createdEvent.manager.managerId).toBe(createdEvent.manager.agentId)
+      expect(createdEvent.manager.model).toEqual({
+        provider: 'anthropic',
+        modelId: 'claude-opus-4-6',
+        thinkingLevel: 'xhigh',
+      })
     }
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
+  it('rejects invalid create_manager model presets at websocket protocol validation time', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port, true)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe' }))
+    await waitForEvent(events, (event) => event.type === 'ready')
+
+    client.send(
+      JSON.stringify({
+        type: 'create_manager',
+        name: 'Invalid Manager',
+        cwd: config.defaultCwd,
+        model: 'gpt-4o',
+      }),
+    )
+
+    const errorEvent = await waitForEvent(
+      events,
+      (event) =>
+        event.type === 'error' &&
+        event.code === 'INVALID_COMMAND' &&
+        event.message.includes('create_manager.model must be one of codex-5.3|opus-4.6'),
+    )
+
+    expect(errorEvent.type).toBe('error')
 
     client.close()
     await once(client, 'close')

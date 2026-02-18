@@ -1,10 +1,11 @@
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
-import type {
-  AgentDescriptor,
-  RequestedDeliveryMode,
-  SendMessageReceipt,
-  SpawnAgentInput
+import { parseSwarmModelPreset } from "./model-presets.js";
+import {
+  type AgentDescriptor,
+  type RequestedDeliveryMode,
+  type SendMessageReceipt,
+  type SpawnAgentInput
 } from "./types.js";
 
 export interface SwarmToolHost {
@@ -24,6 +25,11 @@ const deliveryModeSchema = Type.Union([
   Type.Literal("auto"),
   Type.Literal("followUp"),
   Type.Literal("steer")
+]);
+
+const spawnModelPresetSchema = Type.Union([
+  Type.Literal("codex-5.3"),
+  Type.Literal("opus-4.6")
 ]);
 
 export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor): ToolDefinition[] {
@@ -92,7 +98,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
       name: "spawn_agent",
       label: "Spawn Agent",
       description:
-        "Create and start a new worker agent. agentId is required and normalized to lowercase kebab-case; if taken, a numeric suffix (-2, -3, …) is appended. archetypeId, systemPrompt, model, cwd, and initialMessage are optional.",
+        "Create and start a new worker agent. agentId is required and normalized to lowercase kebab-case; if taken, a numeric suffix (-2, -3, …) is appended. archetypeId, systemPrompt, model, cwd, and initialMessage are optional. model accepts codex-5.3|opus-4.6.",
       parameters: Type.Object({
         agentId: Type.String({
           description:
@@ -102,13 +108,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
           Type.String({ description: "Optional archetype id (for example: merger)." })
         ),
         systemPrompt: Type.Optional(Type.String({ description: "Optional system prompt override." })),
-        model: Type.Optional(
-          Type.Object({
-            provider: Type.String(),
-            modelId: Type.String(),
-            thinkingLevel: Type.Optional(Type.String())
-          })
-        ),
+        model: Type.Optional(spawnModelPresetSchema),
         cwd: Type.Optional(Type.String({ description: "Optional working directory override." })),
         initialMessage: Type.Optional(Type.String({ description: "Optional first message to send after spawn." }))
       }),
@@ -117,7 +117,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
           agentId: string;
           archetypeId?: string;
           systemPrompt?: string;
-          model?: { provider: string; modelId: string; thinkingLevel?: string };
+          model?: unknown;
           cwd?: string;
           initialMessage?: string;
         };
@@ -126,7 +126,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
           agentId: parsed.agentId,
           archetypeId: parsed.archetypeId,
           systemPrompt: parsed.systemPrompt,
-          model: parsed.model,
+          model: parseSwarmModelPreset(parsed.model, "spawn_agent.model"),
           cwd: parsed.cwd,
           initialMessage: parsed.initialMessage
         });

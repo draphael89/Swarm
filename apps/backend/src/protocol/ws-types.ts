@@ -2,7 +2,8 @@ import type {
   AgentDescriptor,
   ConversationEntryEvent,
   ConversationLogEvent,
-  ConversationMessageEvent
+  ConversationMessageEvent,
+  SwarmModelPreset
 } from "../swarm/types.js";
 
 export interface DirectoryItem {
@@ -14,7 +15,7 @@ export type ClientCommand =
   | { type: "subscribe"; agentId?: string }
   | { type: "user_message"; text: string; agentId?: string; delivery?: "auto" | "followUp" | "steer" }
   | { type: "kill_agent"; agentId: string }
-  | { type: "create_manager"; name: string; cwd: string; requestId?: string }
+  | { type: "create_manager"; name: string; cwd: string; model?: SwarmModelPreset; requestId?: string }
   | { type: "delete_manager"; managerId: string; requestId?: string }
   | { type: "list_directories"; path?: string; requestId?: string }
   | { type: "validate_directory"; path: string; requestId?: string }
