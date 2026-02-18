@@ -1131,7 +1131,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         descriptor.role === "manager" ? `archetype:${MANAGER_ARCHETYPE_ID}` : undefined
     });
 
-    const authStorage = new AuthStorage(this.config.paths.authFile);
+    const authStorage = AuthStorage.create(this.config.paths.authFile);
     const modelRegistry = new ModelRegistry(authStorage);
     const memoryResources = await this.getMemoryRuntimeResources();
     const applyMemoryContext = (base: { agentsFiles: Array<{ path: string; content: string }> }) => ({
