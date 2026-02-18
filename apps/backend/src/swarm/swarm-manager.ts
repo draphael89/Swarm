@@ -103,6 +103,7 @@ const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
 ## Open Follow-ups
 - (none yet)
 `;
+const DEFAULT_AUTO_MEMORY_MAX_FILE_LINES = 400;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -124,6 +125,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private readonly runtimes = new Map<string, AgentRuntime>();
   private readonly conversationEntriesByAgentId = new Map<string, ConversationEntryEvent[]>();
   private readonly pendingUserRepliesByManagerId = new Map<string, number>();
+  private readonly autoMemoryDirtyByManagerId = new Map<string, boolean>();
+  private readonly autoMemoryReflectionInFlightByManagerId = new Map<string, boolean>();
 
   private archetypePromptRegistry: ArchetypePromptRegistry = createEmptyArchetypePromptRegistry();
 
@@ -134,7 +137,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       inferSwarmModelPresetFromDescriptor(config.defaultModel) ?? DEFAULT_SWARM_MODEL_PRESET;
     this.config = {
       ...config,
-      defaultModel: resolveModelDescriptorFromPreset(this.defaultModelPreset)
+      defaultModel: resolveModelDescriptorFromPreset(this.defaultModelPreset),
+      memory: {
+        autoMode: config.memory?.autoMode ?? false,
+        maxFileLines: normalizeAutoMemoryMaxFileLines(config.memory?.maxFileLines)
+      }
     };
     this.now = options?.now ?? nowIso;
   }
@@ -144,7 +151,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       host: this.config.host,
       port: this.config.port,
       authFile: this.config.paths.authFile,
-      managerId: this.config.managerId
+      managerId: this.config.managerId,
+      autoMemoryMode: this.config.memory.autoMode,
+      autoMemoryMaxFileLines: this.config.memory.maxFileLines
     });
 
     await this.ensureDirectories();
@@ -185,7 +194,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       managerAgentDir: this.config.paths.managerAgentDir,
       managerSystemPromptSource: managerDescriptor ? `archetype:${MANAGER_ARCHETYPE_ID}` : undefined,
       loadedArchetypeIds: this.archetypePromptRegistry.listArchetypeIds(),
-      restoredAgentIds: Array.from(this.runtimes.keys())
+      restoredAgentIds: Array.from(this.runtimes.keys()),
+      autoMemoryMode: this.config.memory.autoMode,
+      autoMemoryMaxFileLines: this.config.memory.maxFileLines
     });
   }
 
@@ -328,6 +339,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     this.descriptors.set(descriptor.agentId, descriptor);
     this.pendingUserRepliesByManagerId.set(managerId, 0);
+    this.autoMemoryDirtyByManagerId.set(managerId, false);
+    this.autoMemoryReflectionInFlightByManagerId.set(managerId, false);
 
     let runtime: AgentRuntime;
     try {
@@ -338,6 +351,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     } catch (error) {
       this.descriptors.delete(descriptor.agentId);
       this.pendingUserRepliesByManagerId.delete(managerId);
+      this.autoMemoryDirtyByManagerId.delete(managerId);
+      this.autoMemoryReflectionInFlightByManagerId.delete(managerId);
       throw error;
     }
 
@@ -387,6 +402,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.descriptors.delete(targetManagerId);
     this.conversationEntriesByAgentId.delete(targetManagerId);
     this.pendingUserRepliesByManagerId.delete(targetManagerId);
+    this.autoMemoryDirtyByManagerId.delete(targetManagerId);
+    this.autoMemoryReflectionInFlightByManagerId.delete(targetManagerId);
 
     await this.saveStore();
     this.emitAgentsSnapshot();
@@ -583,6 +600,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       return;
     }
 
+    this.markAutoMemoryDirty(managerContextId);
     this.incrementPendingUserReplies(managerContextId);
     this.logDebug("manager:user_message_dispatched", {
       managerContextId,
@@ -628,6 +646,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     this.pendingUserRepliesByManagerId.set(managerId, 0);
+    this.autoMemoryDirtyByManagerId.set(managerId, false);
+    this.autoMemoryReflectionInFlightByManagerId.set(managerId, false);
     this.conversationEntriesByAgentId.set(managerId, []);
     await this.deleteManagerSessionFile(managerDescriptor.sessionFile);
 
@@ -888,9 +908,13 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     this.pendingUserRepliesByManagerId.clear();
+    this.autoMemoryDirtyByManagerId.clear();
+    this.autoMemoryReflectionInFlightByManagerId.clear();
     for (const descriptor of this.descriptors.values()) {
       if (descriptor.role === "manager" && descriptor.status !== "terminated") {
         this.pendingUserRepliesByManagerId.set(descriptor.agentId, 0);
+        this.autoMemoryDirtyByManagerId.set(descriptor.agentId, false);
+        this.autoMemoryReflectionInFlightByManagerId.set(descriptor.agentId, false);
       }
     }
   }
@@ -964,7 +988,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
   private resolveSystemPromptForDescriptor(descriptor: AgentDescriptor): string {
     if (descriptor.role === "manager") {
-      return this.resolveRequiredArchetypePrompt(MANAGER_ARCHETYPE_ID);
+      const managerPrompt = this.resolveRequiredArchetypePrompt(MANAGER_ARCHETYPE_ID);
+      return this.applyAutoMemoryGuidanceToManagerPrompt(managerPrompt);
     }
 
     if (descriptor.archetypeId) {
@@ -975,6 +1000,14 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     return DEFAULT_WORKER_SYSTEM_PROMPT;
+  }
+
+  private applyAutoMemoryGuidanceToManagerPrompt(basePrompt: string): string {
+    if (!this.config.memory.autoMode) {
+      return basePrompt;
+    }
+
+    return `${basePrompt}\n\nAuto-memory mode (enabled):\n- You may autonomously update MEMORY.md even when the user did not explicitly ask to remember something.\n- For auto-memory reflections, update MEMORY.md directly with read/edit/write tools instead of delegating to workers.\n- Focus only on durable, high-signal memory: user preferences, project facts/patterns, important decisions, and open follow-ups.\n- If there is nothing worth persisting, leave MEMORY.md unchanged.\n- Keep MEMORY.md under ${this.config.memory.maxFileLines} lines by pruning stale or low-value entries.\n- Never store secrets, API keys, tokens, private keys, or highly sensitive personal data.`;
   }
 
   private resolveRequiredArchetypePrompt(archetypeId: string): string {
@@ -1082,6 +1115,98 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     this.pendingUserRepliesByManagerId.set(managerId, current - 1);
+  }
+
+  private markAutoMemoryDirty(managerId: string): void {
+    if (!this.config.memory.autoMode) {
+      return;
+    }
+
+    this.autoMemoryDirtyByManagerId.set(managerId, true);
+  }
+
+  private isAutoMemoryDirty(managerId: string): boolean {
+    return this.autoMemoryDirtyByManagerId.get(managerId) ?? false;
+  }
+
+  private consumeAutoMemoryReflectionInFlight(managerId: string): boolean {
+    const inFlight = this.autoMemoryReflectionInFlightByManagerId.get(managerId) ?? false;
+    if (inFlight) {
+      this.autoMemoryReflectionInFlightByManagerId.set(managerId, false);
+    }
+    return inFlight;
+  }
+
+  protected async maybeRunAutoMemoryReflection(managerId: string): Promise<void> {
+    if (!this.config.memory.autoMode) {
+      return;
+    }
+
+    if (!this.isAutoMemoryDirty(managerId)) {
+      return;
+    }
+
+    if (this.autoMemoryReflectionInFlightByManagerId.get(managerId)) {
+      return;
+    }
+
+    if (this.getPendingUserReplies(managerId) > 0) {
+      return;
+    }
+
+    const descriptor = this.descriptors.get(managerId);
+    if (!descriptor || descriptor.role !== "manager") {
+      return;
+    }
+
+    if (descriptor.status === "terminated" || descriptor.status === "stopped_on_restart") {
+      return;
+    }
+
+    if (!this.runtimes.has(managerId)) {
+      return;
+    }
+
+    const reflectionPrompt = this.buildAutoMemoryReflectionPrompt();
+
+    this.autoMemoryDirtyByManagerId.set(managerId, false);
+    this.autoMemoryReflectionInFlightByManagerId.set(managerId, true);
+
+    this.logDebug("manager:auto_memory:reflection_dispatch", {
+      managerId,
+      maxFileLines: this.config.memory.maxFileLines
+    });
+
+    try {
+      const receipt = await this.sendMessage(managerId, managerId, reflectionPrompt, "followUp", {
+        origin: "internal"
+      });
+      this.logDebug("manager:auto_memory:reflection_sent", {
+        managerId,
+        acceptedMode: receipt.acceptedMode
+      });
+    } catch (error) {
+      this.autoMemoryDirtyByManagerId.set(managerId, true);
+      this.autoMemoryReflectionInFlightByManagerId.set(managerId, false);
+      this.logDebug("manager:auto_memory:reflection_error", {
+        managerId,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  private buildAutoMemoryReflectionPrompt(): string {
+    return [
+      "Auto-memory reflection (internal task):",
+      "- This is not a user request. Do not call speak_to_user.",
+      "- Perform this reflection directly; do not delegate to worker agents.",
+      "- Review recent conversation context and retain only durable, high-signal information.",
+      "- Persist only lasting user preferences, project facts/patterns, important decisions, and open follow-ups.",
+      "- If nothing new should be remembered, make no file edits and end the turn.",
+      `- Keep MEMORY.md concise and under ${this.config.memory.maxFileLines} lines by pruning stale or low-value entries when needed.`,
+      "- Follow the memory skill workflow before editing MEMORY.md.",
+      "- Never store secrets, credentials, API keys, tokens, private keys, or highly sensitive personal data."
+    ].join("\n");
   }
 
   private parseResetManagerSessionArgs(
@@ -1498,23 +1623,31 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       return;
     }
 
+    if (this.consumeAutoMemoryReflectionInFlight(agentId)) {
+      this.logDebug("manager:auto_memory:reflection_complete", {
+        agentId
+      });
+    }
+
     const pending = this.getPendingUserReplies(agentId);
-    if (pending <= 0) {
+    if (pending > 0) {
+      this.pendingUserRepliesByManagerId.set(agentId, 0);
+      this.autoMemoryDirtyByManagerId.set(agentId, false);
+
+      this.logDebug("manager:missing_speak_to_user", {
+        agentId,
+        pending
+      });
+
+      await this.publishToUser(
+        agentId,
+        `Manager finished without speak_to_user for ${pending} pending user message(s).`,
+        "system"
+      );
       return;
     }
 
-    this.pendingUserRepliesByManagerId.set(agentId, 0);
-
-    this.logDebug("manager:missing_speak_to_user", {
-      agentId,
-      pending
-    });
-
-    await this.publishToUser(
-      agentId,
-      `Manager finished without speak_to_user for ${pending} pending user message(s).`,
-      "system"
-    );
+    await this.maybeRunAutoMemoryReflection(agentId);
   }
 
   private async ensureDirectories(): Promise<void> {
@@ -1785,6 +1918,14 @@ function extractRuntimeMessageText(message: string | RuntimeUserMessage): string
 
 function normalizeThinkingLevel(level: string): string {
   return level === "x-high" ? "xhigh" : level;
+}
+
+function normalizeAutoMemoryMaxFileLines(value: number | undefined): number {
+  if (!Number.isFinite(value) || typeof value !== "number" || value < 1) {
+    return DEFAULT_AUTO_MEMORY_MAX_FILE_LINES;
+  }
+
+  return Math.floor(value);
 }
 
 function isConversationEntryEvent(value: unknown): value is ConversationEntryEvent {

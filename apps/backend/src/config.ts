@@ -21,6 +21,12 @@ export function createConfig(): SwarmConfig {
   const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
   const defaultDataDir = resolve(homedir(), nodeEnv === "production" ? ".swarm" : ".swarm-dev");
 
+  const autoMemoryModeEnv = process.env.SWARM_MEMORY_AUTO_MODE?.trim().toLowerCase();
+  const autoMemoryMode = autoMemoryModeEnv
+    ? ["1", "true", "yes", "on"].includes(autoMemoryModeEnv)
+    : false;
+  const autoMemoryMaxLines = parsePositiveIntegerEnv(process.env.SWARM_MEMORY_MAX_LINES, 400);
+
   const dataDirEnv = process.env.SWARM_DATA_DIR?.trim();
   const dataDir = dataDirEnv ? resolveDataDir(rootDir, dataDirEnv) : defaultDataDir;
   const swarmDir = resolve(dataDir, "swarm");
@@ -63,6 +69,10 @@ export function createConfig(): SwarmConfig {
     },
     defaultCwd,
     cwdAllowlistRoots,
+    memory: {
+      autoMode: autoMemoryMode,
+      maxFileLines: autoMemoryMaxLines
+    },
     paths: {
       rootDir,
       dataDir,
@@ -78,6 +88,14 @@ export function createConfig(): SwarmConfig {
       agentsStoreFile: resolve(swarmDir, "agents.json")
     }
   };
+}
+
+function parsePositiveIntegerEnv(raw: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(raw ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return parsed;
 }
 
 function resolveDataDir(rootDir: string, dataDirEnv: string): string {
