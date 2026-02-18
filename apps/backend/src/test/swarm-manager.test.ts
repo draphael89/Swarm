@@ -141,6 +141,11 @@ describe('SwarmManager', () => {
     expect(agents).toHaveLength(1)
     expect(agents[0].agentId).toBe('manager')
     expect(agents[0].role).toBe('manager')
+    expect(agents[0].model).toEqual({
+      provider: 'openai-codex',
+      modelId: 'gpt-5.3-codex',
+      thinkingLevel: 'xhigh',
+    })
     expect(manager.createdRuntimeIds).toEqual(['manager'])
   })
 
@@ -637,6 +642,106 @@ describe('SwarmManager', () => {
     expect(deleted.terminatedWorkerIds).toContain(ownedWorker.agentId)
     expect(manager.listAgents().some((agent) => agent.agentId === secondary.agentId)).toBe(false)
     expect(manager.listAgents().some((agent) => agent.agentId === ownedWorker.agentId)).toBe(false)
+  })
+
+  it('maps create_manager model presets to canonical runtime models with highest reasoning', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const codexManager = await manager.createManager('manager', {
+      name: 'Codex Manager',
+      cwd: config.defaultCwd,
+      model: 'codex-5.3',
+    })
+
+    const opusManager = await manager.createManager('manager', {
+      name: 'Opus Manager',
+      cwd: config.defaultCwd,
+      model: 'opus-4.6',
+    })
+
+    expect(codexManager.model).toEqual({
+      provider: 'openai-codex',
+      modelId: 'gpt-5.3-codex',
+      thinkingLevel: 'xhigh',
+    })
+    expect(opusManager.model).toEqual({
+      provider: 'anthropic',
+      modelId: 'claude-opus-4-6',
+      thinkingLevel: 'xhigh',
+    })
+  })
+
+  it('defaults create_manager to codex-5.3 mapping when model is omitted', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const created = await manager.createManager('manager', {
+      name: 'Default Model Manager',
+      cwd: config.defaultCwd,
+    })
+
+    expect(created.model).toEqual({
+      provider: 'openai-codex',
+      modelId: 'gpt-5.3-codex',
+      thinkingLevel: 'xhigh',
+    })
+  })
+
+  it('rejects invalid create_manager model presets with a clear error', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await expect(
+      manager.createManager('manager', {
+        name: 'Invalid Manager',
+        cwd: config.defaultCwd,
+        model: 'invalid-model' as any,
+      }),
+    ).rejects.toThrow('create_manager.model must be one of codex-5.3|opus-4.6')
+  })
+
+  it('maps spawn_agent model presets to canonical runtime models with highest reasoning', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const codexWorker = await manager.spawnAgent('manager', {
+      agentId: 'Codex Worker',
+      model: 'codex-5.3',
+    })
+
+    const opusWorker = await manager.spawnAgent('manager', {
+      agentId: 'Opus Worker',
+      model: 'opus-4.6',
+    })
+
+    expect(codexWorker.model).toEqual({
+      provider: 'openai-codex',
+      modelId: 'gpt-5.3-codex',
+      thinkingLevel: 'xhigh',
+    })
+    expect(opusWorker.model).toEqual({
+      provider: 'anthropic',
+      modelId: 'claude-opus-4-6',
+      thinkingLevel: 'xhigh',
+    })
+  })
+
+  it('rejects invalid spawn_agent model presets with a clear error', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await expect(
+      manager.spawnAgent('manager', {
+        agentId: 'Invalid Worker',
+        model: 'invalid-model' as any,
+      }),
+    ).rejects.toThrow('spawn_agent.model must be one of codex-5.3|opus-4.6')
   })
 
   it('allows deleting the default manager when requested', async () => {

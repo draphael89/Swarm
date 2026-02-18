@@ -1,5 +1,6 @@
 import { WebSocketServer, type RawData, WebSocket } from "ws";
 import type { ClientCommand, ServerEvent } from "../protocol/ws-types.js";
+import { describeSwarmModelPresets, isSwarmModelPreset } from "../swarm/model-presets.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
 
 export class SwarmWebSocketServer {
@@ -198,7 +199,8 @@ export class SwarmWebSocketServer {
       try {
         const manager = await this.swarmManager.createManager(managerContextId, {
           name: command.name,
-          cwd: command.cwd
+          cwd: command.cwd,
+          model: command.model
         });
 
         this.broadcastToSubscribed({
@@ -578,6 +580,7 @@ export class SwarmWebSocketServer {
     if (maybe.type === "create_manager") {
       const name = (maybe as { name?: unknown }).name;
       const cwd = (maybe as { cwd?: unknown }).cwd;
+      const model = (maybe as { model?: unknown }).model;
       const requestId = (maybe as { requestId?: unknown }).requestId;
 
       if (typeof name !== "string" || name.trim().length === 0) {
@@ -585,6 +588,12 @@ export class SwarmWebSocketServer {
       }
       if (typeof cwd !== "string" || cwd.trim().length === 0) {
         return { ok: false, error: "create_manager.cwd must be a non-empty string" };
+      }
+      if (model !== undefined && !isSwarmModelPreset(model)) {
+        return {
+          ok: false,
+          error: `create_manager.model must be one of ${describeSwarmModelPresets()}`
+        };
       }
       if (requestId !== undefined && typeof requestId !== "string") {
         return { ok: false, error: "create_manager.requestId must be a string when provided" };
@@ -596,6 +605,7 @@ export class SwarmWebSocketServer {
           type: "create_manager",
           name: name.trim(),
           cwd,
+          model,
           requestId
         }
       };

@@ -4,6 +4,10 @@ export type AgentArchetypeId = string;
 
 export type AgentStatus = "idle" | "streaming" | "terminated" | "stopped_on_restart";
 
+export const SWARM_MODEL_PRESETS = ["codex-5.3", "opus-4.6"] as const;
+
+export type SwarmModelPreset = (typeof SWARM_MODEL_PRESETS)[number];
+
 export interface AgentModelDescriptor {
   provider: string;
   modelId: string;
@@ -42,11 +46,7 @@ export interface SpawnAgentInput {
   agentId: string;
   archetypeId?: AgentArchetypeId;
   systemPrompt?: string;
-  model?: {
-    provider: string;
-    modelId: string;
-    thinkingLevel?: string;
-  };
+  model?: SwarmModelPreset;
   cwd?: string;
   initialMessage?: string;
 }

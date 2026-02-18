@@ -29,6 +29,13 @@ import {
   type DirectoryValidationResult
 } from "./cwd-policy.js";
 import { pickDirectory as pickNativeDirectory } from "./directory-picker.js";
+import {
+  DEFAULT_SWARM_MODEL_PRESET,
+  inferSwarmModelPresetFromDescriptor,
+  normalizeSwarmModelDescriptor,
+  parseSwarmModelPreset,
+  resolveModelDescriptorFromPreset
+} from "./model-presets.js";
 import { buildSwarmTools, type SwarmToolHost } from "./swarm-tools.js";
 import type {
   AcceptedDeliveryMode,
@@ -44,7 +51,8 @@ import type {
   RequestedDeliveryMode,
   SendMessageReceipt,
   SpawnAgentInput,
-  SwarmConfig
+  SwarmConfig,
+  SwarmModelPreset
 } from "./types.js";
 
 const DEFAULT_WORKER_SYSTEM_PROMPT = `You are a worker agent in a swarm.
@@ -105,6 +113,7 @@ function createEmptyArchetypePromptRegistry(): ArchetypePromptRegistry {
 export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private readonly config: SwarmConfig;
   private readonly now: () => string;
+  private readonly defaultModelPreset: SwarmModelPreset;
 
   private readonly descriptors = new Map<string, AgentDescriptor>();
   private readonly runtimes = new Map<string, AgentRuntime>();
@@ -115,7 +124,13 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
   constructor(config: SwarmConfig, options?: { now?: () => string }) {
     super();
-    this.config = config;
+
+    this.defaultModelPreset =
+      inferSwarmModelPresetFromDescriptor(config.defaultModel) ?? DEFAULT_SWARM_MODEL_PRESET;
+    this.config = {
+      ...config,
+      defaultModel: resolveModelDescriptorFromPreset(this.defaultModelPreset)
+    };
     this.now = options?.now ?? nowIso;
   }
 
@@ -265,7 +280,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.emitAgentsSnapshot();
   }
 
-  async createManager(callerAgentId: string, input: { name: string; cwd: string }): Promise<AgentDescriptor> {
+  async createManager(
+    callerAgentId: string,
+    input: { name: string; cwd: string; model?: SwarmModelPreset }
+  ): Promise<AgentDescriptor> {
     const callerDescriptor = this.descriptors.get(callerAgentId);
     if (!callerDescriptor || callerDescriptor.role !== "manager") {
       const canBootstrap = callerAgentId === this.config.managerId && !this.hasRunningManagers();
@@ -281,6 +299,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error("create_manager requires a non-empty name");
     }
 
+    const requestedModelPreset = parseSwarmModelPreset(input.model, "create_manager.model");
     const managerId = this.generateUniqueManagerId(requestedName);
     const createdAt = this.now();
     const cwd = await this.resolveAndValidateCwd(input.cwd);
@@ -295,7 +314,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       createdAt,
       updatedAt: createdAt,
       cwd,
-      model: { ...this.config.defaultModel },
+      model: requestedModelPreset
+        ? resolveModelDescriptorFromPreset(requestedModelPreset)
+        : this.resolveDefaultModelDescriptor(),
       sessionFile: join(this.config.paths.sessionsDir, `${managerId}.jsonl`)
     };
 
@@ -725,28 +746,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         touched = true;
       }
 
-      if (!descriptor.model) {
-        descriptor.model = { ...this.config.defaultModel };
+      const normalizedModel = this.normalizePersistedModelDescriptor(descriptor.model);
+      if (
+        !descriptor.model ||
+        descriptor.model.provider !== normalizedModel.provider ||
+        descriptor.model.modelId !== normalizedModel.modelId ||
+        descriptor.model.thinkingLevel !== normalizedModel.thinkingLevel
+      ) {
+        descriptor.model = normalizedModel;
         touched = true;
-      } else {
-        const provider = descriptor.model.provider?.trim() || this.config.defaultModel.provider;
-        const modelId = descriptor.model.modelId?.trim() || this.config.defaultModel.modelId;
-        const normalizedThinking = normalizeThinkingLevel(
-          descriptor.model.thinkingLevel ?? this.config.defaultModel.thinkingLevel
-        );
-
-        if (
-          provider !== descriptor.model.provider ||
-          modelId !== descriptor.model.modelId ||
-          normalizedThinking !== descriptor.model.thinkingLevel
-        ) {
-          descriptor.model = {
-            provider,
-            modelId,
-            thinkingLevel: normalizedThinking
-          };
-          touched = true;
-        }
       }
 
       if (descriptor.role === "manager") {
@@ -794,7 +802,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         createdAt: now,
         updatedAt: now,
         cwd: this.config.defaultCwd,
-        model: { ...this.config.defaultModel },
+        model: this.resolveDefaultModelDescriptor(),
         sessionFile: join(this.config.paths.sessionsDir, `${this.config.managerId}.jsonl`)
       };
       this.descriptors.set(primaryManager.agentId, primaryManager);
@@ -810,18 +818,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         primaryManager.cwd = this.config.defaultCwd;
       }
 
-      if (!primaryManager.model) {
-        primaryManager.model = { ...this.config.defaultModel };
-      }
-
-      // Migrate the historical default manager model to the current default.
-      if (
-        primaryManager.model.provider === "openai-codex" &&
-        primaryManager.model.modelId === "gpt-5.3-codex" &&
-        primaryManager.model.thinkingLevel === "medium"
-      ) {
-        primaryManager.model = { ...this.config.defaultModel };
-      }
+      primaryManager.model = this.normalizePersistedModelDescriptor(primaryManager.model);
     }
 
     const liveManagerIds = new Set(
@@ -866,19 +863,26 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return descriptor;
   }
 
+  private resolveDefaultModelDescriptor(): AgentModelDescriptor {
+    return resolveModelDescriptorFromPreset(this.defaultModelPreset);
+  }
+
+  private normalizePersistedModelDescriptor(
+    descriptor: Pick<AgentModelDescriptor, "provider" | "modelId"> | undefined
+  ): AgentModelDescriptor {
+    return normalizeSwarmModelDescriptor(descriptor, this.defaultModelPreset);
+  }
+
   private resolveSpawnModel(
     requested: SpawnAgentInput["model"] | undefined,
     fallback: AgentModelDescriptor
   ): AgentModelDescriptor {
-    if (!requested) {
-      return { ...fallback };
+    const requestedPreset = parseSwarmModelPreset(requested, "spawn_agent.model");
+    if (requestedPreset) {
+      return resolveModelDescriptorFromPreset(requestedPreset);
     }
 
-    return {
-      provider: requested.provider,
-      modelId: requested.modelId,
-      thinkingLevel: normalizeThinkingLevel(requested.thinkingLevel ?? fallback.thinkingLevel)
-    };
+    return this.normalizePersistedModelDescriptor(fallback);
   }
 
   private resolveSpawnWorkerArchetypeId(
