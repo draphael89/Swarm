@@ -502,6 +502,51 @@ describe('SwarmManager', () => {
     expect(manager.runtimeByAgentId.get('worker-a')).toBeDefined()
   })
 
+  it('does not implicitly recreate the configured manager when other agents already exist', async () => {
+    const config = await makeTempConfig()
+
+    const seedAgents = {
+      agents: [
+        {
+          agentId: 'ops-manager',
+          displayName: 'Ops Manager',
+          role: 'manager',
+          managerId: 'ops-manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'ops-manager.jsonl'),
+        },
+        {
+          agentId: 'ops-worker',
+          displayName: 'Ops Worker',
+          role: 'worker',
+          managerId: 'ops-manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'ops-worker.jsonl'),
+        },
+      ],
+    }
+
+    await writeFile(config.paths.agentsStoreFile, JSON.stringify(seedAgents, null, 2), 'utf8')
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const agents = manager.listAgents()
+    const restoredWorker = agents.find((agent) => agent.agentId === 'ops-worker')
+
+    expect(agents.some((agent) => agent.agentId === 'manager')).toBe(false)
+    expect(restoredWorker?.managerId).toBe('ops-manager')
+    expect(manager.createdRuntimeIds).toEqual(['ops-manager', 'ops-worker'])
+  })
+
   it('keeps killed workers terminated across restart', async () => {
     const config = await makeTempConfig()
     const firstBoot = new TestSwarmManager(config)
