@@ -13,7 +13,7 @@
     "dev:ui": "pnpm --filter @swarm/ui dev",
     "build": "pnpm --filter @swarm/backend build && pnpm --filter @swarm/ui build",
     "prod": "VITE_SWARM_WS_URL=ws://127.0.0.1:47287 pnpm build && pnpm prod:start",
-    "prod:start": "concurrently --kill-others-on-fail --names backend,ui \"NODE_ENV=production SWARM_PORT=47287 SWARM_MEMORY_AUTO_MODE=true pnpm --filter @swarm/backend start\" \"pnpm --filter @swarm/ui preview -- --port 47289 --strictPort\"",
+    "prod:start": "concurrently --kill-others-on-fail --names backend,ui \"NODE_ENV=production SWARM_PORT=47287 pnpm --filter @swarm/backend start\" \"pnpm --filter @swarm/ui preview -- --port 47289 --strictPort\"",
     "prod:daemon": "node scripts/prod-daemon.mjs",
     "prod:restart": "pnpm i && node scripts/prod-daemon-restart.mjs",
     "test": "pnpm --filter @swarm/backend test && pnpm --filter @swarm/ui test"
