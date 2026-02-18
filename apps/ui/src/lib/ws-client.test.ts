@@ -425,7 +425,7 @@ describe('ManagerWsClient', () => {
     client.destroy()
   })
 
-  it('sends list_directories and validate_directory commands and resolves response events', async () => {
+  it('sends directory picker commands and resolves response events', async () => {
     const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
 
     client.start()
@@ -481,6 +481,22 @@ describe('ManagerWsClient', () => {
       valid: true,
       message: null,
     })
+
+    const pickPromise = client.pickDirectory('/tmp')
+    const pickPayload = JSON.parse(socket.sentPayloads.at(-1) ?? '{}')
+
+    expect(pickPayload).toMatchObject({
+      type: 'pick_directory',
+      defaultPath: '/tmp',
+    })
+
+    emitServerEvent(socket, {
+      type: 'directory_picked',
+      requestId: pickPayload.requestId,
+      path: '/tmp/picked',
+    })
+
+    await expect(pickPromise).resolves.toBe('/tmp/picked')
 
     client.destroy()
   })

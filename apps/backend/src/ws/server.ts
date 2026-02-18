@@ -298,6 +298,25 @@ export class SwarmWebSocketServer {
       return;
     }
 
+    if (command.type === "pick_directory") {
+      try {
+        const pickedPath = await this.swarmManager.pickDirectory(command.defaultPath);
+        this.send(socket, {
+          type: "directory_picked",
+          path: pickedPath,
+          requestId: command.requestId
+        });
+      } catch (error) {
+        this.send(socket, {
+          type: "error",
+          code: "PICK_DIRECTORY_FAILED",
+          message: error instanceof Error ? error.message : String(error),
+          requestId: command.requestId
+        });
+      }
+      return;
+    }
+
     if (command.type === "user_message") {
       const managerId = this.swarmManager.getConfig().managerId;
       const targetAgentId = command.agentId ?? subscribedAgentId;
@@ -474,6 +493,7 @@ export class SwarmWebSocketServer {
       case "delete_manager":
       case "list_directories":
       case "validate_directory":
+      case "pick_directory":
         return command.requestId;
 
       case "subscribe":
@@ -639,6 +659,27 @@ export class SwarmWebSocketServer {
         command: {
           type: "validate_directory",
           path,
+          requestId
+        }
+      };
+    }
+
+    if (maybe.type === "pick_directory") {
+      const defaultPath = (maybe as { defaultPath?: unknown }).defaultPath;
+      const requestId = (maybe as { requestId?: unknown }).requestId;
+
+      if (defaultPath !== undefined && typeof defaultPath !== "string") {
+        return { ok: false, error: "pick_directory.defaultPath must be a string when provided" };
+      }
+      if (requestId !== undefined && typeof requestId !== "string") {
+        return { ok: false, error: "pick_directory.requestId must be a string when provided" };
+      }
+
+      return {
+        ok: true,
+        command: {
+          type: "pick_directory",
+          defaultPath: defaultPath?.trim() ? defaultPath : undefined,
           requestId
         }
       };

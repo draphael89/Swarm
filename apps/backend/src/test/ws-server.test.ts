@@ -54,8 +54,16 @@ class FakeRuntime {
 }
 
 class TestSwarmManager extends SwarmManager {
+  pickedDirectoryPath: string | null = null
+  lastPickedDirectoryDefaultPath: string | undefined
+
   protected override async createRuntimeForDescriptor(descriptor: AgentDescriptor): Promise<AgentRuntime> {
     return new FakeRuntime(descriptor) as unknown as AgentRuntime
+  }
+
+  override async pickDirectory(defaultPath?: string): Promise<string | null> {
+    this.lastPickedDirectoryDefaultPath = defaultPath
+    return this.pickedDirectoryPath
   }
 }
 
@@ -772,6 +780,19 @@ describe('SwarmWebSocketServer', () => {
       expect(validated.message).toBeUndefined()
       expect(validated.roots).toEqual([])
     }
+
+    manager.pickedDirectoryPath = outsideDir
+    client.send(JSON.stringify({ type: 'pick_directory', defaultPath: expectedRoot, requestId: 'pick-1' }))
+
+    const picked = await waitForEvent(
+      events,
+      (event) => event.type === 'directory_picked' && event.requestId === 'pick-1',
+    )
+    expect(picked.type).toBe('directory_picked')
+    if (picked.type === 'directory_picked') {
+      expect(picked.path).toBe(outsideDir)
+    }
+    expect(manager.lastPickedDirectoryDefaultPath).toBe(expectedRoot)
 
     client.close()
     await once(client, 'close')

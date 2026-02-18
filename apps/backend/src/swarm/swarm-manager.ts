@@ -28,6 +28,7 @@ import {
   type DirectoryListingResult,
   type DirectoryValidationResult
 } from "./cwd-policy.js";
+import { pickDirectory as pickNativeDirectory } from "./directory-picker.js";
 import { buildSwarmTools, type SwarmToolHost } from "./swarm-tools.js";
 import type {
   AcceptedDeliveryMode,
@@ -387,6 +388,19 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
   async validateDirectory(path: string): Promise<DirectoryValidationResult> {
     return validateDirectoryInput(path, this.getCwdPolicy());
+  }
+
+  async pickDirectory(defaultPath?: string): Promise<string | null> {
+    const pickedPath = await pickNativeDirectory({
+      defaultPath,
+      prompt: "Select a manager working directory"
+    });
+
+    if (!pickedPath) {
+      return null;
+    }
+
+    return validateDirectoryPath(pickedPath, this.getCwdPolicy());
   }
 
   async sendMessage(

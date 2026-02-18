@@ -36,10 +36,8 @@ function IndexPage() {
   const [isCreatingManager, setIsCreatingManager] = useState(false)
   const [isValidatingDirectory, setIsValidatingDirectory] = useState(false)
 
-  const [browsePath, setBrowsePath] = useState('')
-  const [browseDirectories, setBrowseDirectories] = useState<string[]>([])
   const [browseError, setBrowseError] = useState<string | null>(null)
-  const [isBrowsingDirectories, setIsBrowsingDirectories] = useState(false)
+  const [isPickingDirectory, setIsPickingDirectory] = useState(false)
 
   const [managerToDelete, setManagerToDelete] = useState<AgentDescriptor | null>(null)
   const [deleteManagerError, setDeleteManagerError] = useState<string | null>(null)
@@ -165,28 +163,30 @@ function IndexPage() {
 
     setNewManagerName('')
     setNewManagerCwd(defaultCwd)
-    setBrowsePath(defaultCwd)
-    setBrowseDirectories([])
     setBrowseError(null)
     setCreateManagerError(null)
     setIsCreateManagerDialogOpen(true)
   }
 
-  const handleBrowseDirectory = async (nextPath?: string) => {
-    if (!clientRef.current) return
+  const handleBrowseDirectory = async () => {
+    const client = clientRef.current
+    if (!client) return
 
     setBrowseError(null)
-    setIsBrowsingDirectories(true)
+    setIsPickingDirectory(true)
 
     try {
-      const targetPath = (nextPath ?? newManagerCwd).trim() || undefined
-      const listed = await clientRef.current.listDirectories(targetPath)
-      setBrowsePath(listed.path)
-      setBrowseDirectories([...new Set(listed.directories)])
+      const pickedPath = await client.pickDirectory(newManagerCwd)
+      if (!pickedPath) {
+        return
+      }
+
+      setNewManagerCwd(pickedPath)
+      setCreateManagerError(null)
     } catch (error) {
       setBrowseError(toErrorMessage(error))
     } finally {
-      setIsBrowsingDirectories(false)
+      setIsPickingDirectory(false)
     }
   }
 
@@ -231,7 +231,6 @@ function IndexPage() {
       setIsCreateManagerDialogOpen(false)
       setNewManagerName('')
       setNewManagerCwd('')
-      setBrowseDirectories([])
       setBrowseError(null)
       setCreateManagerError(null)
     } catch (error) {
@@ -245,8 +244,6 @@ function IndexPage() {
   const handleSuggestionClick = (prompt: string) => {
     messageInputRef.current?.setInput(prompt)
   }
-
-  const parentBrowsePath = getParentDirectory(browsePath)
 
   return (
     <main className="h-screen bg-background text-foreground">
@@ -332,9 +329,9 @@ function IndexPage() {
                 type="button"
                 variant="outline"
                 onClick={() => void handleBrowseDirectory()}
-                disabled={isBrowsingDirectories || isCreatingManager}
+                disabled={isPickingDirectory || isCreatingManager}
               >
-                {isBrowsingDirectories ? 'Browsing...' : 'Browse'}
+                {isPickingDirectory ? 'Browsing...' : 'Browse'}
               </Button>
             </div>
 
@@ -342,71 +339,9 @@ function IndexPage() {
               <p className="text-xs text-destructive">{browseError}</p>
             ) : null}
 
-            {browsePath || browseDirectories.length > 0 ? (
-              <div className="rounded-md border border-border/70 bg-muted/20 p-2">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="truncate text-[11px] text-muted-foreground">{browsePath || 'Directory browser'}</span>
-                  <div className="flex items-center gap-2">
-                    {parentBrowsePath ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2"
-                        onClick={() => void handleBrowseDirectory(parentBrowsePath)}
-                        disabled={isBrowsingDirectories}
-                      >
-                        Up
-                      </Button>
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2"
-                      onClick={() => void handleBrowseDirectory(browsePath)}
-                      disabled={isBrowsingDirectories}
-                    >
-                      Refresh
-                    </Button>
-                  </div>
-                </div>
-
-                {browseDirectories.length === 0 ? (
-                  <p className="px-1 py-2 text-xs text-muted-foreground">
-                    {isBrowsingDirectories ? 'Loading directories…' : 'No child directories found.'}
-                  </p>
-                ) : (
-                  <ul className="max-h-40 space-y-1 overflow-y-auto">
-                    {browseDirectories.map((directoryPath) => (
-                      <li key={directoryPath} className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNewManagerCwd(directoryPath)
-                            setCreateManagerError(null)
-                          }}
-                          className="min-w-0 flex-1 truncate rounded-sm px-2 py-1 text-left text-xs transition hover:bg-accent/70"
-                          title={directoryPath}
-                        >
-                          {getPathName(directoryPath)}
-                        </button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-[11px]"
-                          onClick={() => void handleBrowseDirectory(directoryPath)}
-                          disabled={isBrowsingDirectories}
-                        >
-                          Open
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ) : null}
+            <p className="text-[11px] text-muted-foreground">
+              Use Browse to open the native folder picker, or enter a path manually.
+            </p>
           </div>
 
           {createManagerError ? (
@@ -422,7 +357,7 @@ function IndexPage() {
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={isCreatingManager || isBrowsingDirectories}>
+            <Button type="submit" disabled={isCreatingManager || isPickingDirectory}>
               {isCreatingManager
                 ? isValidatingDirectory
                   ? 'Validating...'
@@ -506,32 +441,6 @@ function OverlayDialog({ open, title, description, onClose, children }: OverlayD
       </div>
     </div>
   )
-}
-
-function getParentDirectory(path: string): string | null {
-  const trimmed = path.trim()
-  if (!trimmed) return null
-
-  const normalized = trimmed.replace(/\\/g, '/').replace(/\/+$/, '')
-  if (!normalized || normalized === '/') return null
-
-  if (/^[A-Za-z]:$/.test(normalized)) {
-    return null
-  }
-
-  const slashIndex = normalized.lastIndexOf('/')
-  if (slashIndex <= 0) {
-    return normalized.endsWith(':') ? null : '/'
-  }
-
-  return normalized.slice(0, slashIndex)
-}
-
-function getPathName(path: string): string {
-  const normalized = path.replace(/\\/g, '/').replace(/\/+$/, '')
-  if (!normalized) return path
-  const segments = normalized.split('/')
-  return segments.at(-1) || normalized
 }
 
 function toErrorMessage(error: unknown): string {

@@ -27,6 +27,7 @@ export type ClientCommand =
   | { type: 'delete_manager'; managerId: string; requestId?: string }
   | { type: 'list_directories'; path?: string; requestId?: string }
   | { type: 'validate_directory'; path: string; requestId?: string }
+  | { type: 'pick_directory'; defaultPath?: string; requestId?: string }
   | { type: 'ping' }
 
 export interface ConversationMessageEvent {
@@ -85,6 +86,12 @@ export interface DirectoryValidatedEvent {
   requestId?: string
 }
 
+export interface DirectoryPickedEvent {
+  type: 'directory_picked'
+  path: string | null
+  requestId?: string
+}
+
 export type ConversationEntry = ConversationMessageEvent | ConversationLogEvent
 
 export type ServerEvent =
@@ -103,4 +110,5 @@ export type ServerEvent =
   | ManagerDeletedEvent
   | DirectoriesListedEvent
   | DirectoryValidatedEvent
+  | DirectoryPickedEvent
   | { type: 'error'; code: string; message: string; requestId?: string }

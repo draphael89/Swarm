@@ -69,6 +69,7 @@ export class ManagerWsClient {
   private readonly pendingDeleteManagerRequests = new Map<string, PendingRequest<{ managerId: string }>>()
   private readonly pendingListDirectoriesRequests = new Map<string, PendingRequest<DirectoriesListedResult>>()
   private readonly pendingValidateDirectoryRequests = new Map<string, PendingRequest<DirectoryValidationResult>>()
+  private readonly pendingPickDirectoryRequests = new Map<string, PendingRequest<string | null>>()
 
   constructor(url: string, initialAgentId = 'manager') {
     this.url = url
@@ -321,6 +322,32 @@ export class ManagerWsClient {
     })
   }
 
+  async pickDirectory(defaultPath?: string): Promise<string | null> {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket is disconnected. Reconnecting...')
+    }
+
+    const requestId = this.nextRequestId('pick_directory')
+
+    return new Promise<string | null>((resolve, reject) => {
+      this.trackPendingRequest(this.pendingPickDirectoryRequests, requestId, resolve, reject)
+
+      const sent = this.send({
+        type: 'pick_directory',
+        defaultPath: defaultPath?.trim() || undefined,
+        requestId,
+      })
+
+      if (!sent) {
+        this.rejectPendingRequest(
+          this.pendingPickDirectoryRequests,
+          requestId,
+          new Error('WebSocket is disconnected. Reconnecting...'),
+        )
+      }
+    })
+  }
+
   private connect(): void {
     if (this.destroyed) return
 
@@ -480,6 +507,15 @@ export class ManagerWsClient {
             valid: event.valid,
             message: event.message ?? null,
           },
+        )
+        break
+      }
+
+      case 'directory_picked': {
+        this.resolvePendingRequest(
+          this.pendingPickDirectoryRequests,
+          event.requestId,
+          event.path ?? null,
         )
         break
       }
@@ -678,7 +714,8 @@ export class ManagerWsClient {
         this.rejectPendingByRequestId(this.pendingCreateManagerRequests, requestId, fullError) ||
         this.rejectPendingByRequestId(this.pendingDeleteManagerRequests, requestId, fullError) ||
         this.rejectPendingByRequestId(this.pendingListDirectoriesRequests, requestId, fullError) ||
-        this.rejectPendingByRequestId(this.pendingValidateDirectoryRequests, requestId, fullError)
+        this.rejectPendingByRequestId(this.pendingValidateDirectoryRequests, requestId, fullError) ||
+        this.rejectPendingByRequestId(this.pendingPickDirectoryRequests, requestId, fullError)
 
       if (resolvedById) {
         return
@@ -703,11 +740,16 @@ export class ManagerWsClient {
       if (this.rejectOldestPendingRequest(this.pendingValidateDirectoryRequests, fullError)) return
     }
 
+    if (loweredCode.includes('pick_directory')) {
+      if (this.rejectOldestPendingRequest(this.pendingPickDirectoryRequests, fullError)) return
+    }
+
     const totalPending =
       this.pendingCreateManagerRequests.size +
       this.pendingDeleteManagerRequests.size +
       this.pendingListDirectoriesRequests.size +
-      this.pendingValidateDirectoryRequests.size
+      this.pendingValidateDirectoryRequests.size +
+      this.pendingPickDirectoryRequests.size
 
     if (totalPending !== 1) {
       return
@@ -717,6 +759,7 @@ export class ManagerWsClient {
     this.rejectOldestPendingRequest(this.pendingDeleteManagerRequests, fullError)
     this.rejectOldestPendingRequest(this.pendingListDirectoriesRequests, fullError)
     this.rejectOldestPendingRequest(this.pendingValidateDirectoryRequests, fullError)
+    this.rejectOldestPendingRequest(this.pendingPickDirectoryRequests, fullError)
   }
 
   private rejectPendingByRequestId<T>(
@@ -740,6 +783,7 @@ export class ManagerWsClient {
     this.rejectPendingMap(this.pendingDeleteManagerRequests, error)
     this.rejectPendingMap(this.pendingListDirectoriesRequests, error)
     this.rejectPendingMap(this.pendingValidateDirectoryRequests, error)
+    this.rejectPendingMap(this.pendingPickDirectoryRequests, error)
   }
 
   private rejectPendingMap<T>(pendingMap: Map<string, PendingRequest<T>>, error: Error): void {

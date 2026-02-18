@@ -18,6 +18,7 @@ export type ClientCommand =
   | { type: "delete_manager"; managerId: string; requestId?: string }
   | { type: "list_directories"; path?: string; requestId?: string }
   | { type: "validate_directory"; path: string; requestId?: string }
+  | { type: "pick_directory"; defaultPath?: string; requestId?: string }
   | { type: "ping" };
 
 export type ServerEvent =
@@ -59,4 +60,5 @@ export type ServerEvent =
       roots: string[];
       resolvedPath?: string;
     }
+  | { type: "directory_picked"; path: string | null; requestId?: string }
   | { type: "error"; code: string; message: string; requestId?: string };
