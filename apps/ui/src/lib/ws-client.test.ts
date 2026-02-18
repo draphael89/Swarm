@@ -108,6 +108,31 @@ describe('ManagerWsClient', () => {
     client.destroy()
   })
 
+  it('subscribes without forcing manager id when no initial target is provided', () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    expect(socket).toBeDefined()
+
+    socket.emit('open')
+    expect(socket.sentPayloads).toHaveLength(1)
+    expect(JSON.parse(socket.sentPayloads[0])).toEqual({ type: 'subscribe' })
+
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'release-manager',
+    })
+
+    expect(client.getState().targetAgentId).toBe('release-manager')
+    expect(client.getState().subscribedAgentId).toBe('release-manager')
+
+    client.destroy()
+  })
+
   it('sends attachment-only user messages when images are provided', () => {
     const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
 
