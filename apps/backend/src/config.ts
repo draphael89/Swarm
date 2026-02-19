@@ -21,7 +21,10 @@ export function createConfig(): SwarmConfig {
   const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
   const defaultDataDir = resolve(homedir(), nodeEnv === "production" ? ".swarm" : ".swarm-dev");
 
-  const autoMemoryMode = true;
+  const autoMemoryModeEnv = process.env.SWARM_MEMORY_AUTO_MODE?.trim().toLowerCase();
+  const autoMemoryMode = autoMemoryModeEnv
+    ? ["1", "true", "yes", "on"].includes(autoMemoryModeEnv)
+    : false;
   const autoMemoryMaxLines = parsePositiveIntegerEnv(process.env.SWARM_MEMORY_MAX_LINES, 400);
 
   const dataDirEnv = process.env.SWARM_DATA_DIR?.trim();

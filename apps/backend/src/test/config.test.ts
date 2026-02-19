@@ -66,7 +66,7 @@ describe('createConfig', () => {
       expect(config.cwdAllowlistRoots).toContain(config.paths.rootDir)
       expect(config.cwdAllowlistRoots).toContain(resolve(homedir(), 'worktrees'))
       expect(config.memory).toEqual({
-        autoMode: true,
+        autoMode: false,
         maxFileLines: 400,
       })
     })
@@ -82,7 +82,7 @@ describe('createConfig', () => {
       expect(config.paths.memoryFile).toBe(resolve(homedir(), '.swarm', 'MEMORY.md'))
       expect(config.paths.repoMemorySkillFile).toBe(resolve(config.paths.rootDir, '.swarm', 'skills', 'memory', 'SKILL.md'))
       expect(config.paths.agentsStoreFile).toBe(resolve(homedir(), '.swarm', 'swarm', 'agents.json'))
-      expect(config.memory.autoMode).toBe(true)
+      expect(config.memory.autoMode).toBe(false)
       expect(config.memory.maxFileLines).toBe(400)
     })
   })
