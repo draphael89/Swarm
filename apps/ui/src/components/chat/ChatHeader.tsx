@@ -1,4 +1,4 @@
-import { Plus } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -39,8 +39,15 @@ export function ChatHeader({ connected, activeAgentId, activeAgentLabel, showNew
         </Badge>
 
         {showNewChat ? (
-          <Button variant="ghost" size="icon" className="size-8" onClick={onNewChat} title="Start new chat">
-            <Plus className="size-4" />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 px-2.5"
+            onClick={onNewChat}
+            title="Clear conversation"
+          >
+            <Trash2 className="size-3.5" />
+            Clear
           </Button>
         ) : null}
       </div>
