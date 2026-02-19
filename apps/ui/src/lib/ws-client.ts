@@ -63,6 +63,8 @@ export class ManagerWsClient {
   private connectTimer: ReturnType<typeof setTimeout> | undefined
   private started = false
   private destroyed = false
+  private hasConnectedOnce = false
+  private shouldReloadOnReconnect = false
 
   private state: ManagerWsState
   private readonly listeners = new Set<Listener>()
@@ -367,6 +369,10 @@ export class ManagerWsClient {
     this.socket = socket
 
     socket.addEventListener('open', () => {
+      const shouldReload = this.shouldReloadOnReconnect
+      this.hasConnectedOnce = true
+      this.shouldReloadOnReconnect = false
+
       this.updateState({
         connected: true,
         lastError: null,
@@ -376,6 +382,10 @@ export class ManagerWsClient {
         type: 'subscribe',
         agentId: this.desiredAgentId ?? undefined,
       })
+
+      if (shouldReload && typeof window !== 'undefined' && typeof window.location?.reload === 'function') {
+        window.location.reload()
+      }
     })
 
     socket.addEventListener('message', (event) => {
@@ -383,6 +393,10 @@ export class ManagerWsClient {
     })
 
     socket.addEventListener('close', () => {
+      if (!this.destroyed && this.hasConnectedOnce) {
+        this.shouldReloadOnReconnect = true
+      }
+
       this.updateState({
         connected: false,
         subscribedAgentId: null,
