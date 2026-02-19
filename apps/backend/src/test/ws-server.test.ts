@@ -120,10 +120,6 @@ async function makeTempConfig(port: number, allowNonManagerSubscriptions = false
     },
     defaultCwd: root,
     cwdAllowlistRoots: [root, join(root, 'worktrees')],
-    memory: {
-      autoMode: false,
-      maxFileLines: 400,
-    },
     paths: {
       rootDir: root,
       dataDir,

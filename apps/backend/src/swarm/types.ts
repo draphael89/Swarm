@@ -66,11 +66,6 @@ export interface SwarmPaths {
   agentsStoreFile: string;
 }
 
-export interface SwarmMemoryConfig {
-  autoMode: boolean;
-  maxFileLines: number;
-}
-
 export interface SwarmConfig {
   host: string;
   port: number;
@@ -81,7 +76,6 @@ export interface SwarmConfig {
   defaultModel: AgentModelDescriptor;
   defaultCwd: string;
   cwdAllowlistRoots: string[];
-  memory: SwarmMemoryConfig;
   paths: SwarmPaths;
 }
 

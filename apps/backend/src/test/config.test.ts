@@ -17,8 +17,6 @@ const MANAGED_ENV_KEYS = [
   'SWARM_MODEL_ID',
   'SWARM_THINKING_LEVEL',
   'SWARM_CWD_ALLOWLIST_ROOTS',
-  'SWARM_MEMORY_AUTO_MODE',
-  'SWARM_MEMORY_MAX_LINES',
 ] as const
 
 async function withEnv(overrides: Partial<Record<(typeof MANAGED_ENV_KEYS)[number], string>>, run: () => Promise<void> | void) {
@@ -65,10 +63,6 @@ describe('createConfig', () => {
       expect(config.paths.repoMemorySkillFile).toBe(resolve(config.paths.rootDir, '.swarm', 'skills', 'memory', 'SKILL.md'))
       expect(config.cwdAllowlistRoots).toContain(config.paths.rootDir)
       expect(config.cwdAllowlistRoots).toContain(resolve(homedir(), 'worktrees'))
-      expect(config.memory).toEqual({
-        autoMode: false,
-        maxFileLines: 400,
-      })
     })
   })
 
@@ -82,8 +76,6 @@ describe('createConfig', () => {
       expect(config.paths.memoryFile).toBe(resolve(homedir(), '.swarm', 'MEMORY.md'))
       expect(config.paths.repoMemorySkillFile).toBe(resolve(config.paths.rootDir, '.swarm', 'skills', 'memory', 'SKILL.md'))
       expect(config.paths.agentsStoreFile).toBe(resolve(homedir(), '.swarm', 'swarm', 'agents.json'))
-      expect(config.memory.autoMode).toBe(false)
-      expect(config.memory.maxFileLines).toBe(400)
     })
   })
 
@@ -117,26 +109,6 @@ describe('createConfig', () => {
 
       expect(config.cwdAllowlistRoots).toContain(resolve(config.paths.rootDir, 'sandbox'))
       expect(config.cwdAllowlistRoots).toContain(resolve('/tmp/custom-root'))
-    })
-  })
-
-  it('supports opt-in auto-memory mode via environment variables', async () => {
-    await withEnv({ SWARM_MEMORY_AUTO_MODE: 'true', SWARM_MEMORY_MAX_LINES: '275' }, () => {
-      const config = createConfig()
-
-      expect(config.memory).toEqual({
-        autoMode: true,
-        maxFileLines: 275,
-      })
-    })
-  })
-
-  it('falls back to default auto-memory line limit when env value is invalid', async () => {
-    await withEnv({ SWARM_MEMORY_AUTO_MODE: '1', SWARM_MEMORY_MAX_LINES: '0' }, () => {
-      const config = createConfig()
-
-      expect(config.memory.autoMode).toBe(true)
-      expect(config.memory.maxFileLines).toBe(400)
     })
   })
 })

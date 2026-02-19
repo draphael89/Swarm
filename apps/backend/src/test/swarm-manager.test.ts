@@ -68,10 +68,6 @@ class TestSwarmManager extends SwarmManager {
     return this.getMemoryRuntimeResources()
   }
 
-  async triggerAutoMemoryReflectionForTest(managerId = 'manager'): Promise<void> {
-    await this.maybeRunAutoMemoryReflection(managerId)
-  }
-
   protected override async createRuntimeForDescriptor(
     descriptor: AgentDescriptor,
     systemPrompt: string,
@@ -117,10 +113,6 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
     },
     defaultCwd: root,
     cwdAllowlistRoots: [root, join(root, 'worktrees')],
-    memory: {
-      autoMode: false,
-      maxFileLines: 400,
-    },
     paths: {
       rootDir: root,
       dataDir,
@@ -217,20 +209,6 @@ describe('SwarmManager', () => {
     expect(workerPrompt).toContain('Incoming messages prefixed with "SYSTEM:"')
     expect(workerPrompt).toContain('Persistent memory lives at ${SWARM_DATA_DIR}/MEMORY.md')
     expect(workerPrompt).toContain('Follow the memory skill workflow before editing MEMORY.md')
-  })
-
-  it('adds auto-memory guidance to manager prompts when enabled', async () => {
-    const config = await makeTempConfig()
-    config.memory.autoMode = true
-    config.memory.maxFileLines = 275
-
-    const manager = new TestSwarmManager(config)
-    await manager.boot()
-
-    const managerPrompt = manager.systemPromptByAgentId.get('manager')
-    expect(managerPrompt).toContain('Auto-memory mode (enabled):')
-    expect(managerPrompt).toContain('may autonomously update MEMORY.md')
-    expect(managerPrompt).toContain('under 275 lines')
   })
 
   it('auto-loads MEMORY.md context and wires the built-in memory skill', async () => {
@@ -414,50 +392,6 @@ describe('SwarmManager', () => {
     expect(managerRuntime).toBeDefined()
     expect(managerRuntime?.sendCalls.at(-1)?.delivery).toBe('steer')
     expect(managerRuntime?.sendCalls.at(-1)?.message).toBe('interrupt current plan')
-  })
-
-  it('queues auto-memory reflection prompts only after manager has replied to the user', async () => {
-    const config = await makeTempConfig()
-    config.memory.autoMode = true
-    config.memory.maxFileLines = 180
-
-    const manager = new TestSwarmManager(config)
-    await manager.boot()
-
-    await manager.handleUserMessage('keep future updates concise')
-
-    const managerRuntime = manager.runtimeByAgentId.get('manager')
-    expect(managerRuntime).toBeDefined()
-    expect(managerRuntime?.sendCalls).toHaveLength(1)
-
-    await manager.triggerAutoMemoryReflectionForTest('manager')
-    expect(managerRuntime?.sendCalls).toHaveLength(1)
-
-    await manager.publishToUser('manager', 'Understood, I will keep updates concise.', 'speak_to_user')
-    await manager.triggerAutoMemoryReflectionForTest('manager')
-
-    expect(managerRuntime?.sendCalls).toHaveLength(2)
-    expect(managerRuntime?.sendCalls.at(-1)?.delivery).toBe('followUp')
-
-    const reflectionMessage = managerRuntime?.sendCalls.at(-1)?.message
-    expect(typeof reflectionMessage).toBe('string')
-    if (typeof reflectionMessage === 'string') {
-      expect(reflectionMessage).toContain('SYSTEM: Auto-memory reflection')
-      expect(reflectionMessage).toContain('under 180 lines')
-    }
-  })
-
-  it('does not queue auto-memory reflection prompts when mode is disabled', async () => {
-    const config = await makeTempConfig()
-    const manager = new TestSwarmManager(config)
-    await manager.boot()
-
-    await manager.handleUserMessage('track this preference')
-    await manager.publishToUser('manager', 'acknowledged', 'speak_to_user')
-    await manager.triggerAutoMemoryReflectionForTest('manager')
-
-    const managerRuntime = manager.runtimeByAgentId.get('manager')
-    expect(managerRuntime?.sendCalls).toHaveLength(1)
   })
 
   it('does not SYSTEM-prefix direct user messages routed to a worker', async () => {
