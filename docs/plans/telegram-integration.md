@@ -1,7 +1,7 @@
 # Telegram Integration Plan for Swarm
 
 ## Overview
-Add Telegram as a chat interface to Swarm so you can talk to the manager agent via Telegram messages.
+Add Telegram as a chat interface to Swarm so you can talk to the manager agent via Telegram messages. **All configuration happens in the Swarm web UI** — no terminal/env var setup required.
 
 ---
 
@@ -28,7 +28,81 @@ Add Telegram as a chat interface to Swarm so you can talk to the manager agent v
 
 ---
 
-## 3. Proposed Architecture
+## 3. UI-First Configuration (NEW — replaces env var approach)
+
+### Settings / Integrations Page
+
+Instead of configuring Telegram via env vars and `.env` files, **all Telegram setup happens in the Swarm web UI**:
+
+#### Settings Panel Design
+- Accessible via a **Settings/gear icon** in the sidebar or header
+- **Integrations** tab with a Telegram section containing:
+
+```
+┌─────────────────────────────────────────────┐
+│  🤖 Telegram Integration                    │
+│                                              │
+│  Status: ● Connected (polling)    [Disable]  │
+│                                              │
+│  Bot Token:  [••••••••••••••••••]  [👁 Show] │
+│                                              │
+│  Allowed Users:                              │
+│  ┌──────────────────────────────────┐       │
+│  │ @sawyerhood (ID: 123456789)  ✕  │       │
+│  └──────────────────────────────────┘       │
+│  [+ Add User ID]                             │
+│                                              │
+│  ☑ Private chats only                        │
+│  ☐ Drop pending updates on start             │
+│  ☑ Show typing indicator                     │
+│                                              │
+│  Target Agent: [opus-manager ▼]              │
+│                                              │
+│  [Save & Connect]                            │
+│                                              │
+│  ─── Connection Log ───                      │
+│  09:15 Connected to Telegram                 │
+│  09:15 Polling started (25s timeout)         │
+│  09:16 Message from @sawyerhood: "hello"     │
+└─────────────────────────────────────────────┘
+```
+
+#### How Config is Stored
+- Backend persists Telegram settings to `$SWARM_DATA_DIR/integrations/telegram.json`
+- Settings are loaded at boot and can be hot-reloaded via the UI without restart
+- **No env vars needed** — everything is configured through the UI
+- The settings file is auto-created when the user first configures Telegram
+
+#### Config Schema (`telegram.json`)
+```json
+{
+  "enabled": true,
+  "botToken": "encrypted-or-plaintext-token",
+  "mode": "polling",
+  "targetAgentId": "opus-manager",
+  "allowedUserIds": [123456789],
+  "allowedChatIds": [],
+  "privateChatsOnly": true,
+  "dropPendingUpdates": true,
+  "typingIndicator": true,
+  "pollTimeoutSec": 25,
+  "pollLimit": 100
+}
+```
+
+#### API Endpoints for Settings
+- `GET /api/integrations/telegram` — get current config (token masked)
+- `PUT /api/integrations/telegram` — update config + restart bridge
+- `POST /api/integrations/telegram/test` — test connection with current token
+- `DELETE /api/integrations/telegram` — disable and remove config
+
+#### WS Events for Status
+- `telegram_status` event — broadcast connection state changes to UI
+  - `{ type: "telegram_status", status: "connected" | "disconnected" | "error", detail: "..." }`
+
+---
+
+## 4. Proposed Architecture
 
 ### New module: `apps/backend/src/telegram/`
 
@@ -36,25 +110,33 @@ Add Telegram as a chat interface to Swarm so you can talk to the manager agent v
 |------|---------|
 | `telegram-client.ts` | Thin Bot API caller (getUpdates, sendMessage, getFile, etc.) |
 | `telegram-bridge.ts` | Maps Telegram updates ↔ Swarm manager messages |
+| `telegram-config.ts` | Load/save/validate config from `telegram.json` |
 | `telegram-session-map.ts` | Maps Telegram chat/user → Swarm agent session |
-| `telegram-security.ts` | Allowlist checks, webhook secret, dedupe/rate limit |
+| `telegram-security.ts` | Allowlist checks, dedupe/rate limit |
 | `telegram-types.ts` | Minimal Telegram Update/Message types |
-| `telegram-poller.ts` | Long-polling loop (V1) |
-| `telegram-webhook.ts` | Webhook handler (V2, optional) |
+| `telegram-poller.ts` | Long-polling loop |
 
-### Lifecycle
-- Start Telegram bridge after `swarmManager.boot()` in `apps/backend/src/index.ts`
-- Stop bridge during shutdown
+### Frontend additions: `apps/ui/src/`
+
+| File | Purpose |
+|------|---------|
+| `components/settings/TelegramSettings.tsx` | Config form + connection status |
+| `components/settings/SettingsPanel.tsx` | Settings panel container (for future integrations too) |
+
+### Lifecycle integration
+- On boot: load `telegram.json`, start bridge if enabled
+- On UI config save: hot-reload bridge (stop → reconfigure → start)
+- No server restart needed for config changes
 
 ---
 
-## 4. Message Flow Design
+## 5. Message Flow Design
 
 ### Inbound (Telegram → Swarm)
-1. Receive Telegram `Update` (polling/webhook)
-2. Validate sender against allowlist
+1. Receive Telegram `Update` via polling
+2. Validate sender against allowlist (configured in UI)
 3. Normalize: text from `message.text`, photos → download → base64 image attachments
-4. Call `swarmManager.handleUserMessage(...)` targeting manager agent
+4. Call `swarmManager.handleUserMessage(...)` targeting configured agent
 
 ### Outbound (Swarm → Telegram)
 1. Bridge listens to `conversation_message` events
@@ -63,89 +145,53 @@ Add Telegram as a chat interface to Swarm so you can talk to the manager agent v
 
 ---
 
-## 5. Security & Auth
+## 6. Security & Auth
 
-- **`SWARM_TELEGRAM_ALLOWED_USER_IDS`** — CSV of authorized Telegram user IDs (deny by default)
-- Private-chat-only by default
+- **Allowlist configured in UI** — no need to edit env vars
+- Private-chat-only by default (toggle in UI)
 - Ignore bot-origin messages
-- Webhook mode: verify `X-Telegram-Bot-Api-Secret-Token` header
 - Dedupe update IDs, maintain offset
+- Bot token stored in `telegram.json` (consider encryption at rest later)
 - Never log bot token
-
----
-
-## 6. Configuration (Env Vars)
-
-```env
-# Core
-SWARM_TELEGRAM_ENABLED=false
-SWARM_TELEGRAM_BOT_TOKEN=your-bot-token
-
-# Mode
-SWARM_TELEGRAM_MODE=polling          # polling | webhook
-SWARM_TELEGRAM_TARGET_AGENT_ID=      # default: manager
-
-# Auth
-SWARM_TELEGRAM_ALLOWED_USER_IDS=     # CSV of user IDs
-SWARM_TELEGRAM_ALLOWED_CHAT_IDS=     # CSV of chat IDs
-SWARM_TELEGRAM_PRIVATE_CHATS_ONLY=true
-
-# Polling config
-SWARM_TELEGRAM_POLL_TIMEOUT_SEC=25
-SWARM_TELEGRAM_POLL_LIMIT=100
-SWARM_TELEGRAM_DROP_PENDING_UPDATES=true
-
-# Webhook config (V2)
-SWARM_TELEGRAM_WEBHOOK_URL=
-SWARM_TELEGRAM_WEBHOOK_PATH=/api/telegram/webhook
-SWARM_TELEGRAM_WEBHOOK_SECRET=
-
-# Limits
-SWARM_TELEGRAM_MAX_FILE_MB=20
-SWARM_TELEGRAM_TYPING_INDICATOR=true
-```
 
 ---
 
 ## 7. Dependencies
 
-**Recommendation: Raw `fetch` API** — no new runtime dependencies. Full control, minimal footprint, consistent with current backend style. Reassess if middleware complexity grows (telegraf/etc).
+**Recommendation: Raw `fetch` API** — no new runtime dependencies. Full control, minimal footprint, consistent with current backend style.
 
 ---
 
 ## 8. Implementation Phases
 
-### Phase 0: Foundations
-- Config parsing + feature flag
-- Telegram client abstraction + typed API errors
+### Phase 0: Settings Infrastructure
+- Add integrations config directory + telegram.json persistence
+- Add REST endpoints for telegram config CRUD
+- Add settings UI panel with Telegram config form
 
 ### Phase 1: Polling MVP (text only)
-- Polling loop (`getUpdates` + offset persistence)
-- Auth allowlist + private-only checks
+- Telegram client (raw fetch)
+- Polling loop with offset persistence
+- Auth allowlist checks (from UI config)
 - Route text → manager via `handleUserMessage`
 - Forward `speak_to_user` → Telegram `sendMessage`
 - Chunking + retry/backoff on 429
+- Connection status broadcast to UI
 
 ### Phase 2: Images + UX
 - Photo/image-doc ingestion (download → base64 → attachment)
-- Typing indicator (`sendChatAction`)
+- Typing indicator
 - Clearer system/error responses
+- Connection log in UI
 
-### Phase 3: Webhook Mode
-- Webhook endpoint integration
-- Secret header verification
-- Health tooling (`getWebhookInfo`)
-
-### Phase 4: Session Mapping
-- Optional per-chat manager mapping + persistence
-
-### Phase 5: Advanced
-- Non-image file attachments (requires contract extension)
-- Optional streaming UX via `editMessageText` throttled updates
+### Phase 3: Advanced
+- Per-chat session mapping
+- Non-image file attachments
+- Optional streaming UX via `editMessageText`
 
 ---
 
-## 9. Limitations to Document
+## 9. Limitations
 
 - Telegram message/media limits are stricter than web UI
 - No rich UI/thread controls available
@@ -158,18 +204,20 @@ SWARM_TELEGRAM_TYPING_INDICATOR=true
 ## 10. Test Plan
 
 **Unit tests (vitest):**
+- Config load/save/validation
 - Update parsing + sender authorization
 - Dedupe/offset behavior
 - Text chunking at 4096 boundary
 - Image attachment transform pipeline
-- Retry/backoff on 429
 
 **Integration tests:**
 - Mock Telegram HTTP endpoints
 - End-to-end: Update → handleUserMessage → speak_to_user → sendMessage
+- Config CRUD endpoints
 
 **Manual smoke:**
-- `/start` + text in private chat
-- Image message
-- Oversized response chunking
-- Unauthorized user denial
+- Configure Telegram in UI
+- Send text in private chat
+- Send image
+- Toggle enabled/disabled
+- Verify unauthorized user rejection
