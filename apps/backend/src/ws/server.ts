@@ -1,7 +1,15 @@
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { WebSocketServer, type RawData, WebSocket } from "ws";
 import type { ClientCommand, ServerEvent } from "../protocol/ws-types.js";
 import { describeSwarmModelPresets, isSwarmModelPreset } from "../swarm/model-presets.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
+
+const REBOOT_ENDPOINT_PATH = "/api/reboot";
+const RESTART_SIGNAL: NodeJS.Signals = "SIGUSR1";
 
 export class SwarmWebSocketServer {
   private readonly swarmManager: SwarmManager;
@@ -9,6 +17,7 @@ export class SwarmWebSocketServer {
   private readonly port: number;
   private readonly allowNonManagerSubscriptions: boolean;
 
+  private httpServer: HttpServer | null = null;
   private wss: WebSocketServer | null = null;
   private readonly subscriptions = new Map<WebSocket, string>();
 
@@ -50,12 +59,16 @@ export class SwarmWebSocketServer {
   }
 
   async start(): Promise<void> {
-    if (this.wss) return;
+    if (this.httpServer || this.wss) return;
 
-    const wss = new WebSocketServer({
-      host: this.host,
-      port: this.port
+    const httpServer = createServer((request, response) => {
+      this.handleHttpRequest(request, response);
     });
+    const wss = new WebSocketServer({
+      server: httpServer
+    });
+
+    this.httpServer = httpServer;
     this.wss = wss;
 
     this.wss.on("connection", (socket) => {
@@ -84,12 +97,13 @@ export class SwarmWebSocketServer {
       };
 
       const cleanup = (): void => {
-        wss.off("listening", onListening);
-        wss.off("error", onError);
+        httpServer.off("listening", onListening);
+        httpServer.off("error", onError);
       };
 
-      wss.on("listening", onListening);
-      wss.on("error", onError);
+      httpServer.on("listening", onListening);
+      httpServer.on("error", onError);
+      httpServer.listen(this.port, this.host);
     });
 
     this.swarmManager.on("conversation_message", this.onConversationMessage);
@@ -106,21 +120,82 @@ export class SwarmWebSocketServer {
     this.swarmManager.off("agent_status", this.onAgentStatus);
     this.swarmManager.off("agents_snapshot", this.onAgentsSnapshot);
 
-    const current = this.wss;
+    const currentWss = this.wss;
+    const currentHttpServer = this.httpServer;
+
     this.wss = null;
+    this.httpServer = null;
     this.subscriptions.clear();
 
-    if (!current) return;
+    if (currentWss) {
+      await closeWebSocketServer(currentWss);
+    }
 
-    await new Promise<void>((resolve, reject) => {
-      current.close((error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
+    if (currentHttpServer) {
+      await closeHttpServer(currentHttpServer);
+    }
+  }
+
+  private handleHttpRequest(request: IncomingMessage, response: ServerResponse): void {
+    const requestUrl = new URL(
+      request.url ?? "/",
+      `http://${request.headers.host ?? `${this.host}:${this.port}`}`
+    );
+
+    if (requestUrl.pathname !== REBOOT_ENDPOINT_PATH) {
+      response.statusCode = 404;
+      response.end("Not Found");
+      return;
+    }
+
+    if (request.method === "OPTIONS") {
+      this.applyRebootCorsHeaders(request, response);
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    if (request.method !== "POST") {
+      this.applyRebootCorsHeaders(request, response);
+      response.setHeader("Allow", "POST, OPTIONS");
+      this.sendJson(response, 405, { error: "Method Not Allowed" });
+      return;
+    }
+
+    this.applyRebootCorsHeaders(request, response);
+    this.sendJson(response, 200, { ok: true });
+
+    const rebootTimer = setTimeout(() => {
+      this.triggerRebootSignal();
+    }, 25);
+    rebootTimer.unref();
+  }
+
+  private applyRebootCorsHeaders(request: IncomingMessage, response: ServerResponse): void {
+    const origin = typeof request.headers.origin === "string" ? request.headers.origin : "*";
+
+    response.setHeader("Access-Control-Allow-Origin", origin);
+    response.setHeader("Vary", "Origin");
+    response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    response.setHeader("Access-Control-Allow-Headers", "content-type");
+  }
+
+  private sendJson(response: ServerResponse, statusCode: number, body: Record<string, unknown>): void {
+    response.statusCode = statusCode;
+    response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.end(JSON.stringify(body));
+  }
+
+  private triggerRebootSignal(): void {
+    try {
+      const daemonPid = resolveProdDaemonPid(this.swarmManager.getConfig().paths.rootDir);
+      const targetPid = daemonPid ?? process.pid;
+
+      process.kill(targetPid, RESTART_SIGNAL);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[reboot] Failed to send ${RESTART_SIGNAL}: ${message}`);
+    }
   }
 
   private async handleSocketMessage(socket: WebSocket, raw: RawData): Promise<void> {
@@ -744,6 +819,65 @@ export class SwarmWebSocketServer {
 
     return { ok: false, error: "Unknown command type" };
   }
+}
+
+async function closeWebSocketServer(server: WebSocketServer): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+async function closeHttpServer(server: HttpServer): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+function resolveProdDaemonPid(repoRoot: string): number | null {
+  const pidFile = getProdDaemonPidFile(repoRoot);
+  if (!existsSync(pidFile)) {
+    return null;
+  }
+
+  const pid = Number.parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+
+  try {
+    process.kill(pid, 0);
+    return pid;
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: string }).code === "ESRCH"
+    ) {
+      rmSync(pidFile, { force: true });
+    }
+
+    return null;
+  }
+}
+
+function getProdDaemonPidFile(repoRoot: string): string {
+  const repoHash = createHash("sha1").update(repoRoot).digest("hex").slice(0, 10);
+  return join(tmpdir(), `swarm-prod-daemon-${repoHash}.pid`);
 }
 
 function parseConversationImageAttachments(

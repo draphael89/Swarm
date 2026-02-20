@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import WebSocket from 'ws'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SessionManager } from '@mariozechner/pi-coding-agent'
 import { SwarmManager } from '../swarm/swarm-manager.js'
 import type { AgentDescriptor, RequestedDeliveryMode, SendMessageReceipt, SwarmConfig } from '../swarm/types.js'
@@ -201,6 +202,46 @@ describe('SwarmWebSocketServer', () => {
     client.close()
     await once(client, 'close')
     await server.stop()
+  })
+
+  it('accepts POST /api/reboot and signals the daemon pid asynchronously', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const daemonPid = 54321
+    const repoHash = createHash('sha1').update(config.paths.rootDir).digest('hex').slice(0, 10)
+    const pidFile = join(tmpdir(), `swarm-prod-daemon-${repoHash}.pid`)
+    await writeFile(pidFile, `${daemonPid}\n`, 'utf8')
+
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
+
+    try {
+      const response = await fetch(`http://${config.host}:${config.port}/api/reboot`, {
+        method: 'POST',
+      })
+
+      expect(response.status).toBe(200)
+      await new Promise((resolve) => setTimeout(resolve, 60))
+
+      expect(killSpy).toHaveBeenCalledWith(daemonPid, 0)
+      expect(killSpy).toHaveBeenCalledWith(daemonPid, 'SIGUSR1')
+    } finally {
+      killSpy.mockRestore()
+      await rm(pidFile, { force: true })
+      await server.stop()
+    }
   })
 
   it('accepts attachment-only user messages and broadcasts attachments', async () => {

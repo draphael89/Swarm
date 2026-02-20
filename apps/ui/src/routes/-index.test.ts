@@ -143,7 +143,7 @@ describe('IndexPage create manager model selection', () => {
 
     click(getByRole(container, 'button', { name: 'Add manager' }))
 
-    const modelSelect = getByLabelText(container, 'Model') as HTMLSelectElement
+    const modelSelect = getByLabelText(document.body, 'Model') as HTMLSelectElement
     expect(modelSelect.value).toBe('codex-5.3')
 
     const optionValues = Array.from(modelSelect.options).map((option) => option.value)
@@ -155,11 +155,11 @@ describe('IndexPage create manager model selection', () => {
 
     click(getByRole(container, 'button', { name: 'Add manager' }))
 
-    changeValue(getByLabelText(container, 'Name') as HTMLInputElement, 'release-manager')
-    changeValue(getByLabelText(container, 'Working directory') as HTMLInputElement, '/tmp/release')
-    changeValue(getByLabelText(container, 'Model') as HTMLSelectElement, 'opus-4.6')
+    changeValue(getByLabelText(document.body, 'Name') as HTMLInputElement, 'release-manager')
+    changeValue(getByLabelText(document.body, 'Working directory') as HTMLInputElement, '/tmp/release')
+    changeValue(getByLabelText(document.body, 'Model') as HTMLSelectElement, 'opus-4.6')
 
-    click(getByRole(container, 'button', { name: 'Create manager' }))
+    click(getByRole(document.body, 'button', { name: 'Create manager' }))
 
     const validatePayload = JSON.parse(socket.sentPayloads.at(-1) ?? '{}')
     expect(validatePayload.type).toBe('validate_directory')

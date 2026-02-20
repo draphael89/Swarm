@@ -146,6 +146,15 @@ export function IndexPage() {
     clientRef.current?.deleteAgent(agentId)
   }
 
+  const handleReboot = useCallback(() => {
+    void requestDaemonReboot(wsUrl).catch((error) => {
+      setState((previous) => ({
+        ...previous,
+        lastError: `Failed to request reboot: ${toErrorMessage(error)}`,
+      }))
+    })
+  }, [wsUrl])
+
   const handleRequestDeleteManager = (managerId: string) => {
     const manager = state.agents.find((agent) => agent.agentId === managerId && agent.role === 'manager')
     if (!manager) return
@@ -324,6 +333,7 @@ export function IndexPage() {
           onSelectAgent={handleSelectAgent}
           onDeleteAgent={handleDeleteAgent}
           onDeleteManager={handleRequestDeleteManager}
+          onReboot={handleReboot}
         />
 
         <div
@@ -542,6 +552,28 @@ function OverlayDialog({ open, title, description, onClose, children }: OverlayD
       </div>
     </div>
   )
+}
+
+async function requestDaemonReboot(wsUrl: string): Promise<void> {
+  const endpoint = resolveRebootEndpoint(wsUrl)
+  const response = await fetch(endpoint, { method: 'POST' })
+
+  if (!response.ok) {
+    throw new Error(`Reboot request failed with status ${response.status}`)
+  }
+}
+
+function resolveRebootEndpoint(wsUrl: string): string {
+  try {
+    const parsed = new URL(wsUrl)
+    parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:'
+    parsed.pathname = '/api/reboot'
+    parsed.search = ''
+    parsed.hash = ''
+    return parsed.toString()
+  } catch {
+    return '/api/reboot'
+  }
 }
 
 function toErrorMessage(error: unknown): string {
