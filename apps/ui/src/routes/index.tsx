@@ -14,6 +14,7 @@ import { ArtifactPanel } from '@/components/chat/ArtifactPanel'
 import { ChatHeader } from '@/components/chat/ChatHeader'
 import { MessageInput, type MessageInputHandle } from '@/components/chat/MessageInput'
 import { MessageList } from '@/components/chat/MessageList'
+import { SettingsDialog } from '@/components/chat/SettingsDialog'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -38,16 +39,6 @@ export const Route = createFileRoute('/')({
 })
 
 const DEFAULT_MANAGER_MODEL: ManagerModelPreset = 'codex-5.3'
-
-interface SettingsEnvVariable {
-  name: string
-  description?: string
-  required: boolean
-  helpUrl?: string
-  skillName: string
-  isSet: boolean
-  maskedValue?: string
-}
 
 export function IndexPage() {
   const wsUrl = import.meta.env.VITE_SWARM_WS_URL ?? 'ws://127.0.0.1:47187'
@@ -80,14 +71,6 @@ export function IndexPage() {
   const [isDeletingManager, setIsDeletingManager] = useState(false)
 
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false)
-  const [settingsEnvVariables, setSettingsEnvVariables] = useState<SettingsEnvVariable[]>([])
-  const [settingsDraftByName, setSettingsDraftByName] = useState<Record<string, string>>({})
-  const [settingsRevealByName, setSettingsRevealByName] = useState<Record<string, boolean>>({})
-  const [settingsError, setSettingsError] = useState<string | null>(null)
-  const [settingsSuccessMessage, setSettingsSuccessMessage] = useState<string | null>(null)
-  const [isLoadingSettings, setIsLoadingSettings] = useState(false)
-  const [settingsSavingVarName, setSettingsSavingVarName] = useState<string | null>(null)
-  const [settingsDeletingVarName, setSettingsDeletingVarName] = useState<string | null>(null)
 
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactReference | null>(null)
@@ -183,78 +166,8 @@ export function IndexPage() {
     })
   }, [wsUrl])
 
-  const loadSettingsEnvVariables = useCallback(async () => {
-    setIsLoadingSettings(true)
-    setSettingsError(null)
-
-    try {
-      const response = await fetchSettingsEnvVariables(wsUrl)
-      setSettingsEnvVariables(response)
-    } catch (error) {
-      setSettingsError(toErrorMessage(error))
-    } finally {
-      setIsLoadingSettings(false)
-    }
-  }, [wsUrl])
-
-  useEffect(() => {
-    if (!isSettingsDialogOpen) {
-      return
-    }
-
-    void loadSettingsEnvVariables()
-  }, [isSettingsDialogOpen, loadSettingsEnvVariables])
-
   const handleOpenSettingsDialog = () => {
-    setSettingsError(null)
-    setSettingsSuccessMessage(null)
     setIsSettingsDialogOpen(true)
-  }
-
-  const handleSaveSettingsVariable = async (variableName: string) => {
-    const nextValue = settingsDraftByName[variableName]?.trim() ?? ''
-    if (!nextValue) {
-      setSettingsError(`Enter a value for ${variableName} before saving.`)
-      return
-    }
-
-    setSettingsError(null)
-    setSettingsSuccessMessage(null)
-    setSettingsSavingVarName(variableName)
-
-    try {
-      await updateSettingsEnvVariables(wsUrl, { [variableName]: nextValue })
-      setSettingsDraftByName((previous) => ({
-        ...previous,
-        [variableName]: '',
-      }))
-      setSettingsSuccessMessage(`Saved ${variableName}.`)
-      await loadSettingsEnvVariables()
-    } catch (error) {
-      setSettingsError(toErrorMessage(error))
-    } finally {
-      setSettingsSavingVarName(null)
-    }
-  }
-
-  const handleDeleteSettingsVariable = async (variableName: string) => {
-    setSettingsError(null)
-    setSettingsSuccessMessage(null)
-    setSettingsDeletingVarName(variableName)
-
-    try {
-      await deleteSettingsEnvVariable(wsUrl, variableName)
-      setSettingsDraftByName((previous) => ({
-        ...previous,
-        [variableName]: '',
-      }))
-      setSettingsSuccessMessage(`Removed ${variableName}.`)
-      await loadSettingsEnvVariables()
-    } catch (error) {
-      setSettingsError(toErrorMessage(error))
-    } finally {
-      setSettingsDeletingVarName(null)
-    }
   }
 
   const handleRequestDeleteManager = (managerId: string) => {
@@ -599,148 +512,11 @@ export function IndexPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog
+      <SettingsDialog
         open={isSettingsDialogOpen}
-        onOpenChange={(open) => {
-          if (!open && (settingsSavingVarName || settingsDeletingVarName)) {
-            return
-          }
-
-          if (!open) {
-            setSettingsError(null)
-            setSettingsSuccessMessage(null)
-          }
-
-          setIsSettingsDialogOpen(open)
-        }}
-      >
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Settings</DialogTitle>
-            <DialogDescription>Configure environment variables required by installed skills.</DialogDescription>
-          </DialogHeader>
-
-          <section className="space-y-3">
-            <div>
-              <h3 className="text-sm font-semibold">Environment Variables</h3>
-              <p className="text-xs text-muted-foreground">
-                Values are stored securely in your swarm data directory and never shown in plain text.
-              </p>
-            </div>
-
-            {settingsError ? <p className="text-xs text-destructive">{settingsError}</p> : null}
-            {settingsSuccessMessage ? <p className="text-xs text-emerald-600">{settingsSuccessMessage}</p> : null}
-
-            {isLoadingSettings ? (
-              <p className="text-xs text-muted-foreground">Loading environment variables...</p>
-            ) : settingsEnvVariables.length === 0 ? (
-              <p className="rounded-md border border-dashed border-border px-3 py-4 text-xs text-muted-foreground">
-                No skill-declared environment variables were found.
-              </p>
-            ) : (
-              <ul className="space-y-3">
-                {settingsEnvVariables.map((variable) => {
-                  const isSaving = settingsSavingVarName === variable.name
-                  const isDeleting = settingsDeletingVarName === variable.name
-                  const draftValue = settingsDraftByName[variable.name] ?? ''
-                  const isRevealed = settingsRevealByName[variable.name] === true
-
-                  return (
-                    <li key={`${variable.skillName}:${variable.name}`} className="rounded-lg border border-border p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-medium">{variable.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Skill: <span className="font-medium text-foreground/80">{variable.skillName}</span>
-                          </p>
-                        </div>
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                            variable.isSet ? 'bg-emerald-500/15 text-emerald-600' : 'bg-amber-500/15 text-amber-600'
-                          }`}
-                        >
-                          {variable.isSet ? 'Set' : 'Missing'}
-                        </span>
-                      </div>
-
-                      {variable.description ? (
-                        <p className="mt-2 text-xs text-muted-foreground">{variable.description}</p>
-                      ) : null}
-
-                      {variable.helpUrl ? (
-                        <a
-                          href={variable.helpUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mt-1 inline-block text-xs text-primary underline-offset-2 hover:underline"
-                        >
-                          Get API key
-                        </a>
-                      ) : null}
-
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <Input
-                          type={isRevealed ? 'text' : 'password'}
-                          placeholder={variable.isSet ? variable.maskedValue ?? '********' : 'Enter value'}
-                          value={draftValue}
-                          onChange={(event) => {
-                            const nextValue = event.target.value
-                            setSettingsDraftByName((previous) => ({
-                              ...previous,
-                              [variable.name]: nextValue,
-                            }))
-                            setSettingsError(null)
-                            setSettingsSuccessMessage(null)
-                          }}
-                          className="min-w-[16rem] flex-1"
-                          autoComplete="off"
-                          spellCheck={false}
-                          disabled={isSaving || isDeleting}
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setSettingsRevealByName((previous) => ({
-                              ...previous,
-                              [variable.name]: !previous[variable.name],
-                            }))
-                          }}
-                          disabled={isSaving || isDeleting}
-                        >
-                          {isRevealed ? 'Hide' : 'Show'}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={() => void handleSaveSettingsVariable(variable.name)}
-                          disabled={!draftValue.trim() || isSaving || isDeleting}
-                        >
-                          {isSaving ? 'Saving...' : 'Save'}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void handleDeleteSettingsVariable(variable.name)}
-                          disabled={isSaving || isDeleting || !variable.isSet}
-                        >
-                          {isDeleting ? 'Removing...' : 'Remove'}
-                        </Button>
-                      </div>
-
-                      <p className="mt-2 text-[11px] text-muted-foreground">
-                        {variable.required ? 'Required by this skill.' : 'Optional for this skill.'}
-                      </p>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </section>
-        </DialogContent>
-      </Dialog>
+        onOpenChange={setIsSettingsDialogOpen}
+        wsUrl={wsUrl}
+      />
 
       <OverlayDialog
         open={Boolean(managerToDelete)}
@@ -826,50 +602,6 @@ async function requestDaemonReboot(wsUrl: string): Promise<void> {
   }
 }
 
-async function fetchSettingsEnvVariables(wsUrl: string): Promise<SettingsEnvVariable[]> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/settings/env')
-  const response = await fetch(endpoint)
-
-  if (!response.ok) {
-    throw new Error(`Settings request failed with status ${response.status}`)
-  }
-
-  const payload = (await response.json()) as { variables?: unknown }
-  if (!payload || !Array.isArray(payload.variables)) {
-    return []
-  }
-
-  return payload.variables.filter(isSettingsEnvVariable)
-}
-
-async function updateSettingsEnvVariables(wsUrl: string, values: Record<string, string>): Promise<void> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/settings/env')
-  const response = await fetch(endpoint, {
-    method: 'PUT',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({ values }),
-  })
-
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || `Failed to save environment variable (status ${response.status})`)
-  }
-}
-
-async function deleteSettingsEnvVariable(wsUrl: string, variableName: string): Promise<void> {
-  const endpoint = resolveApiEndpoint(wsUrl, `/api/settings/env/${encodeURIComponent(variableName)}`)
-  const response = await fetch(endpoint, {
-    method: 'DELETE',
-  })
-
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || `Failed to remove environment variable (status ${response.status})`)
-  }
-}
-
 function resolveApiEndpoint(wsUrl: string, path: string): string {
   try {
     const parsed = new URL(wsUrl)
@@ -881,44 +613,6 @@ function resolveApiEndpoint(wsUrl: string, path: string): string {
   } catch {
     return path
   }
-}
-
-function isSettingsEnvVariable(value: unknown): value is SettingsEnvVariable {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  const maybe = value as Partial<SettingsEnvVariable>
-
-  if (typeof maybe.name !== 'string' || maybe.name.trim().length === 0) {
-    return false
-  }
-
-  if (typeof maybe.skillName !== 'string' || maybe.skillName.trim().length === 0) {
-    return false
-  }
-
-  if (typeof maybe.required !== 'boolean') {
-    return false
-  }
-
-  if (typeof maybe.isSet !== 'boolean') {
-    return false
-  }
-
-  if (maybe.description !== undefined && typeof maybe.description !== 'string') {
-    return false
-  }
-
-  if (maybe.helpUrl !== undefined && typeof maybe.helpUrl !== 'string') {
-    return false
-  }
-
-  if (maybe.maskedValue !== undefined && typeof maybe.maskedValue !== 'string') {
-    return false
-  }
-
-  return true
 }
 
 function toErrorMessage(error: unknown): string {
