@@ -53,6 +53,7 @@ export function IndexPage() {
     agents: [],
     statuses: {},
     lastError: null,
+    slackStatus: null,
   })
 
   const [isCreateManagerDialogOpen, setIsCreateManagerDialogOpen] = useState(false)
@@ -533,6 +534,8 @@ export function IndexPage() {
         open={isSettingsDialogOpen}
         onOpenChange={setIsSettingsDialogOpen}
         wsUrl={wsUrl}
+        managers={state.agents.filter((agent) => agent.role === 'manager')}
+        slackStatus={state.slackStatus}
       />
 
       <OverlayDialog

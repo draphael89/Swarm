@@ -10,6 +10,7 @@ import {
   type DeliveryMode,
   type ManagerModelPreset,
   type ServerEvent,
+  type SlackStatusEvent,
 } from './ws-types'
 
 const INITIAL_CONNECT_DELAY_MS = 50
@@ -24,6 +25,7 @@ export interface ManagerWsState {
   agents: AgentDescriptor[]
   statuses: Record<string, { status: AgentStatus; pendingCount: number }>
   lastError: string | null
+  slackStatus: SlackStatusEvent | null
 }
 
 export interface DirectoriesListedResult {
@@ -53,6 +55,7 @@ const initialState: ManagerWsState = {
   agents: [],
   statuses: {},
   lastError: null,
+  slackStatus: null,
 }
 
 export class ManagerWsClient {
@@ -545,6 +548,10 @@ export class ManagerWsClient {
         )
         break
       }
+
+      case 'slack_status':
+        this.updateState({ slackStatus: event })
+        break
 
       case 'error':
         this.updateState({ lastError: event.message })

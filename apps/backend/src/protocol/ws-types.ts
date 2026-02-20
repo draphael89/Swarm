@@ -6,6 +6,7 @@ import type {
   ConversationMessageEvent,
   SwarmModelPreset
 } from "../swarm/types.js";
+import type { SlackStatusEvent } from "../integrations/slack/slack-status.js";
 
 export type {
   MessageChannel,
@@ -76,4 +77,5 @@ export type ServerEvent =
       resolvedPath?: string;
     }
   | { type: "directory_picked"; path: string | null; requestId?: string }
+  | SlackStatusEvent
   | { type: "error"; code: string; message: string; requestId?: string };

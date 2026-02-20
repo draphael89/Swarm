@@ -2,6 +2,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
 import { createConfig } from "./config.js";
+import { SlackIntegrationService } from "./integrations/slack/slack-integration.js";
 import { SwarmManager } from "./swarm/swarm-manager.js";
 import { SwarmWebSocketServer } from "./ws/server.js";
 
@@ -15,11 +16,19 @@ async function main(): Promise<void> {
   const swarmManager = new SwarmManager(config);
   await swarmManager.boot();
 
+  const slackIntegration = new SlackIntegrationService({
+    swarmManager,
+    dataDir: config.paths.dataDir,
+    defaultManagerId: config.managerId
+  });
+  await slackIntegration.start();
+
   const wsServer = new SwarmWebSocketServer({
     swarmManager,
     host: config.host,
     port: config.port,
-    allowNonManagerSubscriptions: config.allowNonManagerSubscriptions
+    allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    slackIntegration
   });
   await wsServer.start();
 
@@ -27,7 +36,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`Received ${signal}. Shutting down...`);
-    await wsServer.stop();
+    await Promise.allSettled([slackIntegration.stop(), wsServer.stop()]);
     process.exit(0);
   };
 

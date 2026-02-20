@@ -6,6 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, type RawData, WebSocket } from "ws";
 import type { ClientCommand, ServerEvent } from "../protocol/ws-types.js";
+import type { SlackIntegrationService } from "../integrations/slack/slack-integration.js";
 import {
   isPathWithinRoots,
   normalizeAllowlistRoots,
@@ -17,6 +18,9 @@ import type { SwarmManager } from "../swarm/swarm-manager.js";
 const REBOOT_ENDPOINT_PATH = "/api/reboot";
 const READ_FILE_ENDPOINT_PATH = "/api/read-file";
 const SETTINGS_ENV_ENDPOINT_PATH = "/api/settings/env";
+const SLACK_INTEGRATION_ENDPOINT_PATH = "/api/integrations/slack";
+const SLACK_INTEGRATION_TEST_ENDPOINT_PATH = "/api/integrations/slack/test";
+const SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH = "/api/integrations/slack/channels";
 const RESTART_SIGNAL: NodeJS.Signals = "SIGUSR1";
 const MAX_HTTP_BODY_SIZE_BYTES = 64 * 1024;
 const MAX_READ_FILE_BODY_BYTES = 64 * 1024;
@@ -27,6 +31,7 @@ export class SwarmWebSocketServer {
   private readonly host: string;
   private readonly port: number;
   private readonly allowNonManagerSubscriptions: boolean;
+  private readonly slackIntegration: SlackIntegrationService | null;
 
   private httpServer: HttpServer | null = null;
   private wss: WebSocketServer | null = null;
@@ -57,16 +62,23 @@ export class SwarmWebSocketServer {
     this.broadcastToSubscribed(event);
   };
 
+  private readonly onSlackStatus = (event: ServerEvent): void => {
+    if (event.type !== "slack_status") return;
+    this.broadcastToSubscribed(event);
+  };
+
   constructor(options: {
     swarmManager: SwarmManager;
     host: string;
     port: number;
     allowNonManagerSubscriptions: boolean;
+    slackIntegration?: SlackIntegrationService;
   }) {
     this.swarmManager = options.swarmManager;
     this.host = options.host;
     this.port = options.port;
     this.allowNonManagerSubscriptions = options.allowNonManagerSubscriptions;
+    this.slackIntegration = options.slackIntegration ?? null;
   }
 
   async start(): Promise<void> {
@@ -122,6 +134,7 @@ export class SwarmWebSocketServer {
     this.swarmManager.on("conversation_reset", this.onConversationReset);
     this.swarmManager.on("agent_status", this.onAgentStatus);
     this.swarmManager.on("agents_snapshot", this.onAgentsSnapshot);
+    this.slackIntegration?.on("slack_status", this.onSlackStatus);
   }
 
   async stop(): Promise<void> {
@@ -130,6 +143,7 @@ export class SwarmWebSocketServer {
     this.swarmManager.off("conversation_reset", this.onConversationReset);
     this.swarmManager.off("agent_status", this.onAgentStatus);
     this.swarmManager.off("agents_snapshot", this.onAgentsSnapshot);
+    this.slackIntegration?.off("slack_status", this.onSlackStatus);
 
     const currentWss = this.wss;
     const currentHttpServer = this.httpServer;
@@ -172,6 +186,15 @@ export class SwarmWebSocketServer {
         return;
       }
 
+      if (
+        requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH ||
+        requestUrl.pathname === SLACK_INTEGRATION_TEST_ENDPOINT_PATH ||
+        requestUrl.pathname === SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH
+      ) {
+        await this.handleSlackIntegrationHttpRequest(request, response, requestUrl);
+        return;
+      }
+
       response.statusCode = 404;
       response.end("Not Found");
     } catch (error) {
@@ -195,6 +218,12 @@ export class SwarmWebSocketServer {
         this.applyCorsHeaders(request, response, "GET, PUT, DELETE, OPTIONS");
       } else if (requestUrl.pathname === READ_FILE_ENDPOINT_PATH) {
         this.applyCorsHeaders(request, response, "POST, OPTIONS");
+      } else if (
+        requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH ||
+        requestUrl.pathname === SLACK_INTEGRATION_TEST_ENDPOINT_PATH ||
+        requestUrl.pathname === SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH
+      ) {
+        this.applyCorsHeaders(request, response, "GET, PUT, DELETE, POST, OPTIONS");
       }
 
       this.sendJson(response, statusCode, { error: message });
@@ -355,6 +384,72 @@ export class SwarmWebSocketServer {
     }
 
     this.applyCorsHeaders(request, response, methods);
+    response.setHeader("Allow", methods);
+    this.sendJson(response, 405, { error: "Method Not Allowed" });
+  }
+
+  private async handleSlackIntegrationHttpRequest(
+    request: IncomingMessage,
+    response: ServerResponse,
+    requestUrl: URL
+  ): Promise<void> {
+    const methods = "GET, PUT, DELETE, POST, OPTIONS";
+
+    if (request.method === "OPTIONS") {
+      this.applyCorsHeaders(request, response, methods);
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    this.applyCorsHeaders(request, response, methods);
+
+    if (!this.slackIntegration) {
+      this.sendJson(response, 501, { error: "Slack integration is unavailable" });
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH) {
+      this.sendJson(response, 200, {
+        config: this.slackIntegration.getMaskedConfig(),
+        status: this.slackIntegration.getStatus()
+      });
+      return;
+    }
+
+    if (request.method === "PUT" && requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH) {
+      const payload = await this.readJsonBody(request);
+      const updated = await this.slackIntegration.updateConfig(payload);
+      this.sendJson(response, 200, { ok: true, ...updated });
+      return;
+    }
+
+    if (request.method === "DELETE" && requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH) {
+      const disabled = await this.slackIntegration.disable();
+      this.sendJson(response, 200, { ok: true, ...disabled });
+      return;
+    }
+
+    if (request.method === "POST" && requestUrl.pathname === SLACK_INTEGRATION_TEST_ENDPOINT_PATH) {
+      const payload = await this.readJsonBody(request);
+      const result = await this.slackIntegration.testConnection(payload);
+      this.sendJson(response, 200, { ok: true, result });
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH) {
+      const includePrivate = parseOptionalBoolean(
+        requestUrl.searchParams.get("includePrivateChannels") ?? requestUrl.searchParams.get("includePrivate")
+      );
+
+      const channels = await this.slackIntegration.listChannels({
+        includePrivateChannels: includePrivate
+      });
+
+      this.sendJson(response, 200, { channels });
+      return;
+    }
+
     response.setHeader("Allow", methods);
     this.sendJson(response, 405, { error: "Method Not Allowed" });
   }
@@ -784,6 +879,10 @@ export class SwarmWebSocketServer {
       agentId: targetAgentId,
       messages: this.swarmManager.getConversationHistory(targetAgentId)
     });
+
+    if (this.slackIntegration) {
+      this.send(socket, this.slackIntegration.getStatus());
+    }
   }
 
   private resolveDefaultSubscriptionAgentId(): string {
@@ -1127,6 +1226,27 @@ function resolveProdDaemonPid(repoRoot: string): number | null {
 function getProdDaemonPidFile(repoRoot: string): string {
   const repoHash = createHash("sha1").update(repoRoot).digest("hex").slice(0, 10);
   return join(tmpdir(), `swarm-prod-daemon-${repoHash}.pid`);
+}
+
+function parseOptionalBoolean(value: string | null): boolean | undefined {
+  if (value === null) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+
+  return undefined;
 }
 
 function parseSettingsEnvUpdateBody(value: unknown): Record<string, string> {

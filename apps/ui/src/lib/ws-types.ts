@@ -145,6 +145,16 @@ export interface DirectoryPickedEvent {
   requestId?: string
 }
 
+export interface SlackStatusEvent {
+  type: 'slack_status'
+  state: 'disabled' | 'connecting' | 'connected' | 'disconnected' | 'error'
+  enabled: boolean
+  updatedAt: string
+  message?: string
+  teamId?: string
+  botUserId?: string
+}
+
 export type ConversationEntry = ConversationMessageEvent | ConversationLogEvent
 
 export type ServerEvent =
@@ -164,4 +174,5 @@ export type ServerEvent =
   | DirectoriesListedEvent
   | DirectoryValidatedEvent
   | DirectoryPickedEvent
+  | SlackStatusEvent
   | { type: 'error'; code: string; message: string; requestId?: string }
