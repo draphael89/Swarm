@@ -54,7 +54,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
 
   return (
     <>
-      <div className={cn(isDocument ? 'text-[15px] leading-[1.8]' : 'text-sm leading-relaxed')}>
+      <div className={cn('min-w-0 overflow-hidden', isDocument ? 'text-[15px] leading-[1.8]' : 'text-sm leading-relaxed')}>
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           urlTransform={urlTransform}
@@ -273,18 +273,18 @@ export const MarkdownMessage = memo(function MarkdownMessage({
                         <span className="font-mono text-[11px] font-medium text-muted-foreground">{language}</span>
                       </div>
                     ) : null}
-                    <ScrollArea
+                    <div
                       className={cn(
                         'w-full border border-border/50 bg-muted/25',
                         language ? 'rounded-b-lg' : 'rounded-lg',
                       )}
                     >
-                      <pre className="p-4">
+                      <pre className="overflow-x-auto p-4">
                         <code className={cn('font-mono text-foreground/90', isDocument ? 'text-[13px] leading-6' : 'text-xs leading-5')}>
                           {normalizedCode}
                         </code>
                       </pre>
-                    </ScrollArea>
+                    </div>
                   </div>
                 )
               }

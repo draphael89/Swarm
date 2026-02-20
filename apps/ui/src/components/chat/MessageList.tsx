@@ -678,7 +678,7 @@ function ConversationMessage({
   }
 
   return (
-    <div className="space-y-2 text-foreground">
+    <div className="min-w-0 space-y-2 text-foreground">
       {hasText ? <MarkdownMessage content={normalizedText} onArtifactClick={onArtifactClick} /> : null}
       <MessageImageAttachments attachments={imageAttachments} isUser={false} />
       <MessageFileAttachments attachments={fileAttachments} isUser={false} />
