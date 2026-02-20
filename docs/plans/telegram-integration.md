@@ -130,18 +130,38 @@ Instead of configuring Telegram via env vars and `.env` files, **all Telegram se
 
 ---
 
-## 5. Message Flow Design
+## 5. Message Flow Design — Option 3: Broadcast + Source Annotation
+
+### Principle
+All channels (Web UI + Telegram) are windows into **one unified conversation**. The manager has one context regardless of where messages come from. All `speak_to_user` responses are **broadcast to all channels**.
 
 ### Inbound (Telegram → Swarm)
 1. Receive Telegram `Update` via polling
 2. Validate sender against allowlist (configured in UI)
 3. Normalize: text from `message.text`, photos → download → base64 image attachments
-4. Call `swarmManager.handleUserMessage(...)` targeting configured agent
+4. Tag the message with source metadata: `{ source: "telegram", userId: ..., username: "..." }`
+5. Call `swarmManager.handleUserMessage(...)` targeting configured agent
 
-### Outbound (Swarm → Telegram)
+### Inbound (Web UI → Swarm)
+1. Same as current flow, but tag with `{ source: "web" }`
+
+### Outbound (Swarm → All Channels)
 1. Bridge listens to `conversation_message` events
-2. Forward only `source: "speak_to_user"` messages
-3. Chunk text at 4096 chars, send with typing indicator
+2. Forward all `source: "speak_to_user"` messages to **both** Web UI and Telegram
+3. Telegram: chunk text at 4096 chars, send with typing indicator
+4. Web UI: display as normal (already works)
+
+### Source Annotations
+- Messages in the Web UI show a small indicator: "via Telegram" / "via @username"
+- Messages in Telegram optionally show "[from Web]" prefix when the user sent via web UI
+- This prevents confusion about who said what from where
+
+### Future: Multi-User Support (out of scope for V1)
+- Multiple Telegram users can be allowed via the allowlist
+- Each user's messages are tagged with their Telegram username/ID
+- The manager sees all messages in one unified context but knows who's talking
+- The manager can address responses to specific users: "Hey @sawyer, ..." 
+- Requires extending `speak_to_user` to optionally target specific channels/users (V2)
 
 ---
 
