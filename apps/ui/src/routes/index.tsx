@@ -27,7 +27,7 @@ import { ManagerWsClient, type ManagerWsState } from '@/lib/ws-client'
 import {
   MANAGER_MODEL_PRESETS,
   type AgentDescriptor,
-  type ConversationImageAttachment,
+  type ConversationAttachment,
   type ManagerModelPreset,
 } from '@/lib/ws-types'
 
@@ -112,7 +112,7 @@ export function IndexPage() {
     return fromAgents === 'streaming'
   }, [activeAgentId, state.agents, state.statuses])
 
-  const handleSend = (text: string, attachments?: ConversationImageAttachment[]) => {
+  const handleSend = (text: string, attachments?: ConversationAttachment[]) => {
     if (!activeAgentId) return
 
     clientRef.current?.sendUserMessage(text, {

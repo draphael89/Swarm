@@ -4,8 +4,8 @@ import {
   type AgentDescriptor,
   type AgentStatus,
   type ClientCommand,
+  type ConversationAttachment,
   type ConversationEntry,
-  type ConversationImageAttachment,
   type ConversationMessageEvent,
   type DeliveryMode,
   type ManagerModelPreset,
@@ -148,10 +148,10 @@ export class ManagerWsClient {
 
   sendUserMessage(
     text: string,
-    options?: { agentId?: string; delivery?: DeliveryMode; attachments?: ConversationImageAttachment[] },
+    options?: { agentId?: string; delivery?: DeliveryMode; attachments?: ConversationAttachment[] },
   ): void {
     const trimmed = text.trim()
-    const attachments = normalizeConversationImageAttachments(options?.attachments)
+    const attachments = normalizeConversationAttachments(options?.attachments)
     if (!trimmed && attachments.length === 0) return
 
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
@@ -819,24 +819,63 @@ export class ManagerWsClient {
   }
 }
 
-function normalizeConversationImageAttachments(
-  attachments: ConversationImageAttachment[] | undefined,
-): ConversationImageAttachment[] {
+function normalizeConversationAttachments(
+  attachments: ConversationAttachment[] | undefined,
+): ConversationAttachment[] {
   if (!attachments || attachments.length === 0) {
     return []
   }
 
-  const normalized: ConversationImageAttachment[] = []
+  const normalized: ConversationAttachment[] = []
 
   for (const attachment of attachments) {
     if (!attachment || typeof attachment !== 'object') {
       continue
     }
 
-    const mimeType = typeof attachment.mimeType === 'string' ? attachment.mimeType.trim() : ''
-    const data = typeof attachment.data === 'string' ? attachment.data.trim() : ''
-    const fileName = typeof attachment.fileName === 'string' ? attachment.fileName.trim() : ''
+    const maybe = attachment as {
+      type?: unknown
+      mimeType?: unknown
+      data?: unknown
+      text?: unknown
+      fileName?: unknown
+    }
 
+    const attachmentType = typeof maybe.type === 'string' ? maybe.type.trim() : ''
+    const mimeType = typeof maybe.mimeType === 'string' ? maybe.mimeType.trim() : ''
+    const fileName = typeof maybe.fileName === 'string' ? maybe.fileName.trim() : ''
+
+    if (attachmentType === 'text') {
+      const text = typeof maybe.text === 'string' ? maybe.text : ''
+      if (!mimeType || text.trim().length === 0) {
+        continue
+      }
+
+      normalized.push({
+        type: 'text',
+        mimeType,
+        text,
+        fileName: fileName || undefined,
+      })
+      continue
+    }
+
+    if (attachmentType === 'binary') {
+      const data = typeof maybe.data === 'string' ? maybe.data.trim() : ''
+      if (!mimeType || data.length === 0) {
+        continue
+      }
+
+      normalized.push({
+        type: 'binary',
+        mimeType,
+        data,
+        fileName: fileName || undefined,
+      })
+      continue
+    }
+
+    const data = typeof maybe.data === 'string' ? maybe.data.trim() : ''
     if (!mimeType || !mimeType.startsWith('image/') || !data) {
       continue
     }

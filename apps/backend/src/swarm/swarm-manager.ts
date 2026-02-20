@@ -49,10 +49,13 @@ import type {
   AgentStatusEvent,
   AgentsSnapshotEvent,
   AgentsStoreFile,
+  ConversationAttachment,
+  ConversationBinaryAttachment,
   ConversationEntryEvent,
   ConversationImageAttachment,
   ConversationLogEvent,
   ConversationMessageEvent,
+  ConversationTextAttachment,
   RequestedDeliveryMode,
   SendMessageReceipt,
   SpawnAgentInput,
@@ -448,7 +451,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     targetAgentId: string,
     message: string,
     delivery: RequestedDeliveryMode = "auto",
-    options?: { origin?: "user" | "internal"; attachments?: ConversationImageAttachment[] }
+    options?: { origin?: "user" | "internal"; attachments?: ConversationAttachment[] }
   ): Promise<SendMessageReceipt> {
     const sender = this.descriptors.get(fromAgentId);
     if (!sender || sender.status === "terminated") {
@@ -473,8 +476,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     const origin = options?.origin ?? "internal";
-    const attachments = normalizeConversationImageAttachments(options?.attachments);
-    const modelMessage = this.prepareModelInboundMessage(
+    const attachments = normalizeConversationAttachments(options?.attachments);
+    const modelMessage = await this.prepareModelInboundMessage(
+      targetAgentId,
       {
         text: message,
         attachments
@@ -497,10 +501,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return receipt;
   }
 
-  private prepareModelInboundMessage(
-    input: { text: string; attachments: ConversationImageAttachment[] },
+  private async prepareModelInboundMessage(
+    targetAgentId: string,
+    input: { text: string; attachments: ConversationAttachment[] },
     origin: "user" | "internal"
-  ): string | RuntimeUserMessage {
+  ): Promise<string | RuntimeUserMessage> {
     let text = input.text;
 
     if (origin !== "user") {
@@ -509,15 +514,88 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       }
     }
 
-    const images = toRuntimeImageAttachments(input.attachments);
-    if (images.length === 0) {
+    const runtimeAttachments = await this.prepareRuntimeAttachments(targetAgentId, input.attachments);
+
+    if (runtimeAttachments.attachmentMessage.length > 0) {
+      text = text.trim().length > 0 ? `${text}\n\n${runtimeAttachments.attachmentMessage}` : runtimeAttachments.attachmentMessage;
+    }
+
+    if (runtimeAttachments.images.length === 0) {
       return text;
     }
 
     return {
       text,
-      images
+      images: runtimeAttachments.images
     };
+  }
+
+  private async prepareRuntimeAttachments(
+    targetAgentId: string,
+    attachments: ConversationAttachment[]
+  ): Promise<{ images: RuntimeImageAttachment[]; attachmentMessage: string }> {
+    if (attachments.length === 0) {
+      return {
+        images: [],
+        attachmentMessage: ""
+      };
+    }
+
+    const images = toRuntimeImageAttachments(attachments);
+    const fileMessages: string[] = [];
+    let binaryAttachmentDir: string | undefined;
+
+    for (let index = 0; index < attachments.length; index += 1) {
+      const attachment = attachments[index];
+
+      if (isConversationImageAttachment(attachment)) {
+        continue;
+      }
+
+      if (isConversationTextAttachment(attachment)) {
+        fileMessages.push(formatTextAttachmentForPrompt(attachment, index + 1));
+        continue;
+      }
+
+      if (isConversationBinaryAttachment(attachment)) {
+        const directory = binaryAttachmentDir ?? (await this.createBinaryAttachmentDir(targetAgentId));
+        binaryAttachmentDir = directory;
+        const storedPath = await this.writeBinaryAttachmentToDisk(directory, attachment, index + 1);
+        fileMessages.push(formatBinaryAttachmentForPrompt(attachment, storedPath, index + 1));
+      }
+    }
+
+    if (fileMessages.length === 0) {
+      return {
+        images,
+        attachmentMessage: ""
+      };
+    }
+
+    return {
+      images,
+      attachmentMessage: ["The user attached the following files:", "", ...fileMessages].join("\n")
+    };
+  }
+
+  private async createBinaryAttachmentDir(targetAgentId: string): Promise<string> {
+    const agentSegment = sanitizePathSegment(targetAgentId, "agent");
+    const batchId = `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+    const directory = join(this.config.paths.dataDir, "attachments", agentSegment, batchId);
+    await mkdir(directory, { recursive: true });
+    return directory;
+  }
+
+  private async writeBinaryAttachmentToDisk(
+    directory: string,
+    attachment: ConversationBinaryAttachment,
+    attachmentIndex: number
+  ): Promise<string> {
+    const safeName = sanitizeAttachmentFileName(attachment.fileName, `attachment-${attachmentIndex}.bin`);
+    const filePath = join(directory, `${String(attachmentIndex).padStart(2, "0")}-${safeName}`);
+    const buffer = Buffer.from(attachment.data, "base64");
+    await writeFile(filePath, buffer);
+    return filePath;
   }
 
   async publishToUser(agentId: string, text: string, source: "speak_to_user" | "system" = "speak_to_user"): Promise<void> {
@@ -551,11 +629,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     options?: {
       targetAgentId?: string;
       delivery?: RequestedDeliveryMode;
-      attachments?: ConversationImageAttachment[];
+      attachments?: ConversationAttachment[];
     }
   ): Promise<void> {
     const trimmed = text.trim();
-    const attachments = normalizeConversationImageAttachments(options?.attachments);
+    const attachments = normalizeConversationAttachments(options?.attachments);
     if (!trimmed && attachments.length === 0) return;
 
     const targetAgentId = options?.targetAgentId ?? this.config.managerId;
@@ -608,13 +686,14 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     // User messages to managers should always steer in-flight work.
-    const runtimeMessage =
-      attachments.length > 0
-        ? {
-            text: trimmed,
-            images: toRuntimeImageAttachments(attachments)
-          }
-        : trimmed;
+    const runtimeMessage = await this.prepareModelInboundMessage(
+      managerContextId,
+      {
+        text: trimmed,
+        attachments
+      },
+      "user"
+    );
 
     await managerRuntime.sendMessage(runtimeMessage, "steer");
   }
@@ -1819,14 +1898,14 @@ function extractMessageImageAttachments(message: unknown): ConversationImageAtta
   return attachments;
 }
 
-function normalizeConversationImageAttachments(
-  attachments: ConversationImageAttachment[] | undefined
-): ConversationImageAttachment[] {
+function normalizeConversationAttachments(
+  attachments: ConversationAttachment[] | undefined
+): ConversationAttachment[] {
   if (!attachments || attachments.length === 0) {
     return [];
   }
 
-  const normalized: ConversationImageAttachment[] = [];
+  const normalized: ConversationAttachment[] = [];
 
   for (const attachment of attachments) {
     if (!attachment || typeof attachment !== "object") {
@@ -1834,9 +1913,39 @@ function normalizeConversationImageAttachments(
     }
 
     const mimeType = typeof attachment.mimeType === "string" ? attachment.mimeType.trim() : "";
-    const data = typeof attachment.data === "string" ? attachment.data.trim() : "";
     const fileName = typeof attachment.fileName === "string" ? attachment.fileName.trim() : "";
 
+    if (attachment.type === "text") {
+      const text = typeof attachment.text === "string" ? attachment.text : "";
+      if (!mimeType || text.trim().length === 0) {
+        continue;
+      }
+
+      normalized.push({
+        type: "text",
+        mimeType,
+        text,
+        fileName: fileName || undefined
+      });
+      continue;
+    }
+
+    if (attachment.type === "binary") {
+      const data = typeof attachment.data === "string" ? attachment.data.trim() : "";
+      if (!mimeType || data.length === 0) {
+        continue;
+      }
+
+      normalized.push({
+        type: "binary",
+        mimeType,
+        data,
+        fileName: fileName || undefined
+      });
+      continue;
+    }
+
+    const data = typeof attachment.data === "string" ? attachment.data.trim() : "";
     if (!mimeType || !mimeType.startsWith("image/") || !data) {
       continue;
     }
@@ -1851,11 +1960,80 @@ function normalizeConversationImageAttachments(
   return normalized;
 }
 
-function toRuntimeImageAttachments(attachments: ConversationImageAttachment[]): RuntimeImageAttachment[] {
-  return attachments.map((attachment) => ({
-    mimeType: attachment.mimeType,
-    data: attachment.data
-  }));
+function toRuntimeImageAttachments(attachments: ConversationAttachment[]): RuntimeImageAttachment[] {
+  const images: RuntimeImageAttachment[] = [];
+
+  for (const attachment of attachments) {
+    if (!isConversationImageAttachment(attachment)) {
+      continue;
+    }
+
+    images.push({
+      mimeType: attachment.mimeType,
+      data: attachment.data
+    });
+  }
+
+  return images;
+}
+
+function formatTextAttachmentForPrompt(attachment: ConversationTextAttachment, index: number): string {
+  const fileName = attachment.fileName?.trim() || `attachment-${index}.txt`;
+
+  return [
+    `[Attachment ${index}]`,
+    `Name: ${fileName}`,
+    `MIME type: ${attachment.mimeType}`,
+    "Content:",
+    "----- BEGIN FILE -----",
+    attachment.text,
+    "----- END FILE -----"
+  ].join("\n");
+}
+
+function formatBinaryAttachmentForPrompt(
+  attachment: ConversationBinaryAttachment,
+  storedPath: string,
+  index: number
+): string {
+  const fileName = attachment.fileName?.trim() || `attachment-${index}.bin`;
+
+  return [
+    `[Attachment ${index}]`,
+    `Name: ${fileName}`,
+    `MIME type: ${attachment.mimeType}`,
+    `Saved to: ${storedPath}`,
+    "Use read/bash tools to inspect the file directly from disk."
+  ].join("\n");
+}
+
+function sanitizeAttachmentFileName(fileName: string | undefined, fallback: string): string {
+  const fallbackName = fallback.trim() || "attachment.bin";
+  const trimmed = typeof fileName === "string" ? fileName.trim() : "";
+
+  if (!trimmed) {
+    return fallbackName;
+  }
+
+  const cleaned = trimmed
+    .replace(/[\\/]+/g, "-")
+    .replace(/[\0-\x1f\x7f]+/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/^\.+/, "")
+    .slice(0, 120);
+
+  return cleaned || fallbackName;
+}
+
+function sanitizePathSegment(value: string, fallback: string): string {
+  const cleaned = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64);
+
+  return cleaned || fallback;
 }
 
 function extractRuntimeMessageText(message: string | RuntimeUserMessage): string {
@@ -1891,7 +2069,7 @@ function isConversationMessageEvent(value: unknown): value is ConversationMessag
     }
 
     for (const attachment of maybe.attachments) {
-      if (!isConversationImageAttachment(attachment)) {
+      if (!isConversationAttachment(attachment)) {
         return false;
       }
     }
@@ -1900,17 +2078,79 @@ function isConversationMessageEvent(value: unknown): value is ConversationMessag
   return true;
 }
 
+function isConversationAttachment(value: unknown): value is ConversationAttachment {
+  return (
+    isConversationImageAttachment(value) ||
+    isConversationTextAttachment(value) ||
+    isConversationBinaryAttachment(value)
+  );
+}
+
 function isConversationImageAttachment(value: unknown): value is ConversationImageAttachment {
   if (!value || typeof value !== "object") {
     return false;
   }
 
-  const maybe = value as Partial<ConversationImageAttachment>;
+  const maybe = value as Partial<ConversationImageAttachment> & { type?: unknown };
+  if (maybe.type !== undefined && maybe.type !== "image") {
+    return false;
+  }
+
   if (typeof maybe.mimeType !== "string" || !maybe.mimeType.startsWith("image/")) {
     return false;
   }
 
   if (typeof maybe.data !== "string" || maybe.data.length === 0) {
+    return false;
+  }
+
+  if (maybe.fileName !== undefined && typeof maybe.fileName !== "string") {
+    return false;
+  }
+
+  return true;
+}
+
+function isConversationTextAttachment(value: unknown): value is ConversationTextAttachment {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const maybe = value as Partial<ConversationTextAttachment>;
+  if (maybe.type !== "text") {
+    return false;
+  }
+
+  if (typeof maybe.mimeType !== "string" || maybe.mimeType.trim().length === 0) {
+    return false;
+  }
+
+  if (typeof maybe.text !== "string" || maybe.text.trim().length === 0) {
+    return false;
+  }
+
+  if (maybe.fileName !== undefined && typeof maybe.fileName !== "string") {
+    return false;
+  }
+
+  return true;
+}
+
+function isConversationBinaryAttachment(value: unknown): value is ConversationBinaryAttachment {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const maybe = value as Partial<ConversationBinaryAttachment>;
+  if (maybe.type !== "binary") {
+    return false;
+  }
+
+  if (typeof maybe.mimeType !== "string" || maybe.mimeType.trim().length === 0) {
+    return false;
+  }
+
+  if (typeof maybe.data !== "string" || maybe.data.trim().length === 0) {
     return false;
   }
 

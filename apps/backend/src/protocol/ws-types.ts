@@ -1,7 +1,7 @@
 import type {
   AgentDescriptor,
+  ConversationAttachment,
   ConversationEntryEvent,
-  ConversationImageAttachment,
   ConversationLogEvent,
   ConversationMessageEvent,
   SwarmModelPreset
@@ -17,7 +17,7 @@ export type ClientCommand =
   | {
       type: "user_message";
       text: string;
-      attachments?: ConversationImageAttachment[];
+      attachments?: ConversationAttachment[];
       agentId?: string;
       delivery?: "auto" | "followUp" | "steer";
     }

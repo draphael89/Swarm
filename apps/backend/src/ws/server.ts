@@ -777,7 +777,7 @@ export class SwarmWebSocketServer {
       }
 
       const normalizedText = maybe.text.trim();
-      const parsedAttachments = parseConversationImageAttachments(
+      const parsedAttachments = parseConversationAttachments(
         (maybe as { attachments?: unknown }).attachments,
         "user_message.attachments"
       );
@@ -788,7 +788,7 @@ export class SwarmWebSocketServer {
       if (!normalizedText && parsedAttachments.attachments.length === 0) {
         return {
           ok: false,
-          error: "user_message must include non-empty text or at least one image attachment"
+          error: "user_message must include non-empty text or at least one attachment"
         };
       }
 
@@ -880,11 +880,18 @@ function getProdDaemonPidFile(repoRoot: string): string {
   return join(tmpdir(), `swarm-prod-daemon-${repoHash}.pid`);
 }
 
-function parseConversationImageAttachments(
+function parseConversationAttachments(
   value: unknown,
   fieldName: string
 ):
-  | { ok: true; attachments: Array<{ mimeType: string; data: string; fileName?: string }> }
+  | {
+      ok: true;
+      attachments: Array<
+        | { mimeType: string; data: string; fileName?: string }
+        | { type: "text"; mimeType: string; text: string; fileName?: string }
+        | { type: "binary"; mimeType: string; data: string; fileName?: string }
+      >;
+    }
   | { ok: false; error: string } {
   if (value === undefined) {
     return { ok: true, attachments: [] };
@@ -894,7 +901,11 @@ function parseConversationImageAttachments(
     return { ok: false, error: `${fieldName} must be an array when provided` };
   }
 
-  const attachments: Array<{ mimeType: string; data: string; fileName?: string }> = [];
+  const attachments: Array<
+    | { mimeType: string; data: string; fileName?: string }
+    | { type: "text"; mimeType: string; text: string; fileName?: string }
+    | { type: "binary"; mimeType: string; data: string; fileName?: string }
+  > = [];
 
   for (let index = 0; index < value.length; index += 1) {
     const item = value[index];
@@ -902,13 +913,66 @@ function parseConversationImageAttachments(
       return { ok: false, error: `${fieldName}[${index}] must be an object` };
     }
 
-    const maybe = item as { mimeType?: unknown; data?: unknown; fileName?: unknown };
+    const maybe = item as {
+      type?: unknown;
+      mimeType?: unknown;
+      data?: unknown;
+      text?: unknown;
+      fileName?: unknown;
+    };
+
+    if (maybe.type !== undefined && typeof maybe.type !== "string") {
+      return { ok: false, error: `${fieldName}[${index}].type must be a string when provided` };
+    }
 
     if (typeof maybe.mimeType !== "string" || maybe.mimeType.trim().length === 0) {
       return { ok: false, error: `${fieldName}[${index}].mimeType must be a non-empty string` };
     }
 
-    if (!maybe.mimeType.startsWith("image/")) {
+    if (maybe.fileName !== undefined && typeof maybe.fileName !== "string") {
+      return { ok: false, error: `${fieldName}[${index}].fileName must be a string when provided` };
+    }
+
+    const attachmentType = typeof maybe.type === "string" ? maybe.type.trim() : "";
+    const mimeType = maybe.mimeType.trim();
+    const fileName = typeof maybe.fileName === "string" ? maybe.fileName.trim() : "";
+
+    if (attachmentType === "text") {
+      if (typeof maybe.text !== "string" || maybe.text.trim().length === 0) {
+        return { ok: false, error: `${fieldName}[${index}].text must be a non-empty string` };
+      }
+
+      attachments.push({
+        type: "text",
+        mimeType,
+        text: maybe.text,
+        fileName: fileName || undefined
+      });
+      continue;
+    }
+
+    if (attachmentType === "binary") {
+      if (typeof maybe.data !== "string" || maybe.data.trim().length === 0) {
+        return { ok: false, error: `${fieldName}[${index}].data must be a non-empty base64 string` };
+      }
+
+      attachments.push({
+        type: "binary",
+        mimeType,
+        data: maybe.data.trim(),
+        fileName: fileName || undefined
+      });
+      continue;
+    }
+
+    if (attachmentType !== "" && attachmentType !== "image") {
+      return {
+        ok: false,
+        error: `${fieldName}[${index}].type must be image|text|binary when provided`
+      };
+    }
+
+    if (!mimeType.startsWith("image/")) {
       return { ok: false, error: `${fieldName}[${index}].mimeType must start with image/` };
     }
 
@@ -916,14 +980,8 @@ function parseConversationImageAttachments(
       return { ok: false, error: `${fieldName}[${index}].data must be a non-empty base64 string` };
     }
 
-    if (maybe.fileName !== undefined && typeof maybe.fileName !== "string") {
-      return { ok: false, error: `${fieldName}[${index}].fileName must be a string when provided` };
-    }
-
-    const fileName = typeof maybe.fileName === "string" ? maybe.fileName.trim() : "";
-
     attachments.push({
-      mimeType: maybe.mimeType.trim(),
+      mimeType,
       data: maybe.data.trim(),
       fileName: fileName || undefined
     });

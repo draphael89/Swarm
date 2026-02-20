@@ -3,6 +3,7 @@ import {
   AlertCircle,
   Check,
   ChevronRight,
+  File,
   FileText,
   Loader2,
   MessageSquare,
@@ -11,8 +12,13 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
+import { isImageAttachment } from '@/lib/file-attachments'
 import { cn } from '@/lib/utils'
-import type { ConversationEntry, ConversationImageAttachment } from '@/lib/ws-types'
+import type {
+  ConversationAttachment,
+  ConversationEntry,
+  ConversationImageAttachment,
+} from '@/lib/ws-types'
 import { MarkdownMessage } from './MarkdownMessage'
 
 interface MessageListProps {
@@ -499,11 +505,62 @@ function MessageImageAttachments({
   )
 }
 
+function MessageFileAttachments({
+  attachments,
+  isUser,
+}: {
+  attachments: ConversationAttachment[]
+  isUser: boolean
+}) {
+  if (attachments.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {attachments.map((attachment, index) => {
+        const isTextFile = attachment.type === 'text'
+        const fileName = attachment.fileName || `Attachment ${index + 1}`
+        const subtitle = isTextFile ? 'Text file' : 'Binary file'
+
+        return (
+          <div
+            key={`${attachment.mimeType}-${fileName}-${index}`}
+            className={cn(
+              'flex items-center gap-2 rounded-md border px-2 py-1.5',
+              isUser
+                ? 'border-primary-foreground/25 bg-primary-foreground/10 text-primary-foreground'
+                : 'border-border bg-muted/35 text-foreground',
+            )}
+          >
+            <span
+              className={cn(
+                'inline-flex size-6 items-center justify-center rounded',
+                isUser ? 'bg-primary-foreground/15 text-primary-foreground' : 'bg-muted text-muted-foreground',
+              )}
+            >
+              {isTextFile ? <FileText className="size-3.5" /> : <File className="size-3.5" />}
+            </span>
+            <span className="min-w-0">
+              <p className="truncate text-xs font-medium">{fileName}</p>
+              <p className={cn('truncate text-[11px]', isUser ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
+                {subtitle} • {attachment.mimeType}
+              </p>
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function ConversationMessage({ message }: { message: ConversationMessageEntry }) {
   const normalizedText = message.text.trim()
   const hasText = normalizedText.length > 0 && normalizedText !== '.'
   const attachments = message.attachments ?? []
-  const hasAttachments = attachments.length > 0
+  const imageAttachments = attachments.filter(isImageAttachment)
+  const fileAttachments = attachments.filter((attachment) => !isImageAttachment(attachment))
+  const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0
 
   if (!hasText && !hasAttachments) {
     return null
@@ -517,7 +574,8 @@ function ConversationMessage({ message }: { message: ConversationMessageEntry })
         <div className="text-[11px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300/90">System</div>
         <div className="mt-1 space-y-2">
           {hasText ? <p className="whitespace-pre-wrap break-words leading-relaxed">{normalizedText}</p> : null}
-          <MessageImageAttachments attachments={attachments} isUser={false} />
+          <MessageImageAttachments attachments={imageAttachments} isUser={false} />
+          <MessageFileAttachments attachments={fileAttachments} isUser={false} />
         </div>
         {timestampLabel ? (
           <div className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/80">{timestampLabel}</div>
@@ -531,7 +589,8 @@ function ConversationMessage({ message }: { message: ConversationMessageEntry })
       <div className="flex justify-end">
         <div className="max-w-[85%] rounded-lg rounded-tr-sm bg-primary px-3 py-2 text-primary-foreground">
           <div className="space-y-2">
-            <MessageImageAttachments attachments={attachments} isUser />
+            <MessageImageAttachments attachments={imageAttachments} isUser />
+            <MessageFileAttachments attachments={fileAttachments} isUser />
             {hasText ? <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{normalizedText}</p> : null}
           </div>
           {timestampLabel ? (
@@ -545,7 +604,8 @@ function ConversationMessage({ message }: { message: ConversationMessageEntry })
   return (
     <div className="space-y-2 text-foreground">
       {hasText ? <MarkdownMessage content={normalizedText} /> : null}
-      <MessageImageAttachments attachments={attachments} isUser={false} />
+      <MessageImageAttachments attachments={imageAttachments} isUser={false} />
+      <MessageFileAttachments attachments={fileAttachments} isUser={false} />
       {timestampLabel ? <p className="text-[11px] leading-none text-muted-foreground/70">{timestampLabel}</p> : null}
     </div>
   )

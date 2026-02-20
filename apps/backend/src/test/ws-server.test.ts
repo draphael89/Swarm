@@ -308,6 +308,87 @@ describe('SwarmWebSocketServer', () => {
     await server.stop()
   })
 
+  it('accepts text and binary attachments in websocket user messages', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+
+    client.send(JSON.stringify({ type: 'subscribe' }))
+    await waitForEvent(events, (event) => event.type === 'ready')
+
+    client.send(
+      JSON.stringify({
+        type: 'user_message',
+        text: '',
+        attachments: [
+          {
+            type: 'text',
+            mimeType: 'text/markdown',
+            text: '# Notes',
+            fileName: 'notes.md',
+          },
+          {
+            type: 'binary',
+            mimeType: 'application/pdf',
+            data: 'aGVsbG8=',
+            fileName: 'design.pdf',
+          },
+        ],
+      }),
+    )
+
+    const userEvent = await waitForEvent(
+      events,
+      (event) =>
+        event.type === 'conversation_message' &&
+        event.source === 'user_input' &&
+        Array.isArray(event.attachments) &&
+        event.attachments.length === 2,
+    )
+
+    expect(userEvent.type).toBe('conversation_message')
+    if (userEvent.type === 'conversation_message') {
+      expect(userEvent.attachments).toEqual([
+        {
+          type: 'text',
+          mimeType: 'text/markdown',
+          text: '# Notes',
+          fileName: 'notes.md',
+        },
+        {
+          type: 'binary',
+          mimeType: 'application/pdf',
+          data: 'aGVsbG8=',
+          fileName: 'design.pdf',
+        },
+      ])
+    }
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
   it('replays manager conversation history on reconnect', async () => {
     const port = await getAvailablePort()
     const config = await makeTempConfig(port)

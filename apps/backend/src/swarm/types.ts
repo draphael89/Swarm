@@ -80,17 +80,37 @@ export interface SwarmConfig {
 }
 
 export interface ConversationImageAttachment {
+  type?: "image";
   mimeType: string;
   data: string;
   fileName?: string;
 }
+
+export interface ConversationTextAttachment {
+  type: "text";
+  mimeType: string;
+  text: string;
+  fileName?: string;
+}
+
+export interface ConversationBinaryAttachment {
+  type: "binary";
+  mimeType: string;
+  data: string;
+  fileName?: string;
+}
+
+export type ConversationAttachment =
+  | ConversationImageAttachment
+  | ConversationTextAttachment
+  | ConversationBinaryAttachment;
 
 export interface ConversationMessageEvent {
   type: "conversation_message";
   agentId: string;
   role: "user" | "assistant" | "system";
   text: string;
-  attachments?: ConversationImageAttachment[];
+  attachments?: ConversationAttachment[];
   timestamp: string;
   source: "user_input" | "speak_to_user" | "system";
 }
