@@ -691,7 +691,7 @@ function ConversationMessage({
 
 function LoadingIndicator() {
   return (
-    <div className="flex justify-start" role="status" aria-live="polite" aria-label="Assistant is working">
+    <div className="mt-3 flex justify-start" role="status" aria-live="polite" aria-label="Assistant is working">
       <div className="flex items-center gap-0.5">
         <div className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-duration:900ms]" />
         <div className="size-1.5 animate-bounce rounded-full bg-foreground/40 [animation-delay:150ms] [animation-duration:900ms]" />
