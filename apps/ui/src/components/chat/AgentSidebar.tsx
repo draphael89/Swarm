@@ -62,10 +62,28 @@ function RuntimeIcon({ agent, className }: { agent: AgentDescriptor; className?:
   const preset = inferModelPreset(agent)
 
   if (preset === 'pi-opus') {
-    return <img src="/agents/claude-logo.svg" alt="" aria-hidden="true" className={className} />
+    return (
+      <span className="inline-flex items-center gap-0.5" aria-hidden="true">
+        <img src="/pi-logo.svg" alt="" className={cn('size-3 shrink-0 object-contain dark:invert', className)} />
+        <img src="/agents/claude-logo.svg" alt="" className={cn('size-3 shrink-0 object-contain', className)} />
+      </span>
+    )
   }
 
-  if (preset === 'pi-codex' || preset === 'codex-app') {
+  if (preset === 'pi-codex') {
+    return (
+      <span className="inline-flex items-center gap-0.5" aria-hidden="true">
+        <img src="/pi-logo.svg" alt="" className={cn('size-3 shrink-0 object-contain dark:invert', className)} />
+        <img
+          src="/agents/codex-logo.svg"
+          alt=""
+          className={cn('size-3 shrink-0 object-contain dark:invert', className)}
+        />
+      </span>
+    )
+  }
+
+  if (preset === 'codex-app') {
     return <img src="/agents/codex-logo.svg" alt="" aria-hidden="true" className={cn('dark:invert', className)} />
   }
 
@@ -174,11 +192,11 @@ function AgentRow({
               <span className="ml-1 inline-flex shrink-0 items-center gap-1">
                 <span
                   className={cn(
-                    'inline-flex size-5 items-center justify-center rounded-sm border border-sidebar-border/80 bg-sidebar-accent/40',
+                    'inline-flex h-5 min-w-7 items-center justify-center rounded-sm border border-sidebar-border/80 bg-sidebar-accent/40 px-0.5',
                     isSelected ? 'border-sidebar-ring/60 bg-sidebar-accent-foreground/10' : '',
                   )}
                 >
-                  <RuntimeIcon agent={agent} className="size-3.5 shrink-0 object-contain opacity-90" />
+                  <RuntimeIcon agent={agent} className="size-3 shrink-0 object-contain opacity-90" />
                 </span>
                 <Badge
                   variant="outline"
