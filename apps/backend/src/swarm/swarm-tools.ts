@@ -45,7 +45,7 @@ const messageChannelSchema = Type.Union([Type.Literal("web"), Type.Literal("slac
 
 const speakToUserTargetSchema = Type.Object({
   channel: messageChannelSchema,
-  channelId: Type.Optional(Type.String()),
+  channelId: Type.Optional(Type.String({ description: "Required when channel is 'slack'." })),
   userId: Type.Optional(Type.String()),
   threadTs: Type.Optional(Type.String())
 });
@@ -188,7 +188,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
       name: "speak_to_user",
       label: "Speak To User",
       description:
-        "Publish a user-visible manager message into the websocket conversation feed. Optional target routes output to a specific channel context.",
+        "Publish a user-visible manager message into the websocket conversation feed. If target is omitted, delivery defaults to web. For Slack delivery, set target.channel='slack' with target.channelId.",
       parameters: Type.Object({
         text: Type.String({ description: "Message content to show to the user." }),
         target: Type.Optional(speakToUserTargetSchema)

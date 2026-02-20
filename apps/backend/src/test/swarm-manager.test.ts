@@ -543,7 +543,7 @@ describe('SwarmManager', () => {
     expect(workerRuntime?.sendCalls.at(-1)?.message).toBe('SYSTEM: hi worker')
   })
 
-  it('sends manager user input as steer delivery without SYSTEM prefixing', async () => {
+  it('sends manager user input as steer delivery, without SYSTEM prefixing, and with source metadata annotation', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
@@ -553,7 +553,7 @@ describe('SwarmManager', () => {
     const managerRuntime = manager.runtimeByAgentId.get('manager')
     expect(managerRuntime).toBeDefined()
     expect(managerRuntime?.sendCalls.at(-1)?.delivery).toBe('steer')
-    expect(managerRuntime?.sendCalls.at(-1)?.message).toBe('interrupt current plan')
+    expect(managerRuntime?.sendCalls.at(-1)?.message).toBe('[sourceContext] {"channel":"web"}\n\ninterrupt current plan')
   })
 
   it('tags web user messages with default source metadata', async () => {
@@ -574,7 +574,29 @@ describe('SwarmManager', () => {
     }
   })
 
-  it('defaults speak_to_user routing to the originating source context', async () => {
+  it('includes full sourceContext annotation when forwarding slack user messages to manager runtime', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await manager.handleUserMessage('reply in slack thread', {
+      sourceContext: {
+        channel: 'slack',
+        channelId: 'C123',
+        userId: 'U456',
+        threadTs: '173.456',
+        channelType: 'channel',
+        teamId: 'T789',
+      },
+    })
+
+    const managerRuntime = manager.runtimeByAgentId.get('manager')
+    expect(managerRuntime?.sendCalls.at(-1)?.message).toBe(
+      '[sourceContext] {"channel":"slack","channelId":"C123","userId":"U456","threadTs":"173.456","channelType":"channel","teamId":"T789"}\n\nreply in slack thread',
+    )
+  })
+
+  it('defaults speak_to_user routing to web when target is omitted, even after slack input', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
@@ -597,16 +619,11 @@ describe('SwarmManager', () => {
 
     expect(assistantEvent).toBeDefined()
     if (assistantEvent?.type === 'conversation_message') {
-      expect(assistantEvent.sourceContext).toEqual({
-        channel: 'slack',
-        channelId: 'C123',
-        userId: 'U456',
-        threadTs: '173.456',
-      })
+      expect(assistantEvent.sourceContext).toEqual({ channel: 'web' })
     }
   })
 
-  it('prefers explicit speak_to_user targets over inferred source context', async () => {
+  it('uses explicit speak_to_user targets without inferred fallback behavior', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
@@ -643,7 +660,19 @@ describe('SwarmManager', () => {
     }
   })
 
-  it('falls back to web routing when no inbound source context exists', async () => {
+  it('requires channelId for explicit slack speak_to_user targets', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await expect(
+      manager.publishToUser('manager', 'ack from manager', 'speak_to_user', {
+        channel: 'slack',
+      }),
+    ).rejects.toThrow('speak_to_user target.channelId is required when target.channel is "slack"')
+  })
+
+  it('falls back to web routing when no explicit target context exists', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()

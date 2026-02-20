@@ -162,7 +162,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private readonly descriptors = new Map<string, AgentDescriptor>();
   private readonly runtimes = new Map<string, SwarmAgentRuntime>();
   private readonly conversationEntriesByAgentId = new Map<string, ConversationEntryEvent[]>();
-  private readonly mostRecentInboundSourceContextByManagerId = new Map<string, MessageSourceContext>();
   private readonly originalProcessEnvByName = new Map<string, string | undefined>();
   private skillMetadata: SkillMetadata[] = [];
   private secrets: Record<string, string> = {};
@@ -430,7 +429,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     await this.terminateDescriptor(target, { abort: true, emitStatus: true });
     this.descriptors.delete(targetManagerId);
     this.conversationEntriesByAgentId.delete(targetManagerId);
-    this.mostRecentInboundSourceContextByManagerId.delete(targetManagerId);
 
     await this.saveStore();
     this.emitAgentsSnapshot();
@@ -636,7 +634,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     if (source === "speak_to_user") {
       this.assertManager(agentId, "speak to user");
-      resolvedTargetContext = this.resolveReplyTargetContext(agentId, targetContext);
+      resolvedTargetContext = this.resolveReplyTargetContext(targetContext);
     } else {
       resolvedTargetContext = normalizeMessageSourceContext(targetContext ?? { channel: "web" });
     }
@@ -710,7 +708,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       sourceContext
     };
     this.emitConversationMessage(userEvent);
-    this.mostRecentInboundSourceContextByManagerId.set(managerContextId, sourceContext);
 
     if (target.role !== "manager") {
       await this.sendMessage(managerContextId, targetAgentId, trimmed, options?.delivery ?? "auto", {
@@ -725,11 +722,13 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error(`Manager runtime is not initialized: ${managerContextId}`);
     }
 
+    const managerVisibleMessage = formatInboundUserMessageForManager(trimmed, sourceContext);
+
     // User messages to managers should always steer in-flight work.
     const runtimeMessage = await this.prepareModelInboundMessage(
       managerContextId,
       {
-        text: trimmed,
+        text: managerVisibleMessage,
         attachments
       },
       "user"
@@ -759,7 +758,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       this.runtimes.delete(managerId);
     }
 
-    this.mostRecentInboundSourceContextByManagerId.delete(managerId);
     this.conversationEntriesByAgentId.set(managerId, []);
     await this.deleteManagerSessionFile(managerDescriptor.sessionFile);
 
@@ -1169,8 +1167,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         descriptor.updatedAt = now;
       }
     }
-
-    this.mostRecentInboundSourceContextByManagerId.clear();
   }
 
   private getBootLogManagerDescriptor(): AgentDescriptor | undefined {
@@ -1344,21 +1340,18 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return false;
   }
 
-  private resolveReplyTargetContext(
-    managerId: string,
-    explicitTargetContext?: MessageTargetContext
-  ): MessageSourceContext {
-    if (explicitTargetContext) {
-      const normalizedExplicitTarget = normalizeMessageTargetContext(explicitTargetContext);
-      return normalizeMessageSourceContext(normalizedExplicitTarget);
+  private resolveReplyTargetContext(explicitTargetContext?: MessageTargetContext): MessageSourceContext {
+    if (!explicitTargetContext) {
+      return { channel: "web" };
     }
 
-    const mostRecent = this.mostRecentInboundSourceContextByManagerId.get(managerId);
-    if (mostRecent) {
-      return mostRecent;
+    const normalizedExplicitTarget = normalizeMessageTargetContext(explicitTargetContext);
+
+    if (normalizedExplicitTarget.channel === "slack" && !normalizedExplicitTarget.channelId) {
+      throw new Error('speak_to_user target.channelId is required when target.channel is "slack"');
     }
 
-    return { channel: "web" };
+    return normalizeMessageSourceContext(normalizedExplicitTarget);
   }
 
   private parseResetManagerSessionArgs(
@@ -2645,6 +2638,17 @@ function extractRuntimeMessageText(message: string | RuntimeUserMessage): string
   }
 
   return message.text;
+}
+
+function formatInboundUserMessageForManager(text: string, sourceContext: MessageSourceContext): string {
+  const sourceMetadataLine = `[sourceContext] ${JSON.stringify(sourceContext)}`;
+  const trimmed = text.trim();
+
+  if (trimmed.length === 0) {
+    return sourceMetadataLine;
+  }
+
+  return `${sourceMetadataLine}\n\n${trimmed}`;
 }
 
 function normalizeMessageTargetContext(input: MessageTargetContext): MessageTargetContext {
