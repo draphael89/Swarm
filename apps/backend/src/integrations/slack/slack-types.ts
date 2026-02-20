@@ -1,4 +1,4 @@
-import type { ConversationAttachment, MessageSourceContext, ResponseExpectation } from "../../swarm/types.js";
+import type { ConversationAttachment, MessageSourceContext } from "../../swarm/types.js";
 
 export type SlackConnectionMode = "socket";
 
@@ -100,7 +100,6 @@ export interface SlackNormalizedInboundMessage {
   text: string;
   attachments: ConversationAttachment[];
   sourceContext: MessageSourceContext;
-  responseExpectation: ResponseExpectation;
 }
 
 export interface SlackConnectionTestResult {

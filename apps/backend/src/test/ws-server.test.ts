@@ -205,7 +205,6 @@ describe('SwarmWebSocketServer', () => {
     expect(userEvent.type).toBe('conversation_message')
     if (userEvent.type === 'conversation_message') {
       expect(userEvent.sourceContext).toEqual({ channel: 'web' })
-      expect(userEvent.responseExpectation).toBe('required')
     }
 
     client.close()

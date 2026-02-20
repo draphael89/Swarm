@@ -1,10 +1,9 @@
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
 import type {
   ConversationAttachment,
-  MessageSourceContext,
-  ResponseExpectation
+  MessageSourceContext
 } from "../../swarm/types.js";
-import { isDirectedAtBot, stripBotMention } from "./slack-heuristics.js";
+import { stripBotMention } from "./slack-heuristics.js";
 import { SlackWebApiClient } from "./slack-client.js";
 import type {
   SlackAppMentionEvent,
@@ -95,18 +94,6 @@ export class SlackInboundRouter {
       }
     }
 
-    const responseExpectation =
-      channelType === "dm"
-        ? "required"
-        : isDirectedAtBot({
-            text: event.text ?? "",
-            botUserId,
-            wakeWords: config.response.wakeWords,
-            isThreadReply: Boolean(event.thread_ts)
-          })
-          ? "required"
-          : "optional";
-
     await this.forwardToSwarm({
       eventType: "message",
       body,
@@ -117,7 +104,6 @@ export class SlackInboundRouter {
       ts: event.ts,
       threadTs: event.thread_ts,
       files: event.files,
-      responseExpectation,
       stripMention: false
     });
   }
@@ -132,7 +118,7 @@ export class SlackInboundRouter {
     const channelType = resolveChannelType(undefined, event.channel);
 
     if (channelType !== "dm") {
-      if (!this.isChannelAllowed(event.channel, channelType, config, true)) {
+      if (!this.isChannelAllowed(event.channel, channelType, config)) {
         return;
       }
     }
@@ -147,7 +133,6 @@ export class SlackInboundRouter {
       ts: event.ts,
       threadTs: event.thread_ts,
       files: event.files,
-      responseExpectation: "required",
       stripMention: true
     });
   }
@@ -162,7 +147,6 @@ export class SlackInboundRouter {
     ts?: string;
     threadTs?: string;
     files?: SlackFileDescriptor[];
-    responseExpectation: ResponseExpectation;
     stripMention: boolean;
   }): Promise<void> {
     const config = this.getConfig();
@@ -195,8 +179,7 @@ export class SlackInboundRouter {
       await this.swarmManager.handleUserMessage(normalizedText, {
         targetAgentId: targetManagerId,
         attachments,
-        sourceContext,
-        responseExpectation: input.responseExpectation
+        sourceContext
       });
     } catch (error) {
       this.onError?.("Failed to route Slack message to swarm manager", error);
@@ -238,8 +221,7 @@ export class SlackInboundRouter {
   private isChannelAllowed(
     channelId: string,
     channelType: MessageSourceContext["channelType"],
-    config: SlackIntegrationConfig,
-    isMention = false
+    config: SlackIntegrationConfig
   ): boolean {
     if (!channelId) {
       return false;
@@ -252,7 +234,7 @@ export class SlackInboundRouter {
 
     const channelIds = config.listen.channelIds;
     if (channelIds.length === 0) {
-      return isMention;
+      return true;
     }
 
     return channelIds.includes(channelId);
