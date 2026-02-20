@@ -102,15 +102,16 @@ export function IndexPage() {
   const activeAgentLabel = activeAgent?.displayName ?? activeAgentId ?? 'No active agent'
   const isActiveManager = activeAgent?.role === 'manager'
 
-  const isLoading = useMemo(() => {
-    if (!activeAgentId) return false
+  const activeAgentStatus = useMemo(() => {
+    if (!activeAgentId) return null
 
     const fromStatuses = state.statuses[activeAgentId]?.status
-    if (fromStatuses) return fromStatuses === 'streaming'
+    if (fromStatuses) return fromStatuses
 
-    const fromAgents = state.agents.find((agent) => agent.agentId === activeAgentId)?.status
-    return fromAgents === 'streaming'
+    return state.agents.find((agent) => agent.agentId === activeAgentId)?.status ?? null
   }, [activeAgentId, state.agents, state.statuses])
+
+  const isLoading = activeAgentStatus === 'streaming'
 
   const handleSend = (text: string, attachments?: ConversationAttachment[]) => {
     if (!activeAgentId) return
@@ -351,6 +352,7 @@ export function IndexPage() {
             connected={state.connected}
             activeAgentId={activeAgentId}
             activeAgentLabel={activeAgentLabel}
+            activeAgentStatus={activeAgentStatus}
             showNewChat={isActiveManager}
             onNewChat={handleNewChat}
           />
