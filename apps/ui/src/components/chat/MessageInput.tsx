@@ -20,6 +20,8 @@ import {
 import { cn } from '@/lib/utils'
 import type { ConversationAttachment } from '@/lib/ws-types'
 
+const TEXTAREA_MAX_HEIGHT = 186
+
 interface MessageInputProps {
   onSend: (message: string, attachments?: ConversationAttachment[]) => void
   isLoading: boolean
@@ -48,7 +50,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     if (!textarea) return
 
     textarea.style.height = 'auto'
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`
+    textarea.style.height = `${Math.min(textarea.scrollHeight, TEXTAREA_MAX_HEIGHT)}px`
   }, [])
 
   const blockedByLoading = isLoading && !allowWhileLoading
@@ -186,7 +188,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       <div className="overflow-hidden rounded-2xl border border-border">
         <AttachedFiles attachments={attachedFiles} onRemove={removeAttachment} />
 
-        <div className="group relative flex">
+        <div className="group flex flex-col">
           <textarea
             ref={textareaRef}
             value={input}
@@ -198,8 +200,8 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
             rows={1}
             className={cn(
               'flex-1 resize-none border-0 bg-transparent text-sm text-foreground shadow-none focus:outline-none',
-              'min-h-[68px] max-h-[220px]',
-              'px-4 pt-3 pb-11',
+              'min-h-[44px] max-h-[186px] overflow-y-auto',
+              'px-4 pt-3 pb-2',
               '[&::-webkit-scrollbar]:w-1.5',
               '[&::-webkit-scrollbar-track]:bg-transparent',
               '[&::-webkit-scrollbar-thumb]:bg-transparent',
@@ -217,7 +219,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
             aria-label="Attach files"
           />
 
-          <div className="absolute bottom-1.5 left-1.5 right-1.5 z-10 flex items-center justify-between">
+          <div className="flex items-center justify-between px-1.5 pb-1.5 pt-1">
             <Button
               type="button"
               variant="ghost"
