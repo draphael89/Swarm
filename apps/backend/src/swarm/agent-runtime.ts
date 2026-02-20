@@ -2,23 +2,14 @@ import { randomUUID } from "node:crypto";
 import type { AgentSession, AgentSessionEvent } from "@mariozechner/pi-coding-agent";
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 import type {
-  AgentDescriptor,
-  AgentStatus,
-  RequestedDeliveryMode,
-  SendMessageReceipt
-} from "./types.js";
-
-export interface RuntimeImageAttachment {
-  mimeType: string;
-  data: string;
-}
-
-export interface RuntimeUserMessage {
-  text: string;
-  images?: RuntimeImageAttachment[];
-}
-
-type RuntimeUserMessageInput = string | RuntimeUserMessage;
+  RuntimeImageAttachment,
+  RuntimeSessionEvent,
+  RuntimeUserMessage,
+  RuntimeUserMessageInput,
+  SwarmAgentRuntime,
+  SwarmRuntimeCallbacks
+} from "./runtime-types.js";
+import type { AgentDescriptor, AgentStatus, RequestedDeliveryMode, SendMessageReceipt } from "./types.js";
 
 interface PendingDelivery {
   deliveryId: string;
@@ -26,17 +17,13 @@ interface PendingDelivery {
   mode: "steer";
 }
 
-export interface AgentRuntimeCallbacks {
-  onStatusChange: (agentId: string, status: AgentStatus, pendingCount: number) => void | Promise<void>;
-  onSessionEvent?: (agentId: string, event: AgentSessionEvent) => void | Promise<void>;
-  onAgentEnd?: (agentId: string) => void | Promise<void>;
-}
+export type { RuntimeImageAttachment, RuntimeUserMessage, RuntimeUserMessageInput } from "./runtime-types.js";
 
-export class AgentRuntime {
+export class AgentRuntime implements SwarmAgentRuntime {
   readonly descriptor: AgentDescriptor;
 
   private readonly session: AgentSession;
-  private readonly callbacks: AgentRuntimeCallbacks;
+  private readonly callbacks: SwarmRuntimeCallbacks;
   private readonly now: () => string;
   private pendingDeliveries: PendingDelivery[] = [];
   private status: AgentStatus;
@@ -47,7 +34,7 @@ export class AgentRuntime {
   constructor(options: {
     descriptor: AgentDescriptor;
     session: AgentSession;
-    callbacks: AgentRuntimeCallbacks;
+    callbacks: SwarmRuntimeCallbacks;
     now?: () => string;
   }) {
     this.descriptor = options.descriptor;
@@ -187,7 +174,7 @@ export class AgentRuntime {
 
   private async handleEvent(event: AgentSessionEvent): Promise<void> {
     if (this.callbacks.onSessionEvent) {
-      await this.callbacks.onSessionEvent(this.descriptor.agentId, event);
+      await this.callbacks.onSessionEvent(this.descriptor.agentId, event as unknown as RuntimeSessionEvent);
     }
 
     if (event.type === "agent_start") {

@@ -58,7 +58,7 @@ graph TB
 
         subgraph "Subsystems"
             ARCHETYPES["ArchetypePromptRegistry"]
-            MODEL_PRESETS["Model Presets (codex-5.3, opus-4.6)"]
+            MODEL_PRESETS["Model Presets (pi-codex, pi-opus, codex-app)"]
             SWARM_TOOLS["Swarm Tools (spawn/kill/send/speak)"]
             CWD_POLICY["CWD Policy & Validation"]
             DIR_PICKER["Directory Picker (native OS)"]
@@ -168,7 +168,7 @@ swarm/                          # Monorepo root (pnpm workspaces)
 │   │       │   ├── agent-runtime.ts      # Per-agent session wrapper
 │   │       │   ├── swarm-tools.ts        # Tool definitions for agents
 │   │       │   ├── types.ts              # Shared domain types
-│   │       │   ├── model-presets.ts      # codex-5.3 / opus-4.6 preset resolution
+│   │       │   ├── model-presets.ts      # pi-codex / pi-opus / codex-app preset resolution
 │   │       │   ├── cwd-policy.ts         # Directory validation & listing
 │   │       │   ├── directory-picker.ts   # Native OS folder picker
 │   │       │   ├── archetypes/
@@ -510,11 +510,12 @@ The system uses named presets for model configuration rather than arbitrary prov
 
 | Preset | Provider | Model ID | Thinking Level |
 |---|---|---|---|
-| `codex-5.3` | `openai-codex` | `gpt-5.3-codex` | `xhigh` |
-| `opus-4.6` | `anthropic` | `claude-opus-4-6` | `xhigh` |
+| `pi-codex` | `openai-codex` | `gpt-5.3-codex` | `xhigh` |
+| `pi-opus` | `anthropic` | `claude-opus-4-6` | `xhigh` |
+| `codex-app` | `openai-codex-app-server` | `default` | `xhigh` |
 
-- **Default preset**: `codex-5.3`
-- Agents can be spawned with a specific preset: `spawn_agent({ model: "opus-4.6" })`
+- **Default preset**: `pi-codex`
+- Agents can be spawned with a specific preset: `spawn_agent({ model: "pi-opus" })`
 - Managers can be created with a specific preset via the UI or WS command
 - The default can be overridden via `SWARM_MODEL_PROVIDER` + `SWARM_MODEL_ID` + `SWARM_THINKING_LEVEL` env vars
 
@@ -544,8 +545,8 @@ The auth file is managed by the pi SDK's `AuthStorage`. It typically holds OAuth
 
 - `AuthStorage.create(authFile)` loads credentials
 - `ModelRegistry` uses auth to configure model providers
-- For `anthropic` provider (opus-4.6): Anthropic OAuth tokens trigger Claude Code auth headers in pi-ai
-- For `openai-codex` provider (codex-5.3): OpenAI credentials from the auth storage
+- For `anthropic` provider (pi-opus): Anthropic OAuth tokens trigger Claude Code auth headers in pi-ai
+- For `openai-codex` provider (pi-codex): OpenAI credentials from the auth storage
 
 #### Key Dependencies
 

@@ -138,13 +138,13 @@ async function renderPage(): Promise<FakeWebSocket> {
 }
 
 describe('IndexPage create manager model selection', () => {
-  it('shows only allowed model presets and defaults to codex-5.3', async () => {
+  it('shows only allowed model presets and defaults to pi-codex', async () => {
     await renderPage()
 
     click(getByRole(container, 'button', { name: 'Add manager' }))
 
     const modelSelect = getByLabelText(document.body, 'Model') as HTMLSelectElement
-    expect(modelSelect.value).toBe('codex-5.3')
+    expect(modelSelect.value).toBe('pi-codex')
 
     const optionValues = Array.from(modelSelect.options).map((option) => option.value)
     expect(optionValues).toEqual([...MANAGER_MODEL_PRESETS])
@@ -157,7 +157,7 @@ describe('IndexPage create manager model selection', () => {
 
     changeValue(getByLabelText(document.body, 'Name') as HTMLInputElement, 'release-manager')
     changeValue(getByLabelText(document.body, 'Working directory') as HTMLInputElement, '/tmp/release')
-    changeValue(getByLabelText(document.body, 'Model') as HTMLSelectElement, 'opus-4.6')
+    changeValue(getByLabelText(document.body, 'Model') as HTMLSelectElement, 'pi-opus')
 
     click(getByRole(document.body, 'button', { name: 'Create manager' }))
 
@@ -181,7 +181,7 @@ describe('IndexPage create manager model selection', () => {
       type: 'create_manager',
       name: 'release-manager',
       cwd: '/tmp/release',
-      model: 'opus-4.6',
+      model: 'pi-opus',
     })
     expect(typeof createPayload?.requestId).toBe('string')
 

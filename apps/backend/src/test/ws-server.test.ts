@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { SessionManager } from '@mariozechner/pi-coding-agent'
 import { SwarmManager } from '../swarm/swarm-manager.js'
 import type { AgentDescriptor, RequestedDeliveryMode, SendMessageReceipt, SwarmConfig } from '../swarm/types.js'
-import type { AgentRuntime } from '../swarm/agent-runtime.js'
+import type { SwarmAgentRuntime } from '../swarm/runtime-types.js'
 import { SwarmWebSocketServer } from '../ws/server.js'
 import type { ServerEvent } from '../protocol/ws-types.js'
 
@@ -20,6 +20,10 @@ class FakeRuntime {
   constructor(descriptor: AgentDescriptor) {
     this.descriptor = descriptor
     this.sessionManager = SessionManager.open(descriptor.sessionFile)
+  }
+
+  getStatus(): AgentDescriptor['status'] {
+    return this.descriptor.status
   }
 
   getPendingCount(): number {
@@ -58,8 +62,8 @@ class TestSwarmManager extends SwarmManager {
   pickedDirectoryPath: string | null = null
   lastPickedDirectoryDefaultPath: string | undefined
 
-  protected override async createRuntimeForDescriptor(descriptor: AgentDescriptor): Promise<AgentRuntime> {
-    return new FakeRuntime(descriptor) as unknown as AgentRuntime
+  protected override async createRuntimeForDescriptor(descriptor: AgentDescriptor): Promise<SwarmAgentRuntime> {
+    return new FakeRuntime(descriptor) as unknown as SwarmAgentRuntime
   }
 
   override async pickDirectory(defaultPath?: string): Promise<string | null> {
@@ -864,7 +868,7 @@ describe('SwarmWebSocketServer', () => {
         type: 'create_manager',
         name: 'Review Manager',
         cwd: config.defaultCwd,
-        model: 'opus-4.6',
+        model: 'pi-opus',
       }),
     )
 
@@ -876,6 +880,56 @@ describe('SwarmWebSocketServer', () => {
       expect(createdEvent.manager.model).toEqual({
         provider: 'anthropic',
         modelId: 'claude-opus-4-6',
+        thinkingLevel: 'xhigh',
+      })
+    }
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
+  it('creates codex-app managers over websocket', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port, true)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe' }))
+    await waitForEvent(events, (event) => event.type === 'ready')
+
+    client.send(
+      JSON.stringify({
+        type: 'create_manager',
+        name: 'Codex App Manager',
+        cwd: config.defaultCwd,
+        model: 'codex-app',
+      }),
+    )
+
+    const createdEvent = await waitForEvent(events, (event) => event.type === 'manager_created')
+    expect(createdEvent.type).toBe('manager_created')
+    if (createdEvent.type === 'manager_created') {
+      expect(createdEvent.manager.model).toEqual({
+        provider: 'openai-codex-app-server',
+        modelId: 'default',
         thinkingLevel: 'xhigh',
       })
     }
@@ -925,7 +979,7 @@ describe('SwarmWebSocketServer', () => {
       (event) =>
         event.type === 'error' &&
         event.code === 'INVALID_COMMAND' &&
-        event.message.includes('create_manager.model must be one of codex-5.3|opus-4.6'),
+        event.message.includes('create_manager.model must be one of pi-codex|pi-opus|codex-app'),
     )
 
     expect(errorEvent.type).toBe('error')

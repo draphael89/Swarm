@@ -80,14 +80,14 @@ describe('buildSwarmTools', () => {
       'tool-call',
       {
         agentId: 'Worker Opus',
-        model: 'opus-4.6',
+        model: 'pi-opus',
       },
       undefined,
       undefined,
       undefined as any,
     )
 
-    expect(receivedInput?.model).toBe('opus-4.6')
+    expect(receivedInput?.model).toBe('pi-opus')
     expect(result.details).toMatchObject({
       agentId: 'worker-opus',
       model: {
@@ -116,7 +116,7 @@ describe('buildSwarmTools', () => {
         undefined,
         undefined as any,
       ),
-    ).rejects.toThrow('spawn_agent.model must be one of codex-5.3|opus-4.6')
+    ).rejects.toThrow('spawn_agent.model must be one of pi-codex|pi-opus|codex-app')
   })
 
   it('forwards speak_to_user target metadata and returns resolved target context', async () => {

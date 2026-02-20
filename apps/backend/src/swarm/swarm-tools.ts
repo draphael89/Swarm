@@ -36,8 +36,9 @@ const deliveryModeSchema = Type.Union([
 ]);
 
 const spawnModelPresetSchema = Type.Union([
-  Type.Literal("codex-5.3"),
-  Type.Literal("opus-4.6")
+  Type.Literal("pi-codex"),
+  Type.Literal("pi-opus"),
+  Type.Literal("codex-app")
 ]);
 
 const messageChannelSchema = Type.Union([Type.Literal("web"), Type.Literal("slack")]);
@@ -115,7 +116,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
       name: "spawn_agent",
       label: "Spawn Agent",
       description:
-        "Create and start a new worker agent. agentId is required and normalized to lowercase kebab-case; if taken, a numeric suffix (-2, -3, …) is appended. archetypeId, systemPrompt, model, cwd, and initialMessage are optional. model accepts codex-5.3|opus-4.6.",
+        "Create and start a new worker agent. agentId is required and normalized to lowercase kebab-case; if taken, a numeric suffix (-2, -3, …) is appended. archetypeId, systemPrompt, model, cwd, and initialMessage are optional. model accepts pi-codex|pi-opus|codex-app.",
       parameters: Type.Object({
         agentId: Type.String({
           description:

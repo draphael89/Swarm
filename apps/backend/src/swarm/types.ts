@@ -4,7 +4,7 @@ export type AgentArchetypeId = string;
 
 export type AgentStatus = "idle" | "streaming" | "terminated" | "stopped_on_restart";
 
-export const SWARM_MODEL_PRESETS = ["codex-5.3", "opus-4.6"] as const;
+export const SWARM_MODEL_PRESETS = ["pi-codex", "pi-opus", "codex-app"] as const;
 
 export type SwarmModelPreset = (typeof SWARM_MODEL_PRESETS)[number];
 
