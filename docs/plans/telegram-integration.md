@@ -1,243 +1,303 @@
-# Telegram Integration Plan for Swarm
+# Telegram Integration Plan (Slack-Aligned)
 
-## Overview
-Add Telegram as a chat interface to Swarm so you can talk to the manager agent via Telegram messages. **All configuration happens in the Swarm web UI** — no terminal/env var setup required.
+## Objective
+Add Telegram as a third user channel in Swarm while reusing the same channel-aware messaging architecture already used for web + Slack.
 
----
-
-## 1. Telegram Bot API — Key Facts
-
-- Create bot with **@BotFather** (`/newbot`), get bot token
-- Two update delivery modes (mutually exclusive):
-  - **`getUpdates`** (long polling) — simplest, no public HTTPS needed
-  - **`setWebhook`** (push) — needs HTTPS on port 443/80/88/8443
-- `sendMessage` text limit: **4096 chars**
-- File download via `getFile`: up to **20MB**
-- Rate limits: ~1 msg/sec per chat, ~30 msgs/sec global
+This plan intentionally mirrors what worked in Slack:
+- inbound messages are always forwarded to manager with `[sourceContext]` metadata,
+- outbound delivery is driven by explicit `speak_to_user.target`,
+- default delivery remains web when no target is provided,
+- channel-specific formatting is handled in a dedicated markdown adapter layer.
 
 ---
 
-## 2. Current Swarm Message Flow (for reference)
+## What We’re Carrying Forward from Slack
 
-1. UI sends WS command `{ type: "user_message", ... }`
-2. WS server calls `swarmManager.handleUserMessage(text, { targetAgentId, delivery, attachments })`
-3. Manager processes → replies via `speak_to_user` tool → emits `conversation_message` with `source: "speak_to_user"`
-4. WS server broadcasts to subscribed clients
+1. **Shared channel model**
+   - Current: `target: { channel: "web" | "slack", channelId? }`
+   - Planned: `target: { channel: "web" | "slack" | "telegram", channelId? }`
 
-**Key insight:** Telegram bridge should call the same `handleUserMessage` API and listen for the same events — no need to route through WebSocket internally.
+2. **Inbound manager context is explicit**
+   - Telegram inbound messages are forwarded through `handleUserMessage(...)` with source metadata.
+   - Manager receives user text prefixed with `[sourceContext] {...}` (same pattern as Slack).
+
+3. **No implicit reply routing**
+   - If manager omits `target`, message goes to web.
+   - Telegram replies require explicit `target.channel = "telegram"` plus `target.channelId` (Telegram chat id).
+
+4. **Prompt-based selective response**
+   - Router forwards inbound Telegram messages without heuristic pre-filtering.
+   - Manager prompt decides when to respond, based on message intent + source context.
+
+5. **Dedicated delivery + formatting adapters**
+   - Same pattern as Slack (`slack-delivery.ts`, `slack-mrkdwn.ts`):
+     - `telegram-delivery.ts` for outbound API calls,
+     - `telegram-markdown.ts` for Markdown → Telegram-safe format.
+
+6. **Settings UX parity**
+   - Add Telegram controls in `SettingsDialog.tsx` with:
+     - enable/disable,
+     - token input,
+     - target manager,
+     - connection status badge,
+     - test/save/disable actions.
+
+7. **Secrets handling**
+   - Telegram bot token is stored in `secrets.json` (same pattern used for integration secrets), not exposed in plaintext API responses.
 
 ---
 
-## 3. UI-First Configuration (NEW — replaces env var approach)
+## Telegram vs Slack Differences (Design Implications)
 
-### Settings / Integrations Page
+- Slack uses Socket Mode WebSocket; Telegram uses Bot API over HTTP.
+- Telegram conversation key is `chat.id` (maps to `channelId`).
+- Telegram formatting uses `parse_mode` (`HTML` or `MarkdownV2`), not Slack mrkdwn.
+- No workspace/team model in Telegram.
+- Telegram supports reply markup/inline keyboards (deferred beyond MVP).
 
-Instead of configuring Telegram via env vars and `.env` files, **all Telegram setup happens in the Swarm web UI**:
+---
 
-#### Settings Panel Design
-- Accessible via a **Settings/gear icon** in the sidebar or header
-- **Integrations** tab with a Telegram section containing:
+## Proposed File Structure
 
+> Mirror Slack’s modular structure and file naming.
+>
+> Recommended repo path (matches current Slack placement):
+> `apps/backend/src/integrations/telegram/`
+>
+> Equivalent naming requested in earlier drafts is preserved (`src/swarm/telegram/*`):
+> `telegram-client.ts`, `telegram-router.ts`, `telegram-delivery.ts`, `telegram-markdown.ts`, `index.ts`.
+
+### Backend
+`apps/backend/src/integrations/telegram/`
+
+- `telegram-client.ts` — Bot API client (`getMe`, `getUpdates`, `sendMessage`, file download)
+- `telegram-router.ts` — inbound update normalization and routing to manager
+- `telegram-delivery.ts` — outbound `conversation_message` → Telegram delivery
+- `telegram-markdown.ts` — markdown conversion for Telegram format
+- `telegram-config.ts` — load/save/merge Telegram integration config
+- `telegram-types.ts` — Telegram payload/config/status types
+- `telegram-status.ts` — status tracker (`telegram_status` events)
+- `telegram-integration.ts` — lifecycle service (start/stop/reload)
+- `index.ts` — exports
+
+### Existing app integration points
+- `apps/backend/src/index.ts` — instantiate/start/stop `TelegramIntegrationService`
+- `apps/backend/src/ws/server.ts` — add `/api/integrations/telegram*` endpoints + status fanout
+- `apps/ui/src/components/chat/SettingsDialog.tsx` — Telegram settings section
+- `apps/ui/src/lib/ws-types.ts` — add `TelegramStatusEvent`
+
+---
+
+## Contract Updates
+
+### 1) Channel union
+Update channel contracts to include Telegram:
+- `apps/backend/src/swarm/types.ts`
+- `apps/backend/src/protocol/ws-types.ts`
+- `apps/ui/src/lib/ws-types.ts`
+- `apps/backend/src/swarm/swarm-tools.ts` schema
+
+From:
+```ts
+type MessageChannel = "web" | "slack"
 ```
-┌─────────────────────────────────────────────┐
-│  🤖 Telegram Integration                    │
-│                                              │
-│  Status: ● Connected (polling)    [Disable]  │
-│                                              │
-│  Bot Token:  [••••••••••••••••••]  [👁 Show] │
-│                                              │
-│  Allowed Users:                              │
-│  ┌──────────────────────────────────┐       │
-│  │ @sawyerhood (ID: 123456789)  ✕  │       │
-│  └──────────────────────────────────┘       │
-│  [+ Add User ID]                             │
-│                                              │
-│  ☑ Private chats only                        │
-│  ☐ Drop pending updates on start             │
-│  ☑ Show typing indicator                     │
-│                                              │
-│  Target Agent: [opus-manager ▼]              │
-│                                              │
-│  [Save & Connect]                            │
-│                                              │
-│  ─── Connection Log ───                      │
-│  09:15 Connected to Telegram                 │
-│  09:15 Polling started (25s timeout)         │
-│  09:16 Message from @sawyerhood: "hello"     │
-└─────────────────────────────────────────────┘
+To:
+```ts
+type MessageChannel = "web" | "slack" | "telegram"
 ```
 
-#### How Config is Stored
-- Backend persists Telegram settings to `$SWARM_DATA_DIR/integrations/telegram.json`
-- Settings are loaded at boot and can be hot-reloaded via the UI without restart
-- **No env vars needed** — everything is configured through the UI
-- The settings file is auto-created when the user first configures Telegram
+### 2) Source metadata shape
+Keep existing `sourceContext` shape and include Telegram identifiers:
+- `channel: "telegram"`
+- `channelId: String(chat.id)`
+- `userId: String(from.id)`
+- `messageId: String(message.message_id)` *(new optional field in source metadata)*
+- `channelType`: map Telegram chat type to existing semantic bucket (`dm`/`group`/`channel`)
 
-#### Config Schema (`telegram.json`)
+Example manager-visible line:
+```text
+[sourceContext] {"channel":"telegram","channelId":"123456789","userId":"5550001","messageId":"42","channelType":"dm"}
+```
+
+### 3) `speak_to_user` target behavior
+- `target.channel = "telegram"` requires `target.channelId`.
+- Missing `target` still defaults to web.
+- No “reply to most recent Telegram chat” fallback.
+
+### 4) Manager prompt update
+Update `apps/backend/src/swarm/archetypes/builtins/manager.md` so non-web channel guidance applies to Telegram as well as Slack:
+- use source metadata,
+- be selective in shared chats,
+- always set explicit non-web target.
+
+---
+
+## Configuration & Secrets
+
+### Telegram config file
+`$SWARM_DATA_DIR/integrations/telegram.json`
+
+Recommended non-secret shape:
 ```json
 {
-  "enabled": true,
-  "botToken": "encrypted-or-plaintext-token",
+  "enabled": false,
   "mode": "polling",
-  "targetAgentId": "opus-manager",
-  "allowedUserIds": [123456789],
-  "allowedChatIds": [],
-  "privateChatsOnly": true,
-  "dropPendingUpdates": true,
-  "typingIndicator": true,
-  "pollTimeoutSec": 25,
-  "pollLimit": 100
+  "targetManagerId": "manager",
+  "polling": {
+    "timeoutSeconds": 25,
+    "limit": 100,
+    "dropPendingUpdatesOnStart": true
+  },
+  "delivery": {
+    "parseMode": "HTML",
+    "disableLinkPreview": true,
+    "replyToInboundMessageByDefault": false
+  },
+  "attachments": {
+    "maxFileBytes": 10485760,
+    "allowImages": true,
+    "allowText": true,
+    "allowBinary": false
+  }
 }
 ```
 
-#### API Endpoints for Settings
-- `GET /api/integrations/telegram` — get current config (token masked)
-- `PUT /api/integrations/telegram` — update config + restart bridge
-- `POST /api/integrations/telegram/test` — test connection with current token
-- `DELETE /api/integrations/telegram` — disable and remove config
-
-#### WS Events for Status
-- `telegram_status` event — broadcast connection state changes to UI
-  - `{ type: "telegram_status", status: "connected" | "disconnected" | "error", detail: "..." }`
+### Secret storage
+- `TELEGRAM_BOT_TOKEN` stored in `$SWARM_DATA_DIR/secrets.json`.
+- API responses expose `hasBotToken` + masked value only.
 
 ---
 
-## 4. Proposed Architecture
+## Inbound Routing (Telegram → Manager)
 
-### New module: `apps/backend/src/telegram/`
-
-| File | Purpose |
-|------|---------|
-| `telegram-client.ts` | Thin Bot API caller (getUpdates, sendMessage, getFile, etc.) |
-| `telegram-bridge.ts` | Maps Telegram updates ↔ Swarm manager messages |
-| `telegram-config.ts` | Load/save/validate config from `telegram.json` |
-| `telegram-session-map.ts` | Maps Telegram chat/user → Swarm agent session |
-| `telegram-security.ts` | Allowlist checks, dedupe/rate limit |
-| `telegram-types.ts` | Minimal Telegram Update/Message types |
-| `telegram-poller.ts` | Long-polling loop |
-
-### Frontend additions: `apps/ui/src/`
-
-| File | Purpose |
-|------|---------|
-| `components/settings/TelegramSettings.tsx` | Config form + connection status |
-| `components/settings/SettingsPanel.tsx` | Settings panel container (for future integrations too) |
-
-### Lifecycle integration
-- On boot: load `telegram.json`, start bridge if enabled
-- On UI config save: hot-reload bridge (stop → reconfigure → start)
-- No server restart needed for config changes
+1. Poll `getUpdates` (MVP), maintain `offset`.
+2. Normalize supported updates (`message`, `edited_message` optional later).
+3. Build `sourceContext` with channel/chat/user/message metadata.
+4. Convert attachments (photo/document) using same attachment model as Slack path.
+5. Call:
+```ts
+swarmManager.handleUserMessage(text, {
+  targetAgentId: config.targetManagerId,
+  attachments,
+  sourceContext: {
+    channel: "telegram",
+    channelId,
+    userId,
+    messageId,
+    channelType
+  }
+})
+```
+6. No heuristic suppression in router; manager decides whether to answer.
 
 ---
 
-## 5. Message Flow Design — Option 3: Broadcast + Source Annotation
+## Outbound Delivery (Manager → Telegram)
 
-### Principle
-All channels (Web UI + Telegram) are windows into **one unified conversation**. The manager has one context regardless of where messages come from. All `speak_to_user` responses are **broadcast to all channels**.
+Delivery bridge behavior mirrors Slack delivery bridge:
 
-### Inbound (Telegram → Swarm)
-1. Receive Telegram `Update` via polling
-2. Validate sender against allowlist (configured in UI)
-3. Normalize: text from `message.text`, photos → download → base64 image attachments
-4. Tag the message with source metadata: `{ source: "telegram", userId: ..., username: "..." }`
-5. Call `swarmManager.handleUserMessage(...)` targeting configured agent
+- listen to `conversation_message` events,
+- only deliver when `sourceContext.channel === "telegram"`,
+- ignore `source === "user_input"`,
+- require explicit `channelId` (chat id),
+- convert markdown via `telegram-markdown.ts`,
+- chunk to Telegram limit (4096 chars),
+- handle 429 with retry/backoff.
 
-### Inbound (Web UI → Swarm)
-1. Same as current flow, but tag with `{ source: "web" }`
-
-### Outbound (Swarm → All Channels)
-1. Bridge listens to `conversation_message` events
-2. Forward all `source: "speak_to_user"` messages to **both** Web UI and Telegram
-3. Telegram: chunk text at 4096 chars, send with typing indicator
-4. Web UI: display as normal (already works)
-
-### Source Annotations
-- Messages in the Web UI show a small indicator: "via Telegram" / "via @username"
-- Messages in Telegram optionally show "[from Web]" prefix when the user sent via web UI
-- This prevents confusion about who said what from where
-
-### Future: Multi-User Support (out of scope for V1)
-- Multiple Telegram users can be allowed via the allowlist
-- Each user's messages are tagged with their Telegram username/ID
-- The manager sees all messages in one unified context but knows who's talking
-- The manager can address responses to specific users: "Hey @sawyer, ..." 
-- Requires extending `speak_to_user` to optionally target specific channels/users (V2)
+If manager omits target, event is `channel: "web"` and Telegram delivery does nothing.
 
 ---
 
-## 6. Security & Auth
+## Markdown Conversion Strategy
 
-- **Allowlist configured in UI** — no need to edit env vars
-- Private-chat-only by default (toggle in UI)
-- Ignore bot-origin messages
-- Dedupe update IDs, maintain offset
-- Bot token stored in `telegram.json` (consider encryption at rest later)
-- Never log bot token
+Implement `telegram-markdown.ts` analogous to Slack’s formatter layer.
 
----
+Recommendation for MVP: **Telegram HTML parse mode**
+- easier escaping rules than MarkdownV2,
+- good support for code/pre/links/emphasis,
+- deterministic conversion path.
 
-## 7. Dependencies
+Function shape:
+```ts
+export function markdownToTelegramHtml(text: string): string
+```
 
-**Recommendation: Raw `fetch` API** — no new runtime dependencies. Full control, minimal footprint, consistent with current backend style.
-
----
-
-## 8. Implementation Phases
-
-### Phase 0: Settings Infrastructure
-- Add integrations config directory + telegram.json persistence
-- Add REST endpoints for telegram config CRUD
-- Add settings UI panel with Telegram config form
-
-### Phase 1: Polling MVP (text only)
-- Telegram client (raw fetch)
-- Polling loop with offset persistence
-- Auth allowlist checks (from UI config)
-- Route text → manager via `handleUserMessage`
-- Forward `speak_to_user` → Telegram `sendMessage`
-- Chunking + retry/backoff on 429
-- Connection status broadcast to UI
-
-### Phase 2: Images + UX
-- Photo/image-doc ingestion (download → base64 → attachment)
-- Typing indicator
-- Clearer system/error responses
-- Connection log in UI
-
-### Phase 3: Advanced
-- Per-chat session mapping
-- Non-image file attachments
-- Optional streaming UX via `editMessageText`
+Include tests similar to `slack-mrkdwn.test.ts`:
+- emphasis/link conversion,
+- code fence handling,
+- HTML escaping safety,
+- newline normalization.
 
 ---
 
-## 9. Limitations
+## Settings UI (Slack-Pattern Parity)
 
-- Telegram message/media limits are stricter than web UI
-- No rich UI/thread controls available
-- V1 responses are final-chunk only (no token streaming)
-- Non-image file attachments deferred to later phase
-- Single-manager mode recommended; multi-user context can collide
+Update `apps/ui/src/components/chat/SettingsDialog.tsx`:
+- add **Telegram** section/tab beside Slack settings,
+- controls:
+  - enable Telegram integration,
+  - bot token (masked, rotatable),
+  - target manager select,
+  - polling options,
+  - attachment toggles,
+  - test connection button,
+  - disable button,
+  - save button,
+  - connection/status badge.
+
+Add `telegram_status` event handling in UI ws types and settings state.
 
 ---
 
-## 10. Test Plan
+## API Endpoints
 
-**Unit tests (vitest):**
-- Config load/save/validation
-- Update parsing + sender authorization
-- Dedupe/offset behavior
-- Text chunking at 4096 boundary
-- Image attachment transform pipeline
+Add Telegram endpoints parallel to Slack:
+- `GET /api/integrations/telegram`
+- `PUT /api/integrations/telegram`
+- `DELETE /api/integrations/telegram`
+- `POST /api/integrations/telegram/test`
 
-**Integration tests:**
-- Mock Telegram HTTP endpoints
-- End-to-end: Update → handleUserMessage → speak_to_user → sendMessage
-- Config CRUD endpoints
+Optional later:
+- `POST /api/integrations/telegram/webhook` (if webhook mode is added)
 
-**Manual smoke:**
-- Configure Telegram in UI
-- Send text in private chat
-- Send image
-- Toggle enabled/disabled
-- Verify unauthorized user rejection
+---
+
+## Implementation Phases
+
+### Phase 0 — Channel contract alignment
+- Add `telegram` to channel unions + tool schemas.
+- Add optional `messageId` to source metadata contract.
+- Update manager prompt rules for Telegram routing.
+
+### Phase 1 — Backend Telegram service skeleton
+- Add config/types/status/integration service files.
+- Add polling client and lifecycle wiring in backend startup/shutdown.
+- Add Telegram REST endpoints and status event fanout.
+
+### Phase 2 — Inbound routing MVP
+- Parse Telegram updates and map to `handleUserMessage` with `sourceContext`.
+- Text-only first; preserve metadata.
+- No inbound pre-filtering.
+
+### Phase 3 — Outbound delivery + formatting
+- Implement `telegram-delivery.ts` event bridge.
+- Implement markdown conversion and chunking.
+- Add retry/backoff and delivery error reporting.
+
+### Phase 4 — Settings dialog integration
+- Add Telegram section with Slack-like UX.
+- Mask token + show connection state + test/save/disable flows.
+
+### Phase 5 — Attachments + advanced Telegram features
+- Photo/document ingestion parity with Slack attachment handling.
+- Optional reply-to-message behavior and inline keyboard primitives.
+
+---
+
+## Validation Checklist
+
+- Clean markdown doc and actionable file map.
+- Routing model matches Slack architecture (sourceContext + explicit target).
+- No implicit channel routing introduced.
+- Telegram token stored in secrets store and masked in APIs.
+- Settings UX mirrors existing Slack settings patterns.
