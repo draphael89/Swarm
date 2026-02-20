@@ -173,7 +173,13 @@ function formatSourceBadge(sourceContext?: MessageSourceContext): string | null 
   return label
 }
 
-function SourceBadge({ sourceContext }: { sourceContext?: MessageSourceContext }) {
+function SourceBadge({
+  sourceContext,
+  isUser = false,
+}: {
+  sourceContext?: MessageSourceContext
+  isUser?: boolean
+}) {
   const label = formatSourceBadge(sourceContext)
   if (!label || !sourceContext) {
     return null
@@ -183,9 +189,11 @@ function SourceBadge({ sourceContext }: { sourceContext?: MessageSourceContext }
     <span
       className={cn(
         'inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none',
-        sourceContext.channel === 'slack'
-          ? 'border-violet-500/35 bg-violet-500/10 text-violet-700 dark:text-violet-300'
-          : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+        isUser
+          ? 'border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground/90'
+          : sourceContext.channel === 'slack'
+            ? 'border-violet-500/35 bg-violet-500/10 text-violet-700 dark:text-violet-300'
+            : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
       )}
     >
       [{label}]
@@ -653,7 +661,7 @@ function ConversationMessage({
           </div>
           {timestampLabel || sourceContext ? (
             <div className="mt-1 flex items-center justify-end gap-1.5">
-              <SourceBadge sourceContext={sourceContext} />
+              <SourceBadge sourceContext={sourceContext} isUser />
               {timestampLabel ? (
                 <p className="text-right text-[10px] leading-none text-primary-foreground/70">{timestampLabel}</p>
               ) : null}
