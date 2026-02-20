@@ -142,7 +142,7 @@ This keeps SwarmManager orchestration unchanged while enabling runtime routing.
 - Replace concrete runtime map type with interface
 - Runtime factory branch:
   - pi runtime for existing presets/providers
-  - codex runtime for new codex preset/runtime kind
+  - codex runtime for new codex-app-server runtime/runtime kind
 - Keep existing lifecycle behavior (`restoreRuntimesForBoot`, `terminateDescriptor`, status emits)
 
 ## 2) `apps/backend/src/swarm/agent-runtime.ts`
@@ -186,7 +186,7 @@ Recommended descriptor mapping for `codex`:
 - `modelId: "default"` (or resolved default from `model/list` at runtime)
 - `thinkingLevel`: preserved field for compatibility (not authoritative for codex runtime)
 
-This avoids ambiguity with current pi codex preset and allows mixed deployments.
+This avoids ambiguity with current pi codex-app-server runtime and allows mixed deployments.
 
 ---
 
@@ -301,7 +301,7 @@ Acceptance: user can chat directly with a codex agent.
 Acceptance: Claude manager can delegate tasks to codex worker and receive reports.
 
 ## Phase 3 — Presets + contract plumbing
-- Add `codex` preset across backend+UI
+- Add `codex-app-server` runtime across backend+UI
 - Update spawn/create validation + tests
 - preserve `codex-5.3` and `opus-4.6`
 
