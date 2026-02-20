@@ -58,6 +58,7 @@ import type {
   ConversationTextAttachment,
   RequestedDeliveryMode,
   SendMessageReceipt,
+  SkillEnvRequirement,
   SpawnAgentInput,
   SwarmConfig,
   SwarmModelPreset
@@ -119,6 +120,22 @@ const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
 ## Open Follow-ups
 - (none yet)
 `;
+const SKILL_FRONTMATTER_BLOCK_PATTERN = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/;
+const SETTINGS_ENV_MASK = "********";
+const VALID_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+interface ParsedSkillEnvDeclaration {
+  name: string;
+  description?: string;
+  required: boolean;
+  helpUrl?: string;
+}
+
+interface SkillMetadata {
+  skillName: string;
+  path: string;
+  env: ParsedSkillEnvDeclaration[];
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -140,6 +157,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private readonly runtimes = new Map<string, AgentRuntime>();
   private readonly conversationEntriesByAgentId = new Map<string, ConversationEntryEvent[]>();
   private readonly pendingUserRepliesByManagerId = new Map<string, number>();
+  private readonly originalProcessEnvByName = new Map<string, string | undefined>();
+  private skillMetadata: SkillMetadata[] = [];
+  private secrets: Record<string, string> = {};
 
   private archetypePromptRegistry: ArchetypePromptRegistry = createEmptyArchetypePromptRegistry();
 
@@ -165,6 +185,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     await this.ensureDirectories();
     await this.ensureMemoryFile();
+    await this.loadSecretsStore();
+    await this.reloadSkillMetadata();
 
     try {
       this.config.defaultCwd = await this.resolveAndValidateCwd(this.config.defaultCwd);
@@ -749,6 +771,76 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return this.config;
   }
 
+  async listSettingsEnv(): Promise<SkillEnvRequirement[]> {
+    if (this.skillMetadata.length === 0) {
+      await this.reloadSkillMetadata();
+    }
+
+    const requirements: SkillEnvRequirement[] = [];
+
+    for (const skill of this.skillMetadata) {
+      for (const declaration of skill.env) {
+        const resolvedValue = this.resolveEnvValue(declaration.name);
+        requirements.push({
+          name: declaration.name,
+          description: declaration.description,
+          required: declaration.required,
+          helpUrl: declaration.helpUrl,
+          skillName: skill.skillName,
+          isSet: typeof resolvedValue === "string" && resolvedValue.trim().length > 0,
+          maskedValue: resolvedValue ? SETTINGS_ENV_MASK : undefined
+        });
+      }
+    }
+
+    requirements.sort((left, right) => {
+      const byName = left.name.localeCompare(right.name);
+      if (byName !== 0) return byName;
+      return left.skillName.localeCompare(right.skillName);
+    });
+
+    return requirements;
+  }
+
+  async updateSettingsEnv(values: Record<string, string>): Promise<void> {
+    const entries = Object.entries(values);
+    if (entries.length === 0) {
+      return;
+    }
+
+    for (const [rawName, rawValue] of entries) {
+      const normalizedName = normalizeEnvVarName(rawName);
+      if (!normalizedName) {
+        throw new Error(`Invalid environment variable name: ${rawName}`);
+      }
+
+      const normalizedValue = typeof rawValue === "string" ? rawValue.trim() : "";
+      if (!normalizedValue) {
+        throw new Error(`Environment variable ${normalizedName} must be a non-empty string`);
+      }
+
+      this.secrets[normalizedName] = normalizedValue;
+      this.applySecretToProcessEnv(normalizedName, normalizedValue);
+    }
+
+    await this.saveSecretsStore();
+  }
+
+  async deleteSettingsEnv(name: string): Promise<void> {
+    const normalizedName = normalizeEnvVarName(name);
+    if (!normalizedName) {
+      throw new Error(`Invalid environment variable name: ${name}`);
+    }
+
+    if (!(normalizedName in this.secrets)) {
+      return;
+    }
+
+    delete this.secrets[normalizedName];
+    this.restoreProcessEnvForSecret(normalizedName);
+    await this.saveSecretsStore();
+  }
+
   private emitConversationMessage(event: ConversationMessageEvent): void {
     this.emitConversationEntry(event);
     this.emit("conversation_message", event satisfies ServerEvent);
@@ -1218,6 +1310,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }> {
     await this.ensureMemoryFile();
 
+    if (this.skillMetadata.length === 0) {
+      await this.reloadSkillMetadata();
+    }
+
     const memoryContextFile = {
       path: this.config.paths.memoryFile,
       content: await readFile(this.config.paths.memoryFile, "utf8")
@@ -1225,7 +1321,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     return {
       memoryContextFile,
-      additionalSkillPaths: [this.resolveMemorySkillPath(), this.resolveBraveSearchSkillPath()]
+      additionalSkillPaths: this.skillMetadata.map((skill) => skill.path)
     };
   }
 
@@ -1245,6 +1341,130 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       repositoryRelativePath: BUILT_IN_BRAVE_SEARCH_SKILL_RELATIVE_PATH,
       fallbackPath: BUILT_IN_BRAVE_SEARCH_SKILL_FALLBACK_PATH
     });
+  }
+
+  private async reloadSkillMetadata(): Promise<void> {
+    const skillPaths = [
+      {
+        fallbackSkillName: "memory",
+        path: this.resolveMemorySkillPath()
+      },
+      {
+        fallbackSkillName: "brave-search",
+        path: this.resolveBraveSearchSkillPath()
+      }
+    ];
+
+    const metadata: SkillMetadata[] = [];
+
+    for (const skillPath of skillPaths) {
+      const markdown = await readFile(skillPath.path, "utf8");
+      const parsed = parseSkillFrontmatter(markdown);
+
+      metadata.push({
+        skillName: parsed.name ?? skillPath.fallbackSkillName,
+        path: skillPath.path,
+        env: parsed.env
+      });
+    }
+
+    this.skillMetadata = metadata;
+  }
+
+  private resolveEnvValue(name: string): string | undefined {
+    const secretValue = this.secrets[name];
+    if (typeof secretValue === "string" && secretValue.trim().length > 0) {
+      return secretValue;
+    }
+
+    const processValue = process.env[name];
+    if (typeof processValue !== "string" || processValue.trim().length === 0) {
+      return undefined;
+    }
+
+    return processValue;
+  }
+
+  private async loadSecretsStore(): Promise<void> {
+    this.secrets = await this.readSecretsStore();
+
+    for (const [name, value] of Object.entries(this.secrets)) {
+      this.applySecretToProcessEnv(name, value);
+    }
+  }
+
+  private async readSecretsStore(): Promise<Record<string, string>> {
+    let raw: string;
+
+    try {
+      raw = await readFile(this.config.paths.secretsFile, "utf8");
+    } catch (error) {
+      if (isEnoentError(error)) {
+        return {};
+      }
+      throw error;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return {};
+    }
+
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    const normalized: Record<string, string> = {};
+
+    for (const [rawName, rawValue] of Object.entries(parsed)) {
+      const normalizedName = normalizeEnvVarName(rawName);
+      if (!normalizedName) {
+        continue;
+      }
+
+      if (typeof rawValue !== "string") {
+        continue;
+      }
+
+      const normalizedValue = rawValue.trim();
+      if (!normalizedValue) {
+        continue;
+      }
+
+      normalized[normalizedName] = normalizedValue;
+    }
+
+    return normalized;
+  }
+
+  private async saveSecretsStore(): Promise<void> {
+    const target = this.config.paths.secretsFile;
+    const tmp = `${target}.tmp`;
+
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(tmp, `${JSON.stringify(this.secrets, null, 2)}\n`, "utf8");
+    await rename(tmp, target);
+  }
+
+  private applySecretToProcessEnv(name: string, value: string): void {
+    if (!this.originalProcessEnvByName.has(name)) {
+      this.originalProcessEnvByName.set(name, process.env[name]);
+    }
+
+    process.env[name] = value;
+  }
+
+  private restoreProcessEnvForSecret(name: string): void {
+    const original = this.originalProcessEnvByName.get(name);
+
+    if (original === undefined) {
+      delete process.env[name];
+      return;
+    }
+
+    process.env[name] = original;
   }
 
   private resolveBuiltInSkillPath(options: {
@@ -1812,6 +2032,208 @@ function normalizeAgentId(input: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
+}
+
+function normalizeEnvVarName(name: string): string | undefined {
+  const normalized = name.trim();
+  if (!VALID_ENV_NAME_PATTERN.test(normalized)) {
+    return undefined;
+  }
+
+  return normalized;
+}
+
+function parseSkillFrontmatter(markdown: string): { name?: string; env: ParsedSkillEnvDeclaration[] } {
+  const match = SKILL_FRONTMATTER_BLOCK_PATTERN.exec(markdown);
+  if (!match) {
+    return { env: [] };
+  }
+
+  const lines = match[1].split(/\r?\n/);
+  let skillName: string | undefined;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || countLeadingSpaces(line) > 0) {
+      continue;
+    }
+
+    const parsed = parseYamlKeyValue(trimmed);
+    if (!parsed) {
+      continue;
+    }
+
+    if (parsed.key === "name") {
+      const candidate = parseYamlStringValue(parsed.value);
+      if (candidate) {
+        skillName = candidate;
+      }
+      break;
+    }
+  }
+
+  return {
+    name: skillName,
+    env: parseSkillEnvDeclarations(lines)
+  };
+}
+
+function parseSkillEnvDeclarations(lines: string[]): ParsedSkillEnvDeclaration[] {
+  const envIndex = lines.findIndex((line) => line.trim() === "env:");
+  if (envIndex < 0) {
+    return [];
+  }
+
+  const envIndent = countLeadingSpaces(lines[envIndex]);
+  const declarations: ParsedSkillEnvDeclaration[] = [];
+  let current: Partial<ParsedSkillEnvDeclaration> | undefined;
+
+  const flushCurrent = (): void => {
+    if (!current) {
+      return;
+    }
+
+    const normalizedName =
+      typeof current.name === "string" ? normalizeEnvVarName(current.name) : undefined;
+    if (!normalizedName) {
+      current = undefined;
+      return;
+    }
+
+    declarations.push({
+      name: normalizedName,
+      description:
+        typeof current.description === "string" && current.description.trim().length > 0
+          ? current.description.trim()
+          : undefined,
+      required: current.required === true,
+      helpUrl:
+        typeof current.helpUrl === "string" && current.helpUrl.trim().length > 0
+          ? current.helpUrl.trim()
+          : undefined
+    });
+
+    current = undefined;
+  };
+
+  for (let index = envIndex + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      continue;
+    }
+
+    const lineIndent = countLeadingSpaces(line);
+    if (lineIndent <= envIndent) {
+      break;
+    }
+
+    if (trimmed.startsWith("-")) {
+      flushCurrent();
+      current = {};
+
+      const inline = trimmed.slice(1).trim();
+      if (inline.length > 0) {
+        const parsedInline = parseYamlKeyValue(inline);
+        if (parsedInline) {
+          assignSkillEnvField(current, parsedInline.key, parsedInline.value);
+        }
+      }
+
+      continue;
+    }
+
+    if (!current) {
+      continue;
+    }
+
+    const parsed = parseYamlKeyValue(trimmed);
+    if (!parsed) {
+      continue;
+    }
+
+    assignSkillEnvField(current, parsed.key, parsed.value);
+  }
+
+  flushCurrent();
+
+  return declarations;
+}
+
+function assignSkillEnvField(target: Partial<ParsedSkillEnvDeclaration>, key: string, value: string): void {
+  switch (key) {
+    case "name":
+      target.name = parseYamlStringValue(value);
+      return;
+
+    case "description":
+      target.description = parseYamlStringValue(value);
+      return;
+
+    case "required": {
+      const parsed = parseYamlBooleanValue(value);
+      if (parsed !== undefined) {
+        target.required = parsed;
+      }
+      return;
+    }
+
+    case "helpUrl":
+      target.helpUrl = parseYamlStringValue(value);
+      return;
+
+    default:
+      return;
+  }
+}
+
+function parseYamlKeyValue(line: string): { key: string; value: string } | undefined {
+  const separatorIndex = line.indexOf(":");
+  if (separatorIndex <= 0) {
+    return undefined;
+  }
+
+  const key = line.slice(0, separatorIndex).trim();
+  if (!key) {
+    return undefined;
+  }
+
+  return {
+    key,
+    value: line.slice(separatorIndex + 1).trim()
+  };
+}
+
+function parseYamlStringValue(value: string): string {
+  const trimmed = value.trim();
+
+  if (
+    (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1).trim();
+  }
+
+  return trimmed;
+}
+
+function parseYamlBooleanValue(value: string): boolean | undefined {
+  const normalized = parseYamlStringValue(value).toLowerCase();
+  if (normalized === "true" || normalized === "yes" || normalized === "on" || normalized === "1") {
+    return true;
+  }
+
+  if (normalized === "false" || normalized === "no" || normalized === "off" || normalized === "0") {
+    return false;
+  }
+
+  return undefined;
+}
+
+function countLeadingSpaces(value: string): number {
+  const match = /^\s*/.exec(value);
+  return match ? match[0].length : 0;
 }
 
 function previewForLog(text: string, maxLength = 160): string {

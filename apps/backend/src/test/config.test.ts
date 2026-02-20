@@ -61,6 +61,7 @@ describe('createConfig', () => {
       expect(config.paths.repoArchetypesDir).toBe(resolve(config.paths.rootDir, '.swarm', 'archetypes'))
       expect(config.paths.memoryFile).toBe(resolve(homedir(), '.swarm-dev', 'MEMORY.md'))
       expect(config.paths.repoMemorySkillFile).toBe(resolve(config.paths.rootDir, '.swarm', 'skills', 'memory', 'SKILL.md'))
+      expect(config.paths.secretsFile).toBe(resolve(homedir(), '.swarm-dev', 'secrets.json'))
       expect(config.cwdAllowlistRoots).toContain(config.paths.rootDir)
       expect(config.cwdAllowlistRoots).toContain(resolve(homedir(), 'worktrees'))
     })
@@ -76,6 +77,7 @@ describe('createConfig', () => {
       expect(config.paths.memoryFile).toBe(resolve(homedir(), '.swarm', 'MEMORY.md'))
       expect(config.paths.repoMemorySkillFile).toBe(resolve(config.paths.rootDir, '.swarm', 'skills', 'memory', 'SKILL.md'))
       expect(config.paths.agentsStoreFile).toBe(resolve(homedir(), '.swarm', 'swarm', 'agents.json'))
+      expect(config.paths.secretsFile).toBe(resolve(homedir(), '.swarm', 'secrets.json'))
     })
   })
 

@@ -130,6 +130,7 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
       memoryFile,
       repoMemorySkillFile,
       agentsStoreFile: join(swarmDir, 'agents.json'),
+      secretsFile: join(dataDir, 'secrets.json'),
     },
   }
 }
@@ -270,6 +271,87 @@ describe('SwarmManager', () => {
     const braveSkill = await readFile(resources.additionalSkillPaths[1], 'utf8')
     expect(braveSkill).toContain('name: brave-search')
     expect(braveSkill).toContain('BRAVE_API_KEY')
+  })
+
+  it('loads skill env requirements and persists secrets to the settings store', async () => {
+    const previousBraveApiKey = process.env.BRAVE_API_KEY
+    delete process.env.BRAVE_API_KEY
+
+    try {
+      const config = await makeTempConfig()
+      const manager = new TestSwarmManager(config)
+      await manager.boot()
+
+      const initial = await manager.listSettingsEnv()
+      const braveRequirement = initial.find(
+        (requirement) => requirement.name === 'BRAVE_API_KEY' && requirement.skillName === 'brave-search',
+      )
+
+      expect(braveRequirement).toMatchObject({
+        description: 'Brave Search API key',
+        required: true,
+        helpUrl: 'https://api-dashboard.search.brave.com/register',
+        isSet: false,
+      })
+
+      await manager.updateSettingsEnv({ BRAVE_API_KEY: 'bsal-test-value' })
+
+      const secretsRaw = await readFile(config.paths.secretsFile, 'utf8')
+      expect(JSON.parse(secretsRaw)).toEqual({ BRAVE_API_KEY: 'bsal-test-value' })
+      expect(process.env.BRAVE_API_KEY).toBe('bsal-test-value')
+
+      const afterUpdate = await manager.listSettingsEnv()
+      expect(
+        afterUpdate.find(
+          (requirement) => requirement.name === 'BRAVE_API_KEY' && requirement.skillName === 'brave-search',
+        ),
+      ).toMatchObject({
+        isSet: true,
+        maskedValue: '********',
+      })
+
+      await manager.deleteSettingsEnv('BRAVE_API_KEY')
+
+      const afterDelete = await manager.listSettingsEnv()
+      expect(
+        afterDelete.find(
+          (requirement) => requirement.name === 'BRAVE_API_KEY' && requirement.skillName === 'brave-search',
+        ),
+      ).toMatchObject({
+        isSet: false,
+      })
+      expect(process.env.BRAVE_API_KEY).toBeUndefined()
+    } finally {
+      if (previousBraveApiKey === undefined) {
+        delete process.env.BRAVE_API_KEY
+      } else {
+        process.env.BRAVE_API_KEY = previousBraveApiKey
+      }
+    }
+  })
+
+  it('restores existing process env values when deleting a secret override', async () => {
+    const previousBraveApiKey = process.env.BRAVE_API_KEY
+    process.env.BRAVE_API_KEY = 'fallback-value'
+
+    try {
+      const config = await makeTempConfig()
+      await writeFile(config.paths.secretsFile, JSON.stringify({ BRAVE_API_KEY: 'override-value' }, null, 2), 'utf8')
+
+      const manager = new TestSwarmManager(config)
+      await manager.boot()
+
+      expect(process.env.BRAVE_API_KEY).toBe('override-value')
+
+      await manager.deleteSettingsEnv('BRAVE_API_KEY')
+      expect(process.env.BRAVE_API_KEY).toBe('fallback-value')
+    } finally {
+      if (previousBraveApiKey === undefined) {
+        delete process.env.BRAVE_API_KEY
+      } else {
+        process.env.BRAVE_API_KEY = previousBraveApiKey
+      }
+    }
   })
 
   it('prefers repo memory skill override when present', async () => {
