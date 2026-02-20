@@ -78,7 +78,10 @@ const MAX_CONVERSATION_HISTORY = 2000;
 const CONVERSATION_ENTRY_TYPE = "swarm_conversation_entry";
 const LEGACY_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
 const SWARM_CONTEXT_FILE_NAME = "SWARM.md";
+const REPO_BRAVE_SEARCH_SKILL_RELATIVE_PATH = ".swarm/skills/brave-search/SKILL.md";
 const BUILT_IN_MEMORY_SKILL_RELATIVE_PATH = "apps/backend/src/swarm/skills/builtins/memory/SKILL.md";
+const BUILT_IN_BRAVE_SEARCH_SKILL_RELATIVE_PATH =
+  "apps/backend/src/swarm/skills/builtins/brave-search/SKILL.md";
 const SWARM_MANAGER_DIR = fileURLToPath(new URL(".", import.meta.url));
 const BACKEND_PACKAGE_DIR = resolve(SWARM_MANAGER_DIR, "..", "..");
 const BUILT_IN_MEMORY_SKILL_FALLBACK_PATH = resolve(
@@ -88,6 +91,15 @@ const BUILT_IN_MEMORY_SKILL_FALLBACK_PATH = resolve(
   "skills",
   "builtins",
   "memory",
+  "SKILL.md"
+);
+const BUILT_IN_BRAVE_SEARCH_SKILL_FALLBACK_PATH = resolve(
+  BACKEND_PACKAGE_DIR,
+  "src",
+  "swarm",
+  "skills",
+  "builtins",
+  "brave-search",
   "SKILL.md"
 );
 const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
@@ -1134,20 +1146,41 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     return {
       memoryContextFile,
-      additionalSkillPaths: [this.resolveMemorySkillPath()]
+      additionalSkillPaths: [this.resolveMemorySkillPath(), this.resolveBraveSearchSkillPath()]
     };
   }
 
   private resolveMemorySkillPath(): string {
-    const repoOverride = this.config.paths.repoMemorySkillFile;
-    if (existsSync(repoOverride)) {
-      return repoOverride;
+    return this.resolveBuiltInSkillPath({
+      skillName: "memory",
+      repoOverridePath: this.config.paths.repoMemorySkillFile,
+      repositoryRelativePath: BUILT_IN_MEMORY_SKILL_RELATIVE_PATH,
+      fallbackPath: BUILT_IN_MEMORY_SKILL_FALLBACK_PATH
+    });
+  }
+
+  private resolveBraveSearchSkillPath(): string {
+    return this.resolveBuiltInSkillPath({
+      skillName: "brave-search",
+      repoOverridePath: resolve(this.config.paths.rootDir, REPO_BRAVE_SEARCH_SKILL_RELATIVE_PATH),
+      repositoryRelativePath: BUILT_IN_BRAVE_SEARCH_SKILL_RELATIVE_PATH,
+      fallbackPath: BUILT_IN_BRAVE_SEARCH_SKILL_FALLBACK_PATH
+    });
+  }
+
+  private resolveBuiltInSkillPath(options: {
+    skillName: string;
+    repoOverridePath: string;
+    repositoryRelativePath: string;
+    fallbackPath: string;
+  }): string {
+    const { skillName, repoOverridePath, repositoryRelativePath, fallbackPath } = options;
+
+    if (existsSync(repoOverridePath)) {
+      return repoOverridePath;
     }
 
-    const candidatePaths = [
-      resolve(this.config.paths.rootDir, BUILT_IN_MEMORY_SKILL_RELATIVE_PATH),
-      BUILT_IN_MEMORY_SKILL_FALLBACK_PATH
-    ];
+    const candidatePaths = [resolve(this.config.paths.rootDir, repositoryRelativePath), fallbackPath];
 
     for (const candidatePath of candidatePaths) {
       if (existsSync(candidatePath)) {
@@ -1155,7 +1188,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       }
     }
 
-    throw new Error(`Missing built-in memory skill file: ${candidatePaths[0]}`);
+    throw new Error(`Missing built-in ${skillName} skill file: ${candidatePaths[0]}`);
   }
 
   protected async getSwarmContextFiles(cwd: string): Promise<Array<{ path: string; content: string }>> {

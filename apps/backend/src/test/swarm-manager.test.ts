@@ -250,7 +250,7 @@ describe('SwarmManager', () => {
     expect(workerPrompt).toContain('Follow the memory skill workflow before editing MEMORY.md')
   })
 
-  it('auto-loads MEMORY.md context and wires the built-in memory skill', async () => {
+  it('auto-loads MEMORY.md context and wires built-in memory + brave-search skills', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
@@ -261,11 +261,15 @@ describe('SwarmManager', () => {
     const resources = await manager.getMemoryRuntimeResourcesForTest()
     expect(resources.memoryContextFile.path).toBe(config.paths.memoryFile)
     expect(resources.memoryContextFile.content).toBe(persistedMemory)
-    expect(resources.additionalSkillPaths).toHaveLength(1)
+    expect(resources.additionalSkillPaths).toHaveLength(2)
 
-    const builtInSkill = await readFile(resources.additionalSkillPaths[0], 'utf8')
-    expect(builtInSkill).toContain('name: memory')
-    expect(builtInSkill).toContain('Persistent memory file: `${SWARM_DATA_DIR}/MEMORY.md`')
+    const memorySkill = await readFile(resources.additionalSkillPaths[0], 'utf8')
+    expect(memorySkill).toContain('name: memory')
+    expect(memorySkill).toContain('Persistent memory file: `${SWARM_DATA_DIR}/MEMORY.md`')
+
+    const braveSkill = await readFile(resources.additionalSkillPaths[1], 'utf8')
+    expect(braveSkill).toContain('name: brave-search')
+    expect(braveSkill).toContain('BRAVE_API_KEY')
   })
 
   it('prefers repo memory skill override when present', async () => {
@@ -281,7 +285,37 @@ describe('SwarmManager', () => {
     await manager.boot()
 
     const resources = await manager.getMemoryRuntimeResourcesForTest()
-    expect(resources.additionalSkillPaths).toEqual([config.paths.repoMemorySkillFile])
+    expect(resources.additionalSkillPaths).toHaveLength(2)
+    expect(resources.additionalSkillPaths[0]).toBe(config.paths.repoMemorySkillFile)
+    expect(resources.additionalSkillPaths[1].endsWith(join('brave-search', 'SKILL.md'))).toBe(true)
+  })
+
+  it('prefers repo brave-search skill override when present', async () => {
+    const config = await makeTempConfig()
+    const repoBraveSkillFile = join(config.paths.rootDir, '.swarm', 'skills', 'brave-search', 'SKILL.md')
+
+    await mkdir(join(config.paths.rootDir, '.swarm', 'skills', 'brave-search'), { recursive: true })
+    await writeFile(
+      repoBraveSkillFile,
+      [
+        '---',
+        'name: brave-search',
+        'description: Repo override brave-search workflow.',
+        '---',
+        '',
+        '# Repo brave-search override',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const resources = await manager.getMemoryRuntimeResourcesForTest()
+    expect(resources.additionalSkillPaths).toHaveLength(2)
+    expect(resources.additionalSkillPaths[0].endsWith(join('memory', 'SKILL.md'))).toBe(true)
+    expect(resources.additionalSkillPaths[1]).toBe(repoBraveSkillFile)
   })
 
   it('uses repo manager archetype overrides on boot', async () => {
