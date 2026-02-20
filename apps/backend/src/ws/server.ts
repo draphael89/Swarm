@@ -769,8 +769,7 @@ export class SwarmWebSocketServer {
           targetAgentId,
           delivery: command.delivery,
           attachments: command.attachments,
-          sourceContext: { channel: "web" },
-          responseExpectation: "required"
+          sourceContext: { channel: "web" }
         });
       } catch (error) {
         this.send(socket, {

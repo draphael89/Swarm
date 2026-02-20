@@ -11,8 +11,7 @@ import type { SlackStatusEvent } from "../integrations/slack/slack-status.js";
 export type {
   MessageChannel,
   MessageSourceContext,
-  MessageTargetContext,
-  ResponseExpectation
+  MessageTargetContext
 } from "../swarm/types.js";
 
 export interface DirectoryItem {

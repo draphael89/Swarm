@@ -567,7 +567,6 @@ describe('SwarmManager', () => {
     expect(userEvent).toBeDefined()
     if (userEvent?.type === 'conversation_message') {
       expect(userEvent.sourceContext).toEqual({ channel: 'web' })
-      expect(userEvent.responseExpectation).toBe('required')
     }
   })
 
@@ -583,7 +582,6 @@ describe('SwarmManager', () => {
         userId: 'U456',
         threadTs: '173.456',
       },
-      responseExpectation: 'required',
     })
 
     await manager.publishToUser('manager', 'ack from manager', 'speak_to_user')
@@ -604,30 +602,59 @@ describe('SwarmManager', () => {
     }
   })
 
-  it('allows optional chatter to be ignored without missing speak warnings', async () => {
+  it('prefers explicit speak_to_user targets over inferred source context', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    await manager.handleUserMessage('ambient channel chatter', {
+    await manager.handleUserMessage('reply in slack thread', {
       sourceContext: {
         channel: 'slack',
-        channelId: 'C987',
+        channelId: 'C123',
+        userId: 'U456',
+        threadTs: '173.456',
       },
-      responseExpectation: 'optional',
     })
 
-    await (manager as any).handleRuntimeAgentEnd('manager')
+    await manager.publishToUser('manager', 'ack from manager', 'speak_to_user', {
+      channel: 'slack',
+      channelId: 'C999',
+      userId: 'U000',
+      threadTs: '999.000',
+    })
 
     const history = manager.getConversationHistory('manager')
-    expect(
-      history.some(
-        (entry) =>
-          entry.type === 'conversation_message' &&
-          entry.role === 'system' &&
-          entry.text.includes('Manager finished without speak_to_user'),
-      ),
-    ).toBe(false)
+    const assistantEvent = [...history]
+      .reverse()
+      .find((entry) => entry.type === 'conversation_message' && entry.source === 'speak_to_user')
+
+    expect(assistantEvent).toBeDefined()
+    if (assistantEvent?.type === 'conversation_message') {
+      expect(assistantEvent.sourceContext).toEqual({
+        channel: 'slack',
+        channelId: 'C999',
+        userId: 'U000',
+        threadTs: '999.000',
+      })
+    }
+  })
+
+  it('falls back to web routing when no inbound source context exists', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await manager.publishToUser('manager', 'ack from manager', 'speak_to_user')
+
+    const history = manager.getConversationHistory('manager')
+    const assistantEvent = [...history]
+      .reverse()
+      .find((entry) => entry.type === 'conversation_message' && entry.source === 'speak_to_user')
+
+    expect(assistantEvent).toBeDefined()
+    if (assistantEvent?.type === 'conversation_message') {
+      expect(assistantEvent.sourceContext).toEqual({ channel: 'web' })
+    }
   })
 
   it('does not SYSTEM-prefix direct user messages routed to a worker', async () => {

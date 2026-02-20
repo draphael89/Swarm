@@ -59,7 +59,6 @@ import type {
   MessageSourceContext,
   MessageTargetContext,
   RequestedDeliveryMode,
-  ResponseExpectation,
   SendMessageReceipt,
   SkillEnvRequirement,
   SpawnAgentInput,
@@ -142,12 +141,6 @@ interface SkillMetadata {
   env: ParsedSkillEnvDeclaration[];
 }
 
-interface PendingReplyContext {
-  sourceContext: MessageSourceContext;
-  responseExpectation: ResponseExpectation;
-  receivedAt: string;
-}
-
 function nowIso(): string {
   return new Date().toISOString();
 }
@@ -167,7 +160,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private readonly descriptors = new Map<string, AgentDescriptor>();
   private readonly runtimes = new Map<string, AgentRuntime>();
   private readonly conversationEntriesByAgentId = new Map<string, ConversationEntryEvent[]>();
-  private readonly pendingReplyContextsByManagerId = new Map<string, PendingReplyContext[]>();
+  private readonly mostRecentInboundSourceContextByManagerId = new Map<string, MessageSourceContext>();
   private readonly originalProcessEnvByName = new Map<string, string | undefined>();
   private skillMetadata: SkillMetadata[] = [];
   private secrets: Record<string, string> = {};
@@ -378,7 +371,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     };
 
     this.descriptors.set(descriptor.agentId, descriptor);
-    this.pendingReplyContextsByManagerId.set(managerId, []);
 
     let runtime: AgentRuntime;
     try {
@@ -388,7 +380,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       );
     } catch (error) {
       this.descriptors.delete(descriptor.agentId);
-      this.pendingReplyContextsByManagerId.delete(managerId);
       throw error;
     }
 
@@ -437,7 +428,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     await this.terminateDescriptor(target, { abort: true, emitStatus: true });
     this.descriptors.delete(targetManagerId);
     this.conversationEntriesByAgentId.delete(targetManagerId);
-    this.pendingReplyContextsByManagerId.delete(targetManagerId);
+    this.mostRecentInboundSourceContextByManagerId.delete(targetManagerId);
 
     await this.saveStore();
     this.emitAgentsSnapshot();
@@ -639,13 +630,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     source: "speak_to_user" | "system" = "speak_to_user",
     targetContext?: MessageTargetContext
   ): Promise<{ targetContext: MessageSourceContext }> {
-    const pendingBefore = this.getPendingRequiredUserReplies(agentId);
-
     let resolvedTargetContext: MessageSourceContext;
 
     if (source === "speak_to_user") {
       this.assertManager(agentId, "speak to user");
-      resolvedTargetContext = this.resolveAndConsumeReplyTargetContext(agentId, targetContext);
+      resolvedTargetContext = this.resolveReplyTargetContext(agentId, targetContext);
     } else {
       resolvedTargetContext = normalizeMessageSourceContext(targetContext ?? { channel: "web" });
     }
@@ -664,9 +653,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.logDebug("manager:publish_to_user", {
       source,
       agentId,
-      pendingRequiredBefore: pendingBefore,
-      pendingRequiredAfter: this.getPendingRequiredUserReplies(agentId),
-      pendingTotalAfter: this.getPendingReplyContextCount(agentId),
       targetContext: resolvedTargetContext,
       textPreview: previewForLog(text)
     });
@@ -683,7 +669,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       delivery?: RequestedDeliveryMode;
       attachments?: ConversationAttachment[];
       sourceContext?: MessageSourceContext;
-      responseExpectation?: ResponseExpectation;
     }
   ): Promise<void> {
     const trimmed = text.trim();
@@ -691,7 +676,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     if (!trimmed && attachments.length === 0) return;
 
     const sourceContext = normalizeMessageSourceContext(options?.sourceContext ?? { channel: "web" });
-    const responseExpectation = normalizeResponseExpectation(options?.responseExpectation);
 
     const targetAgentId = options?.targetAgentId ?? this.config.managerId;
     const target = this.descriptors.get(targetAgentId);
@@ -709,11 +693,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       targetAgentId,
       managerContextId,
       sourceContext,
-      responseExpectation,
       textPreview: previewForLog(trimmed),
-      attachmentCount: attachments.length,
-      pendingRequiredBefore: this.getPendingRequiredUserReplies(managerContextId),
-      pendingTotalBefore: this.getPendingReplyContextCount(managerContextId)
+      attachmentCount: attachments.length
     });
 
     const userEvent: ConversationMessageEvent = {
@@ -724,10 +705,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       attachments: attachments.length > 0 ? attachments : undefined,
       timestamp: receivedAt,
       source: "user_input",
-      sourceContext,
-      responseExpectation
+      sourceContext
     };
     this.emitConversationMessage(userEvent);
+    this.mostRecentInboundSourceContextByManagerId.set(managerContextId, sourceContext);
 
     if (target.role !== "manager") {
       await this.sendMessage(managerContextId, targetAgentId, trimmed, options?.delivery ?? "auto", {
@@ -736,18 +717,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       });
       return;
     }
-
-    this.enqueuePendingReplyContext(managerContextId, {
-      sourceContext,
-      responseExpectation,
-      receivedAt
-    });
-
-    this.logDebug("manager:user_message_dispatched", {
-      managerContextId,
-      pendingRequiredAfter: this.getPendingRequiredUserReplies(managerContextId),
-      pendingTotalAfter: this.getPendingReplyContextCount(managerContextId)
-    });
 
     const managerRuntime = this.runtimes.get(managerContextId);
     if (!managerRuntime) {
@@ -788,7 +757,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       this.runtimes.delete(managerId);
     }
 
-    this.pendingReplyContextsByManagerId.set(managerId, []);
+    this.mostRecentInboundSourceContextByManagerId.delete(managerId);
     this.conversationEntriesByAgentId.set(managerId, []);
     await this.deleteManagerSessionFile(managerDescriptor.sessionFile);
 
@@ -1186,12 +1155,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       }
     }
 
-    this.pendingReplyContextsByManagerId.clear();
-    for (const descriptor of this.descriptors.values()) {
-      if (descriptor.role === "manager" && descriptor.status !== "terminated") {
-        this.pendingReplyContextsByManagerId.set(descriptor.agentId, []);
-      }
-    }
+    this.mostRecentInboundSourceContextByManagerId.clear();
   }
 
   private getBootLogManagerDescriptor(): AgentDescriptor | undefined {
@@ -1365,106 +1329,21 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return false;
   }
 
-  private getPendingReplyContexts(managerId: string): PendingReplyContext[] {
-    const existing = this.pendingReplyContextsByManagerId.get(managerId);
-    if (existing) {
-      return existing;
-    }
-
-    const initialized: PendingReplyContext[] = [];
-    this.pendingReplyContextsByManagerId.set(managerId, initialized);
-    return initialized;
-  }
-
-  private getPendingReplyContextCount(managerId: string): number {
-    return this.getPendingReplyContexts(managerId).length;
-  }
-
-  private getPendingRequiredUserReplies(managerId: string): number {
-    return this.getPendingReplyContexts(managerId).filter(
-      (context) => context.responseExpectation === "required"
-    ).length;
-  }
-
-  private enqueuePendingReplyContext(managerId: string, context: PendingReplyContext): void {
-    this.getPendingReplyContexts(managerId).push(context);
-  }
-
-  private findMatchingPendingReplyContextIndex(
-    contexts: PendingReplyContext[],
-    targetContext: MessageTargetContext
-  ): number {
-    return contexts.findIndex((context) => {
-      if (context.sourceContext.channel !== targetContext.channel) {
-        return false;
-      }
-      if (targetContext.channelId && context.sourceContext.channelId !== targetContext.channelId) {
-        return false;
-      }
-      if (targetContext.userId && context.sourceContext.userId !== targetContext.userId) {
-        return false;
-      }
-      if (targetContext.threadTs && context.sourceContext.threadTs !== targetContext.threadTs) {
-        return false;
-      }
-
-      return true;
-    });
-  }
-
-  private consumePendingReplyContext(
-    managerId: string,
-    explicitTargetContext?: MessageTargetContext
-  ): PendingReplyContext | undefined {
-    const contexts = this.getPendingReplyContexts(managerId);
-    if (contexts.length === 0) {
-      return undefined;
-    }
-
-    if (explicitTargetContext) {
-      const explicitMatchIndex = this.findMatchingPendingReplyContextIndex(contexts, explicitTargetContext);
-      if (explicitMatchIndex >= 0) {
-        return contexts.splice(explicitMatchIndex, 1)[0];
-      }
-    }
-
-    const requiredIndex = contexts.findIndex((context) => context.responseExpectation === "required");
-    if (requiredIndex >= 0) {
-      return contexts.splice(requiredIndex, 1)[0];
-    }
-
-    return contexts.splice(contexts.length - 1, 1)[0];
-  }
-
-  private resolveAndConsumeReplyTargetContext(
+  private resolveReplyTargetContext(
     managerId: string,
     explicitTargetContext?: MessageTargetContext
   ): MessageSourceContext {
     if (explicitTargetContext) {
       const normalizedExplicitTarget = normalizeMessageTargetContext(explicitTargetContext);
-      this.consumePendingReplyContext(managerId, normalizedExplicitTarget);
       return normalizeMessageSourceContext(normalizedExplicitTarget);
     }
 
-    const consumed = this.consumePendingReplyContext(managerId);
-    if (consumed) {
-      return consumed.sourceContext;
+    const mostRecent = this.mostRecentInboundSourceContextByManagerId.get(managerId);
+    if (mostRecent) {
+      return mostRecent;
     }
 
     return { channel: "web" };
-  }
-
-  private clearRequiredPendingReplyContexts(managerId: string): number {
-    const contexts = this.getPendingReplyContexts(managerId);
-    if (contexts.length === 0) {
-      return 0;
-    }
-
-    const optionalContexts = contexts.filter((context) => context.responseExpectation === "optional");
-    const removedCount = contexts.length - optionalContexts.length;
-
-    this.pendingReplyContextsByManagerId.set(managerId, optionalContexts);
-    return removedCount;
   }
 
   private parseResetManagerSessionArgs(
@@ -2073,33 +1952,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.emit("agents_snapshot", payload satisfies ServerEvent);
   }
 
-  private async handleRuntimeAgentEnd(agentId: string): Promise<void> {
-    const descriptor = this.descriptors.get(agentId);
-    if (!descriptor || descriptor.role !== "manager") {
-      return;
-    }
-
-    const pendingRequired = this.getPendingRequiredUserReplies(agentId);
-    if (pendingRequired <= 0) {
-      return;
-    }
-
-    const clearedRequired = this.clearRequiredPendingReplyContexts(agentId);
-    if (clearedRequired <= 0) {
-      return;
-    }
-
-    this.logDebug("manager:missing_speak_to_user", {
-      agentId,
-      pendingRequired,
-      pendingTotalAfter: this.getPendingReplyContextCount(agentId)
-    });
-
-    await this.publishToUser(
-      agentId,
-      `Manager finished without speak_to_user for ${clearedRequired} pending user message(s).`,
-      "system"
-    );
+  private async handleRuntimeAgentEnd(_agentId: string): Promise<void> {
+    // No-op: managers now receive all inbound messages with sourceContext metadata
+    // and decide whether to respond without pending-reply bookkeeping.
   }
 
   private async ensureDirectories(): Promise<void> {
@@ -2669,10 +2524,6 @@ function extractRuntimeMessageText(message: string | RuntimeUserMessage): string
   return message.text;
 }
 
-function normalizeResponseExpectation(value: ResponseExpectation | undefined): ResponseExpectation {
-  return value === "optional" ? "optional" : "required";
-}
-
 function normalizeMessageTargetContext(input: MessageTargetContext): MessageTargetContext {
   return {
     channel: input.channel === "slack" ? "slack" : "web",
@@ -2740,14 +2591,6 @@ function isConversationMessageEvent(value: unknown): value is ConversationMessag
   }
 
   if (maybe.sourceContext !== undefined && !isMessageSourceContext(maybe.sourceContext)) {
-    return false;
-  }
-
-  if (
-    maybe.responseExpectation !== undefined &&
-    maybe.responseExpectation !== "required" &&
-    maybe.responseExpectation !== "optional"
-  ) {
     return false;
   }
 
