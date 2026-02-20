@@ -237,14 +237,14 @@ Proposed backend module:
 
 `apps/backend/src/integrations/slack/`
 
-- `slack-config.ts` — load/save/validate `slack.json`
-- `slack-types.ts` — minimal Slack event/config/domain types
-- `slack-client.ts` — Web API wrapper (`chat.postMessage`, file download, channels list)
-- `slack-socket.ts` — Socket Mode lifecycle/reconnect/ack
-- `slack-router.ts` — inbound event normalization + routing to `SwarmManager`
-- `slack-delivery.ts` — consume `conversation_message` + deliver targeted Slack replies
-- `slack-heuristics.ts` — “directed at bot?” classifier
-- `slack-status.ts` — status/log events for UI
+- `slack-config.ts` - load/save/validate `slack.json`
+- `slack-types.ts` - minimal Slack event/config/domain types
+- `slack-client.ts` - Web API wrapper (`chat.postMessage`, file download, channels list)
+- `slack-socket.ts` - Socket Mode lifecycle/reconnect/ack
+- `slack-router.ts` - inbound event normalization + routing to `SwarmManager`
+- `slack-delivery.ts` - consume `conversation_message` + deliver targeted Slack replies
+- `slack-heuristics.ts` - "directed at bot?" classifier
+- `slack-status.ts` - status/log events for UI
 
 Startup integration point:
 - `apps/backend/src/index.ts` creates/starts Slack integration service after `SwarmManager.boot()`.
@@ -258,7 +258,7 @@ Listen to:
 - `message.channels` (+ optional `message.groups`) for channel traffic
 
 Ignore events that cause loops/noise:
-- bot’s own messages (`event.user === botUserId` or `bot_id` present)
+- bot's own messages (`event.user === botUserId` or `bot_id` present)
 - non-message edit/replay subtypes unless intentionally supported
 - duplicate events (dedupe by `event_id` or fallback `channel+ts`)
 
@@ -372,16 +372,36 @@ Extend existing settings dialog (or move to integrations tab) with Slack section
 - target manager dropdown
 - DM on/off
 - channel picker (multi-select)
-- “respond in thread” toggle
+- "respond in thread" toggle
 - wake words input
 - connection/status log panel
 - test connection button
+
+### Chat Header: Channel View Toggle (Debug Mode)
+
+Add a toggle in the **chat header** (upper right area, near the Connected badge) that lets the user switch between:
+
+1. **Web Only** (default) — only shows messages from/to the web UI. Normal view.
+2. **All Channels** — shows ALL messages across all channels (web + Slack inbound + Slack outbound). Each message is annotated with its source/target:
+   - `[Web]` — from/to web UI
+   - `[Slack DM @username]` — from/to a Slack DM
+   - `[Slack #channel]` — from/to a Slack channel
+   - `[Slack #channel → thread]` — threaded reply
+
+This is primarily for **debugging** — lets you see exactly what the manager is receiving from Slack and what it's sending back, all interleaved with web messages in one unified timeline.
+
+#### Implementation notes:
+- The toggle is a simple UI filter on `conversation_message` events using the `sourceContext` metadata
+- All messages are always stored; the toggle just controls which ones are displayed
+- Could be a simple dropdown or segmented control: `Web | All`
+- Source badges use subtle colored pills (e.g., purple for Slack, green for Web)
+- This pairs with the `sourceContext` metadata added in Phase 0
 
 ---
 
 ## Implementation Phases
 
-## Phase 0 — Channel/Source Core (cross-cutting)
+## Phase 0 - Channel/Source Core (cross-cutting)
 
 Scope:
 - Implement source metadata model and response expectation.
@@ -405,7 +425,7 @@ Acceptance:
 - Default response target resolves to originating context.
 - Manager can ignore optional chatter without missing-speak warnings.
 
-## Phase 1 — Slack Socket Mode MVP (DM-only)
+## Phase 1 - Slack Socket Mode MVP (DM-only)
 
 Scope:
 - Add Slack integration service using Socket Mode.
@@ -419,7 +439,7 @@ Acceptance:
 - Manager reply reaches same DM.
 - Web and Slack coexist without forced cross-channel reply broadcast.
 
-## Phase 2 — Channel listening + selective response
+## Phase 2 - Channel listening + selective response
 
 Scope:
 - Add channel event subscriptions (`app_mention`, `message.channels`, optional private channels).
@@ -432,7 +452,7 @@ Acceptance:
 - Ambient channel chatter can be ignored.
 - Replies default to thread policy in channels.
 
-## Phase 3 — Thread fidelity + file/image support
+## Phase 3 - Thread fidelity + file/image support
 
 Scope:
 - Robust thread behavior (`thread_ts`, start-thread-on-first-reply mode).
@@ -444,7 +464,7 @@ Acceptance:
 - Channel replies stay in intended threads.
 - Images/files from Slack can reach Swarm agent context safely.
 
-## Phase 4 — Full UI settings experience
+## Phase 4 - Full UI settings experience
 
 Scope:
 - Integrations UI polish (channel selection, diagnostics, token masking, test tools).
