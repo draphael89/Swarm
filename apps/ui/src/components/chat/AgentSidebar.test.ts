@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentSidebar } from './AgentSidebar'
 import type { AgentDescriptor, AgentStatus } from '@/lib/ws-types'
 
-function manager(agentId: string): AgentDescriptor {
+function manager(
+  agentId: string,
+  modelOverrides: Partial<AgentDescriptor['model']> = {},
+): AgentDescriptor {
   return {
     agentId,
     managerId: agentId,
@@ -19,17 +22,22 @@ function manager(agentId: string): AgentDescriptor {
     updatedAt: '2026-01-01T00:00:00.000Z',
     cwd: '/tmp',
     model: {
-      provider: 'openai',
+      provider: 'openai-codex',
       modelId: 'gpt-5.3-codex',
       thinkingLevel: 'high',
+      ...modelOverrides,
     },
     sessionFile: `/tmp/${agentId}.jsonl`,
   }
 }
 
-function worker(agentId: string, managerId: string): AgentDescriptor {
+function worker(
+  agentId: string,
+  managerId: string,
+  modelOverrides: Partial<AgentDescriptor['model']> = {},
+): AgentDescriptor {
   return {
-    ...manager(agentId),
+    ...manager(agentId, modelOverrides),
     managerId,
     role: 'worker',
   }
@@ -110,6 +118,22 @@ describe('AgentSidebar', () => {
 
     click(getByRole(container, 'button', { name: 'Expand manager manager-alpha' }))
     expect(queryByText(container, 'worker-alpha')).toBeTruthy()
+  })
+
+  it('shows runtime icons and compact model labels from model presets', () => {
+    renderSidebar({
+      agents: [
+        manager('manager-pi', { provider: 'openai-codex', modelId: 'gpt-5.3-codex' }),
+        worker('worker-opus', 'manager-pi', { provider: 'anthropic', modelId: 'claude-opus-4-6' }),
+        worker('worker-codex', 'manager-pi', { provider: 'openai-codex-app-server', modelId: 'default' }),
+      ],
+    })
+
+    expect(getByText(container, 'pi-codex')).toBeTruthy()
+    expect(getByText(container, 'pi-opus')).toBeTruthy()
+    expect(getByText(container, 'codex-app')).toBeTruthy()
+    expect(container.querySelectorAll('img[src="/pi-logo.svg"]').length).toBeGreaterThanOrEqual(2)
+    expect(container.querySelector('img[src="/agents/codex-logo.svg"]')).toBeTruthy()
   })
 
   it('keeps manager selection behavior working while collapse state changes', () => {
