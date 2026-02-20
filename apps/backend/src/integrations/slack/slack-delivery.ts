@@ -1,6 +1,7 @@
 import type { ServerEvent } from "../../protocol/ws-types.js";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
 import { SlackWebApiClient } from "./slack-client.js";
+import { markdownToSlackMrkdwn } from "./slack-mrkdwn.js";
 import type { SlackIntegrationConfig } from "./slack-types.js";
 
 const SLACK_MESSAGE_LIMIT = 4096;
@@ -62,7 +63,7 @@ export class SlackDeliveryBridge {
       return;
     }
 
-    const text = event.text.trim();
+    const text = markdownToSlackMrkdwn(event.text);
     if (!text) {
       return;
     }

@@ -38,6 +38,9 @@ importers:
       jsdom:
         specifier: ^27.0.1
         version: 27.4.0(@noble/hashes@1.8.0)
+      slackify-markdown:
+        specifier: ^5.0.0
+        version: 5.0.0
       turndown:
         specifier: ^7.2.2
         version: 7.2.2
@@ -4288,6 +4291,10 @@ packages:
     resolution: {integrity: sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw==}
     engines: {node: '>=14'}
 
+  slackify-markdown@5.0.0:
+    resolution: {integrity: sha512-jTWvwjOYGAqS0NNyhTm+9H8S0/tux2anPEwyeIBCayH14jGHIrN70yj4afUYP2zq54aUwEFkASdXytjO/5GA+A==}
+    engines: {node: '>=22'}
+
   smart-buffer@4.2.0:
     resolution: {integrity: sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg==}
     engines: {node: '>= 6.0.0', npm: '>= 3.0.0'}
@@ -4547,6 +4554,9 @@ packages:
 
   unist-util-position@5.0.0:
     resolution: {integrity: sha512-fucsC7HjXvkB5R3kTCO7kUjRdrS0BJt3M/FPxmHMBOm8JQi2BsHAHFsy27E0EolP8rp0NzXsJ+jNPyDWvOJZPA==}
+
+  unist-util-remove@4.0.0:
+    resolution: {integrity: sha512-b4gokeGId57UVRX/eVKej5gXqGlc9+trkORhFJpu9raqZkZhU0zm8Doi05+HaiBsMEIJowL+2WtQ5ItjsngPXg==}
 
   unist-util-stringify-position@4.0.0:
     resolution: {integrity: sha512-0ASV06AAoKCDkS2+xw5RXJywruurpbC4JZSm7nr7MOt1ojAzvyyaO+UxZf18j8FCF6kmzCZKcAgN/yu2gm2XgQ==}
@@ -9974,6 +9984,18 @@ snapshots:
 
   signal-exit@4.1.0: {}
 
+  slackify-markdown@5.0.0:
+    dependencies:
+      mdast-util-to-markdown: 2.1.2
+      remark-gfm: 4.0.1
+      remark-parse: 11.0.0
+      remark-stringify: 11.0.0
+      unified: 11.0.5
+      unist-util-remove: 4.0.0
+      unist-util-visit: 5.1.0
+    transitivePeerDependencies:
+      - supports-color
+
   smart-buffer@4.2.0: {}
 
   socks-proxy-agent@8.0.5:
@@ -10209,6 +10231,12 @@ snapshots:
   unist-util-position@5.0.0:
     dependencies:
       '@types/unist': 3.0.3
+
+  unist-util-remove@4.0.0:
+    dependencies:
+      '@types/unist': 3.0.3
+      unist-util-is: 6.0.1
+      unist-util-visit-parents: 6.0.2
 
   unist-util-stringify-position@4.0.0:
     dependencies:
