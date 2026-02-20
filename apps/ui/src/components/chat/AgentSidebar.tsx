@@ -152,7 +152,7 @@ function AgentRow({
                 <Badge
                   variant="outline"
                   className={cn(
-                    'max-w-[6.5rem] truncate border-sidebar-border/80 bg-transparent px-1.5 py-0 text-[9px] font-medium leading-4',
+                    'w-[4.25rem] justify-center truncate border-sidebar-border/80 bg-transparent px-1.5 py-0 text-[9px] font-medium leading-4',
                     isSelected ? 'text-sidebar-accent-foreground/75' : 'text-muted-foreground',
                   )}
                 >
