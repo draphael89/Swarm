@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { ExternalLink, FileCode2, FileText, Loader2, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogOverlay, DialogPortal, DialogTitle } from '@/components/ui/dialog'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import type { ArtifactReference } from '@/lib/artifacts'
 import { toVscodeInsidersHref } from '@/lib/artifacts'
 import { cn } from '@/lib/utils'
@@ -98,33 +102,6 @@ export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: Art
   }, [artifactPath, wsUrl])
 
   useEffect(() => {
-    if (!artifactPath) {
-      return
-    }
-
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') {
-        return
-      }
-
-      if (event.defaultPrevented) {
-        return
-      }
-
-      if (document.querySelector('[data-content-zoom-dialog="true"]')) {
-        return
-      }
-
-      handleAnimatedClose()
-    }
-
-    window.addEventListener('keydown', handleKeydown)
-    return () => {
-      window.removeEventListener('keydown', handleKeydown)
-    }
-  }, [artifactPath, onClose])
-
-  useEffect(() => {
     return () => {
       if (closingTimerRef.current) {
         clearTimeout(closingTimerRef.current)
@@ -152,106 +129,111 @@ export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: Art
   }
 
   const FileIcon = isMarkdown ? FileText : FileCode2
+  const isOpen = Boolean(artifactPath) || isClosing
 
   return (
-    <div
-      className={cn(
-        'fixed inset-0 z-50 flex justify-end',
-        'transition-[backdrop-filter,background-color] duration-300 ease-out',
-        isVisible
-          ? 'bg-background/60 backdrop-blur-[2px]'
-          : 'pointer-events-none bg-transparent backdrop-blur-0',
-        isClosing && !isVisible && 'pointer-events-none',
-      )}
-      role="dialog"
-      aria-modal="true"
-      aria-label={artifact ? `Artifact: ${artifact.fileName}` : 'Artifact panel'}
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          handleAnimatedClose()
+        }
+      }}
     >
-      <button
-        type="button"
-        className="flex-1"
-        aria-label="Close artifact panel"
-        onClick={handleAnimatedClose}
-        tabIndex={isVisible ? 0 : -1}
-      />
-
-      <aside
-        className={cn(
-          'relative flex h-full w-full max-w-[min(880px,90vw)] flex-col',
-          'border-l border-border/80 bg-background',
-          'shadow-[-8px_0_32px_-4px_rgba(0,0,0,0.12)]',
-          'transition-all duration-[260ms] ease-[cubic-bezier(0.32,0.72,0,1)]',
-          isVisible
-            ? 'translate-x-0 opacity-100'
-            : 'translate-x-[40%] opacity-0',
-        )}
-      >
-        {/* Header */}
-        <header className="flex h-[62px] shrink-0 items-center justify-between gap-3 border-b border-border/80 bg-card/80 px-5 backdrop-blur">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <FileIcon className="size-3.5" aria-hidden="true" />
-            </span>
-            <div className="min-w-0">
-              <h2 className="truncate text-sm font-bold text-foreground">{artifact?.fileName}</h2>
-              <p className="truncate font-mono text-[11px] text-muted-foreground">{displayPath}</p>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-1.5">
-            <a
-              href={toVscodeInsidersHref(displayPath || artifact?.path || '')}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium',
-                'text-muted-foreground transition-colors',
-                'hover:bg-muted hover:text-foreground',
-              )}
-            >
-              <ExternalLink className="size-3" aria-hidden="true" />
-              <span className="hidden sm:inline">Open in VS Code</span>
-              <span className="sm:hidden">VS Code</span>
-            </a>
-
-            <div className="mx-0.5 h-4 w-px bg-border/60" aria-hidden="true" />
-
-            <button
-              type="button"
-              className={cn(
-                'inline-flex size-8 items-center justify-center rounded-md',
-                'text-muted-foreground transition-colors',
-                'hover:bg-muted hover:text-foreground',
-              )}
-              onClick={handleAnimatedClose}
-              aria-label="Close artifact panel"
-            >
-              <X className="size-4" aria-hidden="true" />
-            </button>
-          </div>
-        </header>
-
-        {/* Content */}
-        <div
+      <DialogPortal>
+        <DialogOverlay
           className={cn(
-            'min-h-0 flex-1 overflow-y-auto',
-            '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent',
-            '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent',
-            '[scrollbar-width:thin] [scrollbar-color:transparent_transparent]',
-            'hover:[&::-webkit-scrollbar-thumb]:bg-border hover:[scrollbar-color:var(--color-border)_transparent]',
+            'fixed inset-0 z-50',
+            'transition-[backdrop-filter,background-color] duration-300 ease-out',
+            isVisible
+              ? 'bg-background/60 backdrop-blur-[2px]'
+              : 'pointer-events-none bg-transparent backdrop-blur-0',
+            isClosing && !isVisible && 'pointer-events-none',
           )}
+        />
+        <DialogPrimitive.Content
+          className={cn(
+            'fixed right-0 top-0 z-50 flex h-full w-full max-w-[min(880px,90vw)] flex-col',
+            'border-l border-border/80 bg-background',
+            'shadow-[-8px_0_32px_-4px_rgba(0,0,0,0.12)] outline-none',
+            'transition-all duration-[260ms] ease-[cubic-bezier(0.32,0.72,0,1)]',
+            isVisible
+              ? 'translate-x-0 opacity-100'
+              : 'translate-x-[40%] opacity-0',
+          )}
+          onEscapeKeyDown={(event) => {
+            event.preventDefault()
+            handleAnimatedClose()
+          }}
         >
-          <div className="px-6 py-6">
-            {isLoading ? (
-              <div className="flex items-center gap-2.5 py-12 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                <span>Loading file…</span>
+          <DialogTitle className="sr-only">{artifact ? `Artifact: ${artifact.fileName}` : 'Artifact panel'}</DialogTitle>
+          {/* Header */}
+          <header className="flex h-[62px] shrink-0 items-center justify-between gap-3 border-b border-border/80 bg-card/80 px-5 backdrop-blur">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <FileIcon className="size-3.5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-bold text-foreground">{artifact?.fileName}</h2>
+                <p className="truncate font-mono text-[11px] text-muted-foreground">{displayPath}</p>
               </div>
-            ) : error ? (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-                {error}
-              </div>
-            ) : isMarkdown ? (
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1.5">
+              <a
+                href={toVscodeInsidersHref(displayPath || artifact?.path || '')}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium',
+                  'text-muted-foreground transition-colors',
+                  'hover:bg-muted hover:text-foreground',
+                )}
+              >
+                <ExternalLink className="size-3" aria-hidden="true" />
+                <span className="hidden sm:inline">Open in VS Code</span>
+                <span className="sm:hidden">VS Code</span>
+              </a>
+
+              <div className="mx-0.5 h-4 w-px bg-border/60" aria-hidden="true" />
+
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  'size-8 rounded-md',
+                  'text-muted-foreground transition-colors',
+                  'hover:bg-muted hover:text-foreground',
+                )}
+                onClick={handleAnimatedClose}
+                aria-label="Close artifact panel"
+              >
+                <X className="size-4" aria-hidden="true" />
+              </Button>
+            </div>
+          </header>
+
+          {/* Content */}
+          <ScrollArea
+            className={cn(
+              'min-h-0 flex-1',
+              '[&>[data-slot=scroll-area-scrollbar]]:w-2',
+              '[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-transparent',
+              'hover:[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-border',
+            )}
+          >
+            <div className="px-6 py-6">
+              {isLoading ? (
+                <div className="flex items-center gap-2.5 py-12 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                  <span>Loading file…</span>
+                </div>
+              ) : error ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  {error}
+                </div>
+              ) : isMarkdown ? (
               <article className="mx-auto max-w-[680px]">
                 <MarkdownMessage
                   content={content}
@@ -261,14 +243,17 @@ export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: Art
                 />
               </article>
             ) : (
-              <pre className="overflow-x-auto rounded-lg border border-border/60 bg-muted/25 p-4">
-                <code className="font-mono text-[13px] leading-relaxed whitespace-pre text-foreground/90">{content}</code>
-              </pre>
+              <ScrollArea className="w-full rounded-lg border border-border/60 bg-muted/25">
+                <pre className="p-4">
+                  <code className="font-mono text-[13px] leading-relaxed whitespace-pre text-foreground/90">{content}</code>
+                </pre>
+              </ScrollArea>
             )}
           </div>
-        </div>
-      </aside>
-    </div>
+        </ScrollArea>
+        </DialogPrimitive.Content>
+      </DialogPortal>
+    </Dialog>
   )
 }
 

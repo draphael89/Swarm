@@ -1,4 +1,5 @@
 import { File, FileText, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import {
   isPendingImageAttachment,
   isPendingTextAttachment,
@@ -42,14 +43,16 @@ export function AttachedFiles({ attachments, onRemove }: AttachedFilesProps) {
               </div>
             )}
 
-            <button
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
               onClick={() => onRemove(attachment.id)}
-              className="absolute -right-1.5 -top-1.5 rounded-full bg-muted p-0.5 text-muted-foreground opacity-0 transition-colors hover:bg-red-600 hover:text-white focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-red-300 group-hover:opacity-100"
+              className="absolute -right-1.5 -top-1.5 size-5 rounded-full bg-muted p-0.5 text-muted-foreground opacity-0 transition-colors hover:bg-red-600 hover:text-white focus:opacity-100 focus-visible:ring-red-300 group-hover:opacity-100"
               aria-label={`Remove ${attachment.fileName || 'attachment'}`}
             >
               <X className="size-3" />
-            </button>
+            </Button>
           </div>
         )
       })}

@@ -2,6 +2,8 @@ import { memo, useEffect, useId, useMemo, useState } from 'react'
 import { AlertCircle, ChevronRight, FileCode2, FileText, ZoomIn } from 'lucide-react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   normalizeArtifactShortcodes,
   parseArtifactReference,
@@ -212,11 +214,12 @@ export const MarkdownMessage = memo(function MarkdownMessage({
               }
 
               return (
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
                   onClick={() => setZoomTarget({ type: 'image', src: imageSrc, alt: imageAlt })}
                   className={cn(
-                    'group/zoom relative my-5 inline-block w-full cursor-zoom-in overflow-hidden rounded-lg border border-border/55',
+                    'group/zoom relative my-5 inline-block h-auto w-full cursor-zoom-in overflow-hidden rounded-lg border border-border/55 p-0 text-left',
                     'bg-muted/15 text-left transition-all duration-150',
                     'hover:scale-[1.005] hover:border-primary/35',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35',
@@ -241,7 +244,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
                   >
                     <ZoomIn className="size-3.5" />
                   </span>
-                </button>
+                </Button>
               )
             },
             code({ className, children }) {
@@ -270,16 +273,18 @@ export const MarkdownMessage = memo(function MarkdownMessage({
                         <span className="font-mono text-[11px] font-medium text-muted-foreground">{language}</span>
                       </div>
                     ) : null}
-                    <pre
+                    <ScrollArea
                       className={cn(
-                        'overflow-x-auto border border-border/50 bg-muted/25 p-4',
+                        'w-full border border-border/50 bg-muted/25',
                         language ? 'rounded-b-lg' : 'rounded-lg',
                       )}
                     >
-                      <code className={cn('font-mono text-foreground/90', isDocument ? 'text-[13px] leading-6' : 'text-xs leading-5')}>
-                        {normalizedCode}
-                      </code>
-                    </pre>
+                      <pre className="p-4">
+                        <code className={cn('font-mono text-foreground/90', isDocument ? 'text-[13px] leading-6' : 'text-xs leading-5')}>
+                          {normalizedCode}
+                        </code>
+                      </pre>
+                    </ScrollArea>
                   </div>
                 )
               }
@@ -302,11 +307,11 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             },
             table({ children }) {
               return (
-                <div className={cn('my-4 overflow-x-auto', isDocument && 'my-5')}>
+                <ScrollArea className={cn('my-4 w-full', isDocument && 'my-5')}>
                   <table className="w-full border-collapse text-sm">
                     {children}
                   </table>
-                </div>
+                </ScrollArea>
               )
             },
             th({ children }) {
@@ -375,11 +380,12 @@ function ArtifactReferenceCard({
   const CardIcon = isMarkdownFile ? FileText : FileCode2
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={() => onClick(artifact)}
       className={cn(
-        'group/card my-2.5 flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left',
+        'group/card my-2.5 h-auto w-full justify-start gap-3 rounded-lg border px-3 py-2.5 text-left text-sm font-normal',
         'border-primary/20 bg-primary/[0.04] transition-all duration-150',
         'hover:border-primary/35 hover:bg-primary/[0.07] hover:shadow-sm',
         'active:scale-[0.995]',
@@ -399,7 +405,7 @@ function ArtifactReferenceCard({
       <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-all group-hover/card:text-primary">
         <ChevronRight className="size-4" aria-hidden="true" />
       </span>
-    </button>
+    </Button>
   )
 }
 
@@ -480,20 +486,23 @@ function MermaidDiagram({
         </div>
       ) : svg ? (
         canExpand ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={() => onExpand(svg)}
             className={cn(
-              'group/zoom relative block w-full cursor-zoom-in overflow-auto p-4 text-left',
+              'group/zoom relative block h-auto w-full cursor-zoom-in overflow-hidden p-0 text-left text-sm font-normal',
               'transition-colors hover:bg-muted/20',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-inset',
             )}
             aria-label="Expand Mermaid diagram"
           >
-            <div
-              className="flex justify-center [&_svg]:h-auto [&_svg]:max-w-full"
-              dangerouslySetInnerHTML={{ __html: svg }}
-            />
+            <ScrollArea className="max-h-[70vh] w-full">
+              <div
+                className="flex justify-center p-4 [&_svg]:h-auto [&_svg]:max-w-full"
+                dangerouslySetInnerHTML={{ __html: svg }}
+              />
+            </ScrollArea>
             <span
               className={cn(
                 'pointer-events-none absolute right-3 top-3 inline-flex size-7 items-center justify-center rounded-md',
@@ -505,14 +514,14 @@ function MermaidDiagram({
             >
               <ZoomIn className="size-3.5" />
             </span>
-          </button>
+          </Button>
         ) : (
-          <div className="overflow-auto p-4">
+          <ScrollArea className="max-h-[70vh]">
             <div
-              className="flex justify-center [&_svg]:h-auto [&_svg]:max-w-full"
+              className="flex justify-center p-4 [&_svg]:h-auto [&_svg]:max-w-full"
               dangerouslySetInnerHTML={{ __html: svg }}
             />
-          </div>
+          </ScrollArea>
         )
       ) : (
         <p className="py-4 text-center text-xs text-muted-foreground">Rendering diagram…</p>

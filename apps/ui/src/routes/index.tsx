@@ -24,6 +24,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { chooseFallbackAgentId } from '@/lib/agent-hierarchy'
 import type { ArtifactReference } from '@/lib/artifacts'
 import { ManagerWsClient, type ManagerWsState } from '@/lib/ws-client'
@@ -444,7 +446,9 @@ export function IndexPage() {
 
           <form className="space-y-4" onSubmit={handleCreateManager}>
             <div className="space-y-2">
-              <label htmlFor="manager-name" className="text-xs font-medium text-muted-foreground">Name</label>
+              <Label htmlFor="manager-name" className="text-xs font-medium text-muted-foreground">
+                Name
+              </Label>
               <Input
                 id="manager-name"
                 placeholder="release-manager"
@@ -455,7 +459,9 @@ export function IndexPage() {
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="manager-cwd" className="text-xs font-medium text-muted-foreground">Working directory</label>
+              <Label htmlFor="manager-cwd" className="text-xs font-medium text-muted-foreground">
+                Working directory
+              </Label>
               <div className="flex items-center gap-2">
                 <Input
                   id="manager-cwd"
@@ -486,23 +492,28 @@ export function IndexPage() {
             </div>
 
             <div className="space-y-2">
-              <label htmlFor="manager-model" className="text-xs font-medium text-muted-foreground">Model</label>
-              <select
-                id="manager-model"
+              <Label htmlFor="manager-model" className="text-xs font-medium text-muted-foreground">
+                Model
+              </Label>
+              <Select
                 value={newManagerModel}
-                onChange={(event) => {
-                  setNewManagerModel(event.target.value as ManagerModelPreset)
+                onValueChange={(value) => {
+                  setNewManagerModel(value as ManagerModelPreset)
                   setCreateManagerError(null)
                 }}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={isCreatingManager || isPickingDirectory}
               >
-                {MANAGER_MODEL_PRESETS.map((modelPreset) => (
-                  <option key={modelPreset} value={modelPreset}>
-                    {modelPreset}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="manager-model" className="w-full">
+                  <SelectValue placeholder="Select model preset" />
+                </SelectTrigger>
+                <SelectContent>
+                  {MANAGER_MODEL_PRESETS.map((modelPreset) => (
+                    <SelectItem key={modelPreset} value={modelPreset}>
+                      {modelPreset}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {createManagerError ? (
@@ -592,24 +603,24 @@ interface OverlayDialogProps {
 }
 
 function OverlayDialog({ open, title, description, onClose, children }: OverlayDialogProps) {
-  if (!open) return null
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-xl rounded-lg border border-border bg-background p-4 shadow-2xl">
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold">{title}</h2>
-            {description ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
-          </div>
-          <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={onClose}>
-            Close
-          </Button>
-        </div>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) {
+          onClose()
+        }
+      }}
+    >
+      <DialogContent className="max-w-xl p-4">
+        <DialogHeader className="mb-4">
+          <DialogTitle>{title}</DialogTitle>
+          {description ? <DialogDescription>{description}</DialogDescription> : null}
+        </DialogHeader>
 
         {children}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

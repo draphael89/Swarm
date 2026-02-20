@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogClose, DialogOverlay, DialogPortal, DialogTitle } from '@/components/ui/dialog'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 
 interface ContentZoomDialogProps {
@@ -19,9 +22,9 @@ export function ContentZoomDialog({
   contentClassName,
 }: ContentZoomDialogProps) {
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogPortal>
+        <DialogOverlay
           className={cn(
             'fixed inset-0 z-[120] bg-black/85 backdrop-blur-[2px]',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
@@ -41,13 +44,15 @@ export function ContentZoomDialog({
             onOpenChange(false)
           }}
         >
-          <DialogPrimitive.Title className="sr-only">{title}</DialogPrimitive.Title>
+          <DialogTitle className="sr-only">{title}</DialogTitle>
 
-          <DialogPrimitive.Close asChild>
-            <button
+          <DialogClose asChild>
+            <Button
               type="button"
+              variant="ghost"
+              size="icon"
               className={cn(
-                'absolute right-3 top-3 z-10 inline-flex size-8 items-center justify-center rounded-md',
+                'absolute right-3 top-3 z-10 size-8 rounded-md',
                 'bg-black/55 text-white/85 backdrop-blur-sm transition-colors',
                 'hover:bg-black/70 hover:text-white',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60',
@@ -55,14 +60,16 @@ export function ContentZoomDialog({
               aria-label="Close expanded preview"
             >
               <X className="size-4" aria-hidden="true" />
-            </button>
-          </DialogPrimitive.Close>
+            </Button>
+          </DialogClose>
 
-          <div className={cn('flex h-full items-center justify-center overflow-auto p-4 sm:p-8', contentClassName)}>
-            {children}
-          </div>
+          <ScrollArea className="h-full">
+            <div className={cn('flex min-h-full items-center justify-center p-4 sm:p-8', contentClassName)}>
+              {children}
+            </div>
+          </ScrollArea>
         </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+      </DialogPortal>
+    </Dialog>
   )
 }

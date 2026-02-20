@@ -12,6 +12,8 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import type { ArtifactReference } from '@/lib/artifacts'
 import { isImageAttachment } from '@/lib/file-attachments'
 import { cn } from '@/lib/utils'
@@ -410,9 +412,9 @@ function ToolPayloadBlock({
   return (
     <div>
       <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <pre
+      <ScrollArea
         className={cn(
-          'max-h-64 w-full overflow-auto rounded-md border p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words',
+          'max-h-64 w-full rounded-md border',
           tone === 'error'
             ? 'border-destructive/30 bg-destructive/10 text-destructive'
             : tone === 'cancelled'
@@ -420,8 +422,10 @@ function ToolPayloadBlock({
               : 'border-border/70 bg-muted/45 text-foreground',
         )}
       >
-        {formatPayload(value)}
-      </pre>
+        <pre className="p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
+          {formatPayload(value)}
+        </pre>
+      </ScrollArea>
     </div>
   )
 }
@@ -452,10 +456,11 @@ function ToolExecutionRow({ entry }: { entry: ToolExecutionDisplayEntry }) {
 
   return (
     <div className="rounded-md">
-      <button
+      <Button
         type="button"
+        variant="ghost"
         className={cn(
-          'group flex w-full items-start gap-1.5 rounded-md px-1 py-1 text-left text-sm text-foreground/70 italic transition-colors',
+          'group h-auto w-full items-start justify-start gap-1.5 rounded-md px-1 py-1 text-left text-sm font-normal text-foreground/70 italic transition-colors',
           'hover:text-foreground',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
         )}
@@ -488,7 +493,7 @@ function ToolExecutionRow({ entry }: { entry: ToolExecutionDisplayEntry }) {
           )}
           aria-hidden="true"
         />
-      </button>
+      </Button>
 
       <div
         id={contentId}
@@ -706,14 +711,15 @@ function EmptyState({ onSuggestionClick }: { onSuggestionClick?: (suggestion: st
       {onSuggestionClick ? (
         <div className="flex max-w-[320px] flex-wrap justify-center gap-2">
           {suggestions.map((suggestion) => (
-            <button
+            <Button
               key={suggestion}
               onClick={() => onSuggestionClick(suggestion)}
               type="button"
-              className="rounded-full border border-border bg-muted px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-muted/80"
+              variant="outline"
+              className="h-auto rounded-full bg-muted px-3 py-1.5 text-sm font-normal text-foreground transition-colors hover:bg-muted/80"
             >
               {suggestion}
-            </button>
+            </Button>
           ))}
         </div>
       ) : null}
@@ -736,13 +742,12 @@ export function MessageList({ messages, isLoading, onSuggestionClick, onArtifact
   }
 
   return (
-    <div
+    <ScrollArea
       className={cn(
-        'min-h-0 flex-1 overflow-y-auto',
-        '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent',
-        '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent',
-        '[scrollbar-width:thin] [scrollbar-color:transparent_transparent]',
-        'hover:[&::-webkit-scrollbar-thumb]:bg-border hover:[scrollbar-color:var(--color-border)_transparent]',
+        'min-h-0 flex-1',
+        '[&>[data-slot=scroll-area-scrollbar]]:w-2',
+        '[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-transparent',
+        'hover:[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-border',
       )}
     >
       <div className="space-y-2 p-3">
@@ -766,6 +771,6 @@ export function MessageList({ messages, isLoading, onSuggestionClick, onArtifact
         {isLoading ? <LoadingIndicator /> : null}
         <div ref={bottomRef} />
       </div>
-    </div>
+    </ScrollArea>
   )
 }
