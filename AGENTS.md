@@ -103,3 +103,7 @@ Prefer adding/updating generated UI components under `apps/ui/src/components/ui`
    - Build pass (`pnpm build`).
 6. Before finishing any task, always run a full TypeScript typecheck and fix all reported errors:
    - `pnpm exec tsc --noEmit`
+7. Always prefer shadcn/ui components over hand-rolled HTML elements for UI surfaces and controls.
+8. Add new shadcn/ui components from `apps/ui` using:
+   - `pnpm dlx shadcn@latest add <component>`
+   - Check component availability/usage at `https://ui.shadcn.com/docs`

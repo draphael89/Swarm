@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import {
   AlertTriangle,
   Check,
@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Separator } from '@/components/ui/separator'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import type { AgentDescriptor, SlackStatusEvent } from '@/lib/ws-types'
 
@@ -385,19 +397,18 @@ function ToggleRow({
   checked: boolean
   onChange: (next: boolean) => void
 }) {
+  const switchId = useId()
+
   return (
-    <label className="flex items-start gap-2 rounded-md border border-border/70 p-2">
-      <input
-        type="checkbox"
-        className="mt-0.5"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      <span className="min-w-0">
-        <span className="block text-xs font-medium text-foreground">{label}</span>
-        {description ? <span className="block text-[11px] text-muted-foreground">{description}</span> : null}
-      </span>
-    </label>
+    <div className="flex items-start justify-between gap-3 rounded-md border border-border/70 p-3">
+      <div className="min-w-0 space-y-1">
+        <Label htmlFor={switchId} className="text-xs font-medium text-foreground">
+          {label}
+        </Label>
+        {description ? <p className="text-[11px] text-muted-foreground">{description}</p> : null}
+      </div>
+      <Switch id={switchId} checked={checked} onCheckedChange={onChange} />
+    </div>
   )
 }
 
@@ -472,18 +483,17 @@ function EnvVariableRow({
             spellCheck={false}
             disabled={busy}
           />
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon"
             onClick={onToggleReveal}
             disabled={busy}
-            className={cn(
-              'absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground/60 transition-colors',
-              'hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-            )}
+            className="absolute right-1 top-1/2 size-7 -translate-y-1/2 text-muted-foreground/70 hover:text-foreground"
             title={isRevealed ? 'Hide value' : 'Show value'}
           >
             {isRevealed ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-          </button>
+          </Button>
         </div>
 
         <Button
@@ -734,11 +744,8 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
           </DialogDescription>
         </DialogHeader>
 
-        <div
-          className="flex-1 overflow-y-auto px-6 py-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
-          style={{ scrollbarWidth: 'thin', scrollbarColor: 'var(--border) transparent' }}
-        >
-          <div className="space-y-6">
+        <ScrollArea className="flex-1">
+          <div className="space-y-6 px-6 py-4">
             <section className="space-y-3 rounded-lg border border-border bg-card/50 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
@@ -858,37 +865,48 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-xs font-medium text-muted-foreground">Target manager</label>
-                    <select
-                      value={slackDraft.targetManagerId}
-                      onChange={(event) =>
+                    <Label htmlFor="slack-target-manager" className="text-xs font-medium text-muted-foreground">
+                      Target manager
+                    </Label>
+                    <Select
+                      value={slackDraft.targetManagerId || 'manager'}
+                      onValueChange={(value) =>
                         setSlackDraft((prev) =>
                           prev
                             ? {
                                 ...prev,
-                                targetManagerId: event.target.value,
+                                targetManagerId: value,
                               }
                             : prev,
                         )
                       }
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     >
-                      {managerOptions.length === 0 ? (
-                        <option value={slackDraft.targetManagerId || 'manager'}>{slackDraft.targetManagerId || 'manager'}</option>
-                      ) : (
-                        managerOptions.map((manager) => (
-                          <option key={manager.agentId} value={manager.agentId}>
-                            {manager.agentId}
-                          </option>
-                        ))
-                      )}
-                    </select>
+                      <SelectTrigger id="slack-target-manager" className="w-full">
+                        <SelectValue placeholder="Select manager" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {managerOptions.length === 0 ? (
+                          <SelectItem value={slackDraft.targetManagerId || 'manager'}>
+                            {slackDraft.targetManagerId || 'manager'}
+                          </SelectItem>
+                        ) : (
+                          managerOptions.map((manager) => (
+                            <SelectItem key={manager.agentId} value={manager.agentId}>
+                              {manager.agentId}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">App token (xapp-…)</label>
+                      <Label htmlFor="slack-app-token" className="text-xs font-medium text-muted-foreground">
+                        App token (xapp-…)
+                      </Label>
                       <Input
+                        id="slack-app-token"
                         type="password"
                         value={slackDraft.appToken}
                         onChange={(event) =>
@@ -911,8 +929,11 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">Bot token (xoxb-…)</label>
+                      <Label htmlFor="slack-bot-token" className="text-xs font-medium text-muted-foreground">
+                        Bot token (xoxb-…)
+                      </Label>
                       <Input
+                        id="slack-bot-token"
                         type="password"
                         value={slackDraft.botToken}
                         onChange={(event) =>
@@ -937,8 +958,11 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
 
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">Wake words</label>
+                      <Label htmlFor="slack-wake-words" className="text-xs font-medium text-muted-foreground">
+                        Wake words
+                      </Label>
                       <Input
+                        id="slack-wake-words"
                         value={slackDraft.wakeWords}
                         onChange={(event) =>
                           setSlackDraft((prev) =>
@@ -956,8 +980,11 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
                     </div>
 
                     <div className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">Max attachment size (bytes)</label>
+                      <Label htmlFor="slack-max-file-bytes" className="text-xs font-medium text-muted-foreground">
+                        Max attachment size (bytes)
+                      </Label>
                       <Input
+                        id="slack-max-file-bytes"
                         value={slackDraft.maxFileBytes}
                         onChange={(event) =>
                           setSlackDraft((prev) =>
@@ -975,7 +1002,7 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
                     </div>
                   </div>
 
-                  <div className="space-y-2 rounded-md border border-border/70 p-2">
+                  <div className="space-y-2 rounded-md border border-border/70 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs font-medium">Channel picker</p>
                       <Button
@@ -990,58 +1017,69 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
                       </Button>
                     </div>
 
-                    <Input
-                      value={slackDraft.channelIds.join(', ')}
-                      onChange={(event) =>
-                        setSlackDraft((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                channelIds: parseCommaSeparated(event.target.value),
-                              }
-                            : prev,
-                        )
-                      }
-                      placeholder="C12345, C23456"
-                    />
+                    <div className="space-y-1.5">
+                      <Label htmlFor="slack-channel-ids" className="text-xs font-medium text-muted-foreground">
+                        Channel IDs
+                      </Label>
+                      <Input
+                        id="slack-channel-ids"
+                        value={slackDraft.channelIds.join(', ')}
+                        onChange={(event) =>
+                          setSlackDraft((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  channelIds: parseCommaSeparated(event.target.value),
+                                }
+                              : prev,
+                          )
+                        }
+                        placeholder="C12345, C23456"
+                      />
+                    </div>
 
                     {slackChannels.length > 0 ? (
-                      <div className="max-h-40 space-y-1 overflow-auto rounded border border-border/60 p-2">
-                        {slackChannels.map((channel) => {
-                          const checked = slackDraft.channelIds.includes(channel.id)
+                      <ScrollArea className="h-40 rounded border border-border/60">
+                        <div className="space-y-1 p-2">
+                          {slackChannels.map((channel) => {
+                            const checked = slackDraft.channelIds.includes(channel.id)
+                            const checkboxId = `slack-channel-${channel.id}`
 
-                          return (
-                            <label key={channel.id} className="flex items-center gap-2 text-xs">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={(event) =>
-                                  setSlackDraft((prev) => {
-                                    if (!prev) return prev
+                            return (
+                              <div key={channel.id} className="flex items-center gap-2 text-xs">
+                                <Checkbox
+                                  id={checkboxId}
+                                  checked={checked}
+                                  onCheckedChange={(nextChecked) =>
+                                    setSlackDraft((prev) => {
+                                      if (!prev) return prev
 
-                                    const nextIds = new Set(prev.channelIds)
-                                    if (event.target.checked) {
-                                      nextIds.add(channel.id)
-                                    } else {
-                                      nextIds.delete(channel.id)
-                                    }
+                                      const nextIds = new Set(prev.channelIds)
+                                      if (nextChecked === true) {
+                                        nextIds.add(channel.id)
+                                      } else {
+                                        nextIds.delete(channel.id)
+                                      }
 
-                                    return {
-                                      ...prev,
-                                      channelIds: [...nextIds],
-                                    }
-                                  })
-                                }
-                              />
-                              <span className="font-medium">#{channel.name}</span>
-                              <span className="font-mono text-muted-foreground">({channel.id})</span>
-                              {!channel.isMember ? (
-                                <span className="text-muted-foreground">not joined</span>
-                              ) : null}
-                            </label>
-                          )
-                        })}
-                      </div>
+                                      return {
+                                        ...prev,
+                                        channelIds: [...nextIds],
+                                      }
+                                    })
+                                  }
+                                />
+                                <Label htmlFor={checkboxId} className="cursor-pointer text-xs font-normal">
+                                  <span className="font-medium">#{channel.name}</span>
+                                  <span className="font-mono text-muted-foreground">({channel.id})</span>
+                                  {!channel.isMember ? (
+                                    <span className="text-muted-foreground">not joined</span>
+                                  ) : null}
+                                </Label>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </ScrollArea>
                     ) : (
                       <p className="text-[11px] text-muted-foreground">No channel list loaded yet. Use Refresh channels.</p>
                     )}
@@ -1083,6 +1121,8 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
                 </div>
               )}
             </section>
+
+            <Separator />
 
             <section>
               <div className="mb-4 flex items-center justify-between">
@@ -1153,7 +1193,7 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
               )}
             </section>
           </div>
-        </div>
+        </ScrollArea>
 
         <div className="border-t border-border px-6 py-3">
           <p className="text-[11px] text-muted-foreground">
