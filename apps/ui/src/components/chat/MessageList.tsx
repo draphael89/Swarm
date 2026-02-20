@@ -13,7 +13,6 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import type { ArtifactReference } from '@/lib/artifacts'
 import { isImageAttachment } from '@/lib/file-attachments'
 import { cn } from '@/lib/utils'
@@ -412,9 +411,9 @@ function ToolPayloadBlock({
   return (
     <div>
       <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      <ScrollArea
+      <pre
         className={cn(
-          'max-h-64 w-full rounded-md border',
+          'max-h-64 w-full overflow-auto rounded-md border p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words',
           tone === 'error'
             ? 'border-destructive/30 bg-destructive/10 text-destructive'
             : tone === 'cancelled'
@@ -422,10 +421,8 @@ function ToolPayloadBlock({
               : 'border-border/70 bg-muted/45 text-foreground',
         )}
       >
-        <pre className="p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words">
-          {formatPayload(value)}
-        </pre>
-      </ScrollArea>
+        {formatPayload(value)}
+      </pre>
     </div>
   )
 }
@@ -742,12 +739,13 @@ export function MessageList({ messages, isLoading, onSuggestionClick, onArtifact
   }
 
   return (
-    <ScrollArea
+    <div
       className={cn(
-        'min-h-0 flex-1',
-        '[&>[data-slot=scroll-area-scrollbar]]:w-2',
-        '[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-transparent',
-        'hover:[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-border',
+        'min-h-0 flex-1 overflow-y-auto',
+        '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent',
+        '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent',
+        '[scrollbar-width:thin] [scrollbar-color:transparent_transparent]',
+        'hover:[&::-webkit-scrollbar-thumb]:bg-border hover:[scrollbar-color:var(--color-border)_transparent]',
       )}
     >
       <div className="space-y-2 p-3">
@@ -771,6 +769,6 @@ export function MessageList({ messages, isLoading, onSuggestionClick, onArtifact
         {isLoading ? <LoadingIndicator /> : null}
         <div ref={bottomRef} />
       </div>
-    </ScrollArea>
+    </div>
   )
 }
