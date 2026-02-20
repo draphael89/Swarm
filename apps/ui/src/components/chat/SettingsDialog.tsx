@@ -743,7 +743,7 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
           </DialogDescription>
         </DialogHeader>
 
-        <ScrollArea className="flex-1">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="space-y-6 px-6 py-4">
             <section className="space-y-3 rounded-lg border border-border bg-card/50 p-4">
               <div className="flex items-center justify-between gap-3">
@@ -1168,7 +1168,7 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
               )}
             </section>
           </div>
-        </ScrollArea>
+        </div>
 
         <div className="border-t border-border px-6 py-3">
           <p className="text-[11px] text-muted-foreground">
