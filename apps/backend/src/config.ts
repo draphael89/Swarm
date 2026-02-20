@@ -1,6 +1,6 @@
-import { isAbsolute, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
-import { existsSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { normalizeAllowlistRoots } from "./swarm/cwd-policy.js";
 import type { SwarmConfig } from "./swarm/types.js";
 
@@ -26,10 +26,13 @@ export function createConfig(): SwarmConfig {
   const swarmDir = resolve(dataDir, "swarm");
   const sessionsDir = resolve(dataDir, "sessions");
   const authDir = resolve(dataDir, "auth");
-  const defaultPiAuthFile = resolve(homedir(), ".pi", "agent", "auth.json");
-  const authFile =
-    process.env.SWARM_AUTH_FILE ??
-    (existsSync(defaultPiAuthFile) ? defaultPiAuthFile : resolve(authDir, "auth.json"));
+  const defaultAuthFile = resolve(authDir, "auth.json");
+  const authFileEnv = process.env.SWARM_AUTH_FILE?.trim();
+  const authFile = authFileEnv ? resolvePathLike(rootDir, authFileEnv) : defaultAuthFile;
+
+  if (!authFileEnv) {
+    migrateLegacyPiAuthFileIfNeeded(defaultAuthFile);
+  }
   const agentDir = resolve(dataDir, "agent");
   const managerAgentDir = resolve(agentDir, "manager");
   const repoArchetypesDir = resolve(rootDir, ".swarm", "archetypes");
@@ -100,4 +103,23 @@ function resolvePathLike(rootDir: string, rawPath: string): string {
   }
 
   return resolve(rootDir, rawPath);
+}
+
+function migrateLegacyPiAuthFileIfNeeded(targetAuthFile: string): void {
+  if (process.env.NODE_ENV === "test" || process.env.VITEST) {
+    return;
+  }
+
+  const legacyPiAuthFile = resolve(homedir(), ".pi", "agent", "auth.json");
+  if (existsSync(targetAuthFile) || !existsSync(legacyPiAuthFile)) {
+    return;
+  }
+
+  try {
+    mkdirSync(dirname(targetAuthFile), { recursive: true });
+    copyFileSync(legacyPiAuthFile, targetAuthFile);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[swarm] Failed to migrate legacy Pi auth file: ${message}`);
+  }
 }

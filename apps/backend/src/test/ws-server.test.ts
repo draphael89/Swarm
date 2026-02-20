@@ -429,6 +429,91 @@ describe('SwarmWebSocketServer', () => {
     }
   })
 
+  it('manages auth settings through REST endpoints', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    try {
+      const initialResponse = await fetch(`http://${config.host}:${config.port}/api/settings/auth`)
+      expect(initialResponse.status).toBe(200)
+      const initialPayload = (await initialResponse.json()) as {
+        providers: Array<{ provider: string; configured: boolean }>
+      }
+
+      expect(initialPayload.providers).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ provider: 'anthropic', configured: false }),
+          expect.objectContaining({ provider: 'openai', configured: false }),
+        ]),
+      )
+
+      const updateResponse = await fetch(`http://${config.host}:${config.port}/api/settings/auth`, {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          anthropic: 'sk-ant-test-1234',
+          openai: 'sk-openai-test-5678',
+        }),
+      })
+
+      expect(updateResponse.status).toBe(200)
+      const updatedPayload = (await updateResponse.json()) as {
+        providers: Array<{ provider: string; configured: boolean; maskedValue?: string }>
+      }
+
+      const anthropic = updatedPayload.providers.find((entry) => entry.provider === 'anthropic')
+      const openai = updatedPayload.providers.find((entry) => entry.provider === 'openai')
+
+      expect(anthropic?.configured).toBe(true)
+      expect(anthropic?.maskedValue).toBe('********1234')
+      expect(openai?.configured).toBe(true)
+      expect(openai?.maskedValue).toBe('********5678')
+
+      const storedAuth = JSON.parse(await readFile(config.paths.authFile, 'utf8')) as Record<
+        string,
+        { type: string; key?: string; access?: string }
+      >
+
+      expect(storedAuth.anthropic).toMatchObject({
+        type: 'api_key',
+      })
+      expect(storedAuth.anthropic.key ?? storedAuth.anthropic.access).toBe('sk-ant-test-1234')
+      expect(storedAuth['openai-codex']).toMatchObject({
+        type: 'api_key',
+      })
+      expect(storedAuth['openai-codex'].key ?? storedAuth['openai-codex'].access).toBe('sk-openai-test-5678')
+
+      const deleteResponse = await fetch(`http://${config.host}:${config.port}/api/settings/auth/openai`, {
+        method: 'DELETE',
+      })
+      expect(deleteResponse.status).toBe(200)
+
+      const afterDeletePayload = (await deleteResponse.json()) as {
+        providers: Array<{ provider: string; configured: boolean }>
+      }
+      expect(afterDeletePayload.providers.find((entry) => entry.provider === 'openai')?.configured).toBe(false)
+
+      const afterDeleteAuth = JSON.parse(await readFile(config.paths.authFile, 'utf8')) as Record<string, unknown>
+      expect(afterDeleteAuth['openai-codex']).toBeUndefined()
+    } finally {
+      await server.stop()
+    }
+  })
+
   it('accepts attachment-only user messages and broadcasts attachments', async () => {
     const port = await getAvailablePort()
     const config = await makeTempConfig(port)

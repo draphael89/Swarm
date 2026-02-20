@@ -18,6 +18,7 @@ import type { SwarmManager } from "../swarm/swarm-manager.js";
 const REBOOT_ENDPOINT_PATH = "/api/reboot";
 const READ_FILE_ENDPOINT_PATH = "/api/read-file";
 const SETTINGS_ENV_ENDPOINT_PATH = "/api/settings/env";
+const SETTINGS_AUTH_ENDPOINT_PATH = "/api/settings/auth";
 const SLACK_INTEGRATION_ENDPOINT_PATH = "/api/integrations/slack";
 const SLACK_INTEGRATION_TEST_ENDPOINT_PATH = "/api/integrations/slack/test";
 const SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH = "/api/integrations/slack/channels";
@@ -187,6 +188,14 @@ export class SwarmWebSocketServer {
       }
 
       if (
+        requestUrl.pathname === SETTINGS_AUTH_ENDPOINT_PATH ||
+        requestUrl.pathname.startsWith(`${SETTINGS_AUTH_ENDPOINT_PATH}/`)
+      ) {
+        await this.handleSettingsAuthHttpRequest(request, response, requestUrl);
+        return;
+      }
+
+      if (
         requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH ||
         requestUrl.pathname === SLACK_INTEGRATION_TEST_ENDPOINT_PATH ||
         requestUrl.pathname === SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH
@@ -214,6 +223,11 @@ export class SwarmWebSocketServer {
       if (
         requestUrl.pathname === SETTINGS_ENV_ENDPOINT_PATH ||
         requestUrl.pathname.startsWith(`${SETTINGS_ENV_ENDPOINT_PATH}/`)
+      ) {
+        this.applyCorsHeaders(request, response, "GET, PUT, DELETE, OPTIONS");
+      } else if (
+        requestUrl.pathname === SETTINGS_AUTH_ENDPOINT_PATH ||
+        requestUrl.pathname.startsWith(`${SETTINGS_AUTH_ENDPOINT_PATH}/`)
       ) {
         this.applyCorsHeaders(request, response, "GET, PUT, DELETE, OPTIONS");
       } else if (requestUrl.pathname === READ_FILE_ENDPOINT_PATH) {
@@ -380,6 +394,55 @@ export class SwarmWebSocketServer {
       await this.swarmManager.deleteSettingsEnv(variableName);
       const variables = await this.swarmManager.listSettingsEnv();
       this.sendJson(response, 200, { ok: true, variables });
+      return;
+    }
+
+    this.applyCorsHeaders(request, response, methods);
+    response.setHeader("Allow", methods);
+    this.sendJson(response, 405, { error: "Method Not Allowed" });
+  }
+
+  private async handleSettingsAuthHttpRequest(
+    request: IncomingMessage,
+    response: ServerResponse,
+    requestUrl: URL
+  ): Promise<void> {
+    const methods = "GET, PUT, DELETE, OPTIONS";
+
+    if (request.method === "OPTIONS") {
+      this.applyCorsHeaders(request, response, methods);
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === SETTINGS_AUTH_ENDPOINT_PATH) {
+      this.applyCorsHeaders(request, response, methods);
+      const providers = await this.swarmManager.listSettingsAuth();
+      this.sendJson(response, 200, { providers });
+      return;
+    }
+
+    if (request.method === "PUT" && requestUrl.pathname === SETTINGS_AUTH_ENDPOINT_PATH) {
+      this.applyCorsHeaders(request, response, methods);
+      const payload = parseSettingsAuthUpdateBody(await this.readJsonBody(request));
+      await this.swarmManager.updateSettingsAuth(payload);
+      const providers = await this.swarmManager.listSettingsAuth();
+      this.sendJson(response, 200, { ok: true, providers });
+      return;
+    }
+
+    if (request.method === "DELETE" && requestUrl.pathname.startsWith(`${SETTINGS_AUTH_ENDPOINT_PATH}/`)) {
+      this.applyCorsHeaders(request, response, methods);
+      const provider = decodeURIComponent(requestUrl.pathname.slice(SETTINGS_AUTH_ENDPOINT_PATH.length + 1));
+      if (!provider) {
+        this.sendJson(response, 400, { error: "Missing auth provider" });
+        return;
+      }
+
+      await this.swarmManager.deleteSettingsAuth(provider);
+      const providers = await this.swarmManager.listSettingsAuth();
+      this.sendJson(response, 200, { ok: true, providers });
       return;
     }
 
@@ -1271,6 +1334,29 @@ function parseSettingsEnvUpdateBody(value: unknown): Record<string, string> {
     }
 
     updates[name] = normalized;
+  }
+
+  return updates;
+}
+
+function parseSettingsAuthUpdateBody(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Request body must be a JSON object");
+  }
+
+  const updates: Record<string, string> = {};
+
+  for (const [provider, rawValue] of Object.entries(value)) {
+    if (typeof rawValue !== "string") {
+      throw new Error(`settings auth value for ${provider} must be a string`);
+    }
+
+    const normalized = rawValue.trim();
+    if (!normalized) {
+      throw new Error(`settings auth value for ${provider} must be a non-empty string`);
+    }
+
+    updates[provider] = normalized;
   }
 
   return updates;
