@@ -1,5 +1,4 @@
-import { Trash2 } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { CircleDashed, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
@@ -13,51 +12,46 @@ interface ChatHeaderProps {
 
 export function ChatHeader({ connected, activeAgentId, activeAgentLabel, showNewChat, onNewChat }: ChatHeaderProps) {
   return (
-    <header
-      className="sticky top-0 z-10 flex h-[53px] shrink-0 items-center justify-between border-b border-border/60 bg-background px-4"
-    >
-      {/* Left: title */}
+    <header className="sticky top-0 z-10 flex h-[62px] w-full shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-border/80 bg-card/80 px-4 backdrop-blur">
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <h1 className="truncate text-sm font-semibold">{activeAgentLabel}</h1>
-      </div>
-
-      {/* Right: status badges & actions */}
-      <div className="flex shrink-0 items-center gap-2">
-        <Badge
-          variant="outline"
+        <div
           className={cn(
-            'gap-1.5 border-border/60 px-2 py-0.5 text-[10px] font-medium',
-            connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400',
+            'inline-flex size-5 items-center justify-center rounded-full border',
+            connected
+              ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
+              : 'border-amber-500/35 bg-amber-500/10 text-amber-700 dark:text-amber-400',
           )}
+          aria-hidden="true"
         >
-          <span
-            className={cn(
-              'inline-block size-1.5 rounded-full',
-              connected ? 'bg-emerald-500' : 'bg-amber-500',
-            )}
-          />
-          {connected ? 'Connected' : 'Reconnecting'}
-        </Badge>
+          <CircleDashed className={cn('size-3', !connected && 'animate-spin')} />
+        </div>
 
-        {activeAgentId ? (
-          <Badge variant="outline" className="hidden border-border/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex">
-            {activeAgentId}
-          </Badge>
-        ) : null}
-
-        {showNewChat ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
-            onClick={onNewChat}
-            title="Clear conversation"
-          >
-            <Trash2 className="size-3" />
-            Clear
-          </Button>
-        ) : null}
+        <div className="min-w-0">
+          <h1 className="truncate text-sm font-bold text-foreground">{activeAgentLabel}</h1>
+          <div className="flex h-4 min-w-0 items-center gap-1.5 text-xs font-mono text-muted-foreground">
+            <span className="whitespace-nowrap">{connected ? 'Connected' : 'Reconnecting'}</span>
+            {activeAgentId ? (
+              <>
+                <span aria-hidden="true">·</span>
+                <span className="truncate">{activeAgentId}</span>
+              </>
+            ) : null}
+          </div>
+        </div>
       </div>
+
+      {showNewChat ? (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+          onClick={onNewChat}
+          title="Clear conversation"
+          aria-label="Clear conversation"
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      ) : null}
     </header>
   )
 }

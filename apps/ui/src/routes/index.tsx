@@ -333,7 +333,7 @@ export function IndexPage() {
           <ChatHeader
             connected={state.connected}
             activeAgentId={activeAgentId}
-            activeAgentLabel={`${activeAgentLabel} Chat`}
+            activeAgentLabel={activeAgentLabel}
             showNewChat={isActiveManager}
             onNewChat={handleNewChat}
           />
