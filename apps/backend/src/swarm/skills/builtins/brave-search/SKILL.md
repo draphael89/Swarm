@@ -1,6 +1,11 @@
 ---
 name: brave-search
 description: Web search and content extraction via Brave Search API. Use for searching documentation, facts, or any web content. Lightweight, no browser required.
+env:
+  - name: BRAVE_API_KEY
+    description: Brave Search API key
+    required: true
+    helpUrl: https://api-dashboard.search.brave.com/register
 ---
 
 # Brave Search
@@ -14,10 +19,8 @@ Requires a Brave Search API account with a free subscription. A credit card is r
 1. Create an account at https://api-dashboard.search.brave.com/register
 2. Create a "Free AI" subscription
 3. Create an API key for the subscription
-4. Add to your shell profile (`~/.profile` or `~/.zprofile` for zsh):
-   ```bash
-   export BRAVE_API_KEY="your-api-key-here"
-   ```
+4. Configure `BRAVE_API_KEY` in the app Settings → Environment Variables.
+   (Fallback for standalone usage: export `BRAVE_API_KEY` in your shell.)
 5. Dependencies are installed via the backend workspace package.
    If running this skill standalone, install once from this skill directory:
    ```bash

@@ -66,6 +66,7 @@ function renderSidebar({
   onSelectAgent = vi.fn(),
   onDeleteAgent = vi.fn(),
   onDeleteManager = vi.fn(),
+  onOpenSettings = vi.fn(),
   onReboot = vi.fn(),
   statuses = {},
 }: {
@@ -74,6 +75,7 @@ function renderSidebar({
   onSelectAgent?: (agentId: string) => void
   onDeleteAgent?: (agentId: string) => void
   onDeleteManager?: (managerId: string) => void
+  onOpenSettings?: () => void
   onReboot?: () => void
   statuses?: Record<string, { status: AgentStatus; pendingCount: number }>
 }) {
@@ -90,6 +92,7 @@ function renderSidebar({
         onSelectAgent,
         onDeleteAgent,
         onDeleteManager,
+        onOpenSettings,
         onReboot,
       }),
     )
@@ -149,6 +152,18 @@ describe('AgentSidebar', () => {
     click(getByRole(container, 'button', { name: 'Delete worker-alpha' }))
     expect(onDeleteAgent).toHaveBeenCalledTimes(1)
     expect(onDeleteAgent).toHaveBeenCalledWith('worker-alpha')
+  })
+
+  it('calls onOpenSettings when the settings button is clicked', () => {
+    const onOpenSettings = vi.fn()
+
+    renderSidebar({
+      agents: [manager('manager-alpha')],
+      onOpenSettings,
+    })
+
+    click(getByRole(container, 'button', { name: 'Settings' }))
+    expect(onOpenSettings).toHaveBeenCalledTimes(1)
   })
 
   it('calls onReboot when the reboot button is clicked', () => {

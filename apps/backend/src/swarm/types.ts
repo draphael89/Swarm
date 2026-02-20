@@ -64,6 +64,17 @@ export interface SwarmPaths {
   memoryFile: string;
   repoMemorySkillFile: string;
   agentsStoreFile: string;
+  secretsFile: string;
+}
+
+export interface SkillEnvRequirement {
+  name: string;
+  description?: string;
+  required: boolean;
+  helpUrl?: string;
+  skillName: string;
+  isSet: boolean;
+  maskedValue?: string;
 }
 
 export interface SwarmConfig {

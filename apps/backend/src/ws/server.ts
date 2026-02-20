@@ -16,7 +16,9 @@ import type { SwarmManager } from "../swarm/swarm-manager.js";
 
 const REBOOT_ENDPOINT_PATH = "/api/reboot";
 const READ_FILE_ENDPOINT_PATH = "/api/read-file";
+const SETTINGS_ENV_ENDPOINT_PATH = "/api/settings/env";
 const RESTART_SIGNAL: NodeJS.Signals = "SIGUSR1";
+const MAX_HTTP_BODY_SIZE_BYTES = 64 * 1024;
 const MAX_READ_FILE_BODY_BYTES = 64 * 1024;
 const MAX_READ_FILE_CONTENT_BYTES = 2 * 1024 * 1024;
 
@@ -71,7 +73,7 @@ export class SwarmWebSocketServer {
     if (this.httpServer || this.wss) return;
 
     const httpServer = createServer((request, response) => {
-      this.handleHttpRequest(request, response);
+      void this.handleHttpRequest(request, response);
     });
     const wss = new WebSocketServer({
       server: httpServer
@@ -145,24 +147,58 @@ export class SwarmWebSocketServer {
     }
   }
 
-  private handleHttpRequest(request: IncomingMessage, response: ServerResponse): void {
+  private async handleHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const requestUrl = new URL(
       request.url ?? "/",
       `http://${request.headers.host ?? `${this.host}:${this.port}`}`
     );
 
-    if (requestUrl.pathname === REBOOT_ENDPOINT_PATH) {
-      this.handleRebootHttpRequest(request, response);
-      return;
-    }
+    try {
+      if (requestUrl.pathname === REBOOT_ENDPOINT_PATH) {
+        this.handleRebootHttpRequest(request, response);
+        return;
+      }
 
-    if (requestUrl.pathname === READ_FILE_ENDPOINT_PATH) {
-      void this.handleReadFileHttpRequest(request, response);
-      return;
-    }
+      if (requestUrl.pathname === READ_FILE_ENDPOINT_PATH) {
+        await this.handleReadFileHttpRequest(request, response);
+        return;
+      }
 
-    response.statusCode = 404;
-    response.end("Not Found");
+      if (
+        requestUrl.pathname === SETTINGS_ENV_ENDPOINT_PATH ||
+        requestUrl.pathname.startsWith(`${SETTINGS_ENV_ENDPOINT_PATH}/`)
+      ) {
+        await this.handleSettingsEnvHttpRequest(request, response, requestUrl);
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end("Not Found");
+    } catch (error) {
+      if (response.writableEnded || response.headersSent) {
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : String(error);
+      const statusCode =
+        message.includes("must be") ||
+        message.includes("Invalid") ||
+        message.includes("Missing") ||
+        message.includes("too large")
+          ? 400
+          : 500;
+
+      if (
+        requestUrl.pathname === SETTINGS_ENV_ENDPOINT_PATH ||
+        requestUrl.pathname.startsWith(`${SETTINGS_ENV_ENDPOINT_PATH}/`)
+      ) {
+        this.applyCorsHeaders(request, response, "GET, PUT, DELETE, OPTIONS");
+      } else if (requestUrl.pathname === READ_FILE_ENDPOINT_PATH) {
+        this.applyCorsHeaders(request, response, "POST, OPTIONS");
+      }
+
+      this.sendJson(response, statusCode, { error: message });
+    }
   }
 
   private handleRebootHttpRequest(request: IncomingMessage, response: ServerResponse): void {
@@ -271,6 +307,86 @@ export class SwarmWebSocketServer {
       }
 
       this.sendJson(response, 500, { error: message });
+    }
+  }
+
+  private async handleSettingsEnvHttpRequest(
+    request: IncomingMessage,
+    response: ServerResponse,
+    requestUrl: URL
+  ): Promise<void> {
+    const methods = "GET, PUT, DELETE, OPTIONS";
+
+    if (request.method === "OPTIONS") {
+      this.applyCorsHeaders(request, response, methods);
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === SETTINGS_ENV_ENDPOINT_PATH) {
+      this.applyCorsHeaders(request, response, methods);
+      const variables = await this.swarmManager.listSettingsEnv();
+      this.sendJson(response, 200, { variables });
+      return;
+    }
+
+    if (request.method === "PUT" && requestUrl.pathname === SETTINGS_ENV_ENDPOINT_PATH) {
+      this.applyCorsHeaders(request, response, methods);
+      const payload = parseSettingsEnvUpdateBody(await this.readJsonBody(request));
+      await this.swarmManager.updateSettingsEnv(payload);
+      const variables = await this.swarmManager.listSettingsEnv();
+      this.sendJson(response, 200, { ok: true, variables });
+      return;
+    }
+
+    if (request.method === "DELETE" && requestUrl.pathname.startsWith(`${SETTINGS_ENV_ENDPOINT_PATH}/`)) {
+      this.applyCorsHeaders(request, response, methods);
+      const variableName = decodeURIComponent(requestUrl.pathname.slice(SETTINGS_ENV_ENDPOINT_PATH.length + 1));
+      if (!variableName) {
+        this.sendJson(response, 400, { error: "Missing environment variable name" });
+        return;
+      }
+
+      await this.swarmManager.deleteSettingsEnv(variableName);
+      const variables = await this.swarmManager.listSettingsEnv();
+      this.sendJson(response, 200, { ok: true, variables });
+      return;
+    }
+
+    this.applyCorsHeaders(request, response, methods);
+    response.setHeader("Allow", methods);
+    this.sendJson(response, 405, { error: "Method Not Allowed" });
+  }
+
+  private async readJsonBody(request: IncomingMessage): Promise<unknown> {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+
+    for await (const chunk of request) {
+      const chunkBuffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      totalBytes += chunkBuffer.length;
+
+      if (totalBytes > MAX_HTTP_BODY_SIZE_BYTES) {
+        throw new Error("Request body too large");
+      }
+
+      chunks.push(chunkBuffer);
+    }
+
+    if (chunks.length === 0) {
+      return {};
+    }
+
+    const raw = Buffer.concat(chunks).toString("utf8").trim();
+    if (!raw) {
+      return {};
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      throw new Error("Request body must be valid JSON");
     }
   }
 
@@ -1009,6 +1125,34 @@ function resolveProdDaemonPid(repoRoot: string): number | null {
 function getProdDaemonPidFile(repoRoot: string): string {
   const repoHash = createHash("sha1").update(repoRoot).digest("hex").slice(0, 10);
   return join(tmpdir(), `swarm-prod-daemon-${repoHash}.pid`);
+}
+
+function parseSettingsEnvUpdateBody(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Request body must be a JSON object");
+  }
+
+  const maybeValues = "values" in value ? (value as { values?: unknown }).values : value;
+  if (!maybeValues || typeof maybeValues !== "object" || Array.isArray(maybeValues)) {
+    throw new Error("settings env payload must be an object map");
+  }
+
+  const updates: Record<string, string> = {};
+
+  for (const [name, rawValue] of Object.entries(maybeValues)) {
+    if (typeof rawValue !== "string") {
+      throw new Error(`settings env value for ${name} must be a string`);
+    }
+
+    const normalized = rawValue.trim();
+    if (!normalized) {
+      throw new Error(`settings env value for ${name} must be a non-empty string`);
+    }
+
+    updates[name] = normalized;
+  }
+
+  return updates;
 }
 
 function parseConversationAttachments(

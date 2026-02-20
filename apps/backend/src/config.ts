@@ -35,6 +35,7 @@ export function createConfig(): SwarmConfig {
   const repoArchetypesDir = resolve(rootDir, ".swarm", "archetypes");
   const memoryFile = resolve(dataDir, "MEMORY.md");
   const repoMemorySkillFile = resolve(rootDir, ".swarm", "skills", "memory", "SKILL.md");
+  const secretsFile = resolve(dataDir, "secrets.json");
   const defaultCwd = process.env.SWARM_DEFAULT_CWD ? resolve(process.env.SWARM_DEFAULT_CWD) : rootDir;
 
   const configuredAllowlistRoots = (process.env.SWARM_CWD_ALLOWLIST_ROOTS ?? "")
@@ -75,7 +76,8 @@ export function createConfig(): SwarmConfig {
       repoArchetypesDir,
       memoryFile,
       repoMemorySkillFile,
-      agentsStoreFile: resolve(swarmDir, "agents.json")
+      agentsStoreFile: resolve(swarmDir, "agents.json"),
+      secretsFile
     }
   };
 }

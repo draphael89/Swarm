@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -134,6 +134,7 @@ async function makeTempConfig(port: number, allowNonManagerSubscriptions = false
       memoryFile,
       repoMemorySkillFile,
       agentsStoreFile: join(swarmDir, 'agents.json'),
+      secretsFile: join(dataDir, 'secrets.json'),
     },
   }
 }
@@ -322,6 +323,101 @@ describe('SwarmWebSocketServer', () => {
       expect(payload.error).toContain('outside allowed roots')
     } finally {
       await rm(outsideDir, { recursive: true, force: true })
+      await server.stop()
+    }
+  })
+
+  it('manages skill env settings through REST endpoints', async () => {
+    const previousBraveApiKey = process.env.BRAVE_API_KEY
+    delete process.env.BRAVE_API_KEY
+
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    try {
+      const initialResponse = await fetch(`http://${config.host}:${config.port}/api/settings/env`)
+      expect(initialResponse.status).toBe(200)
+      const initialPayload = (await initialResponse.json()) as {
+        variables: Array<{ name: string; skillName: string; isSet: boolean }>
+      }
+
+      expect(
+        initialPayload.variables.find(
+          (entry) => entry.name === 'BRAVE_API_KEY' && entry.skillName === 'brave-search',
+        ),
+      ).toMatchObject({
+        isSet: false,
+      })
+
+      const updateResponse = await fetch(`http://${config.host}:${config.port}/api/settings/env`, {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          values: {
+            BRAVE_API_KEY: 'bsal-rest-value',
+          },
+        }),
+      })
+
+      expect(updateResponse.status).toBe(200)
+      const updatedPayload = (await updateResponse.json()) as {
+        variables: Array<{ name: string; skillName: string; isSet: boolean; maskedValue?: string }>
+      }
+
+      expect(
+        updatedPayload.variables.find(
+          (entry) => entry.name === 'BRAVE_API_KEY' && entry.skillName === 'brave-search',
+        ),
+      ).toMatchObject({
+        isSet: true,
+        maskedValue: '********',
+      })
+
+      expect(process.env.BRAVE_API_KEY).toBe('bsal-rest-value')
+
+      const storedSecrets = JSON.parse(await readFile(config.paths.secretsFile, 'utf8')) as Record<string, string>
+      expect(storedSecrets.BRAVE_API_KEY).toBe('bsal-rest-value')
+
+      const deleteResponse = await fetch(`http://${config.host}:${config.port}/api/settings/env/BRAVE_API_KEY`, {
+        method: 'DELETE',
+      })
+
+      expect(deleteResponse.status).toBe(200)
+      expect(process.env.BRAVE_API_KEY).toBeUndefined()
+
+      const afterDeleteResponse = await fetch(`http://${config.host}:${config.port}/api/settings/env`)
+      const afterDeletePayload = (await afterDeleteResponse.json()) as {
+        variables: Array<{ name: string; skillName: string; isSet: boolean }>
+      }
+
+      expect(
+        afterDeletePayload.variables.find(
+          (entry) => entry.name === 'BRAVE_API_KEY' && entry.skillName === 'brave-search',
+        ),
+      ).toMatchObject({
+        isSet: false,
+      })
+    } finally {
+      if (previousBraveApiKey === undefined) {
+        delete process.env.BRAVE_API_KEY
+      } else {
+        process.env.BRAVE_API_KEY = previousBraveApiKey
+      }
+
       await server.stop()
     }
   })
