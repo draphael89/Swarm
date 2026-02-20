@@ -1,6 +1,5 @@
 import { ChevronDown, ChevronRight, CircleDashed, RotateCcw, Settings, SquarePen, Trash2, UserStar } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { buildManagerTreeRows } from '@/lib/agent-hierarchy'
 import { cn } from '@/lib/utils'
@@ -189,24 +188,13 @@ function AgentRow({
         <TooltipProvider delayDuration={200}>
           <Tooltip>
             <TooltipTrigger asChild>
-              <span className="ml-1 inline-flex shrink-0 items-center gap-1">
-                <span
-                  className={cn(
-                    'inline-flex h-5 min-w-7 items-center justify-center rounded-sm border border-sidebar-border/80 bg-sidebar-accent/40 px-0.5',
-                    isSelected ? 'border-sidebar-ring/60 bg-sidebar-accent-foreground/10' : '',
-                  )}
-                >
-                  <RuntimeIcon agent={agent} className="size-3 shrink-0 object-contain opacity-90" />
-                </span>
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    'justify-center truncate border-sidebar-border/80 bg-transparent px-1 py-0 text-[9px] font-medium leading-4',
-                    isSelected ? 'text-sidebar-accent-foreground/75' : 'text-muted-foreground',
-                  )}
-                >
-                  {modelLabel}
-                </Badge>
+              <span
+                className={cn(
+                  'ml-1 inline-flex h-5 min-w-7 shrink-0 items-center justify-center rounded-sm border border-sidebar-border/80 bg-sidebar-accent/40 px-0.5',
+                  isSelected ? 'border-sidebar-ring/60 bg-sidebar-accent-foreground/10' : '',
+                )}
+              >
+                <RuntimeIcon agent={agent} className="size-3 shrink-0 object-contain opacity-90" />
               </span>
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={6} className="px-2 py-1 text-[10px]">
@@ -406,7 +394,7 @@ export function AgentSidebar({
                                 onDelete={() => onDeleteAgent(worker.agentId)}
                                 deleteAriaLabel={`Delete ${worker.agentId}`}
                                 nameClassName="font-normal"
-                                className="py-1.5 pl-11 pr-1.5"
+                                className="py-1.5 pl-7 pr-1.5"
                               />
                             </li>
                           )
