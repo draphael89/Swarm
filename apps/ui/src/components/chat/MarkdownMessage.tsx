@@ -2,6 +2,13 @@ import { memo } from 'react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+const EXTRA_ALLOWED_PROTOCOLS = /^(vscode-insiders|vscode):\/\//i
+
+function urlTransform(url: string): string {
+  if (EXTRA_ALLOWED_PROTOCOLS.test(url)) return url
+  return defaultUrlTransform(url)
+}
+
 interface MarkdownMessageProps {
   content: string
 }
@@ -11,7 +18,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({ content }: Markdo
     <div className="text-sm leading-relaxed">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        urlTransform={defaultUrlTransform}
+        urlTransform={urlTransform}
         components={{
           p({ children }) {
             return <p className="mb-2 last:mb-0 break-words whitespace-pre-wrap">{children}</p>
