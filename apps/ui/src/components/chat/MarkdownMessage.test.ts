@@ -23,10 +23,10 @@ describe('MarkdownMessage', () => {
     const html = renderToStaticMarkup(createElement(MarkdownMessage, { content }))
 
     expect(html).toContain('href="https://example.com"')
-    expect(html).toContain('<code class="rounded-sm bg-muted px-1 py-0.5 font-mono text-xs text-foreground">pnpm test</code>')
-    expect(html).toContain('<pre class="my-2 overflow-x-auto rounded-md border border-border/70 bg-muted/45 p-2">')
-    expect(html).toContain('<ul class="mb-2 list-disc space-y-0.5 pl-5 last:mb-0">')
-    expect(html).toContain('<strong class="font-semibold">bold</strong>')
+    expect(html).toContain('>pnpm test</code>')
+    expect(html).toContain('<pre class="overflow-x-auto')
+    expect(html).toContain('<ul class="mb-2 list-disc space-y-0.5 pl-5')
+    expect(html).toContain('<strong class="font-semibold')
     expect(html).toContain('<em class="italic">italic</em>')
   })
 

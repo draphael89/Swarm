@@ -552,6 +552,84 @@ describe('SwarmManager', () => {
     expect(managerRuntime?.sendCalls.at(-1)?.message).toBe('interrupt current plan')
   })
 
+  it('tags web user messages with default source metadata', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await manager.handleUserMessage('interrupt current plan')
+
+    const history = manager.getConversationHistory('manager')
+    const userEvent = history.find(
+      (entry) => entry.type === 'conversation_message' && entry.role === 'user' && entry.text === 'interrupt current plan',
+    )
+
+    expect(userEvent).toBeDefined()
+    if (userEvent?.type === 'conversation_message') {
+      expect(userEvent.sourceContext).toEqual({ channel: 'web' })
+      expect(userEvent.responseExpectation).toBe('required')
+    }
+  })
+
+  it('defaults speak_to_user routing to the originating source context', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await manager.handleUserMessage('reply in slack thread', {
+      sourceContext: {
+        channel: 'slack',
+        channelId: 'C123',
+        userId: 'U456',
+        threadTs: '173.456',
+      },
+      responseExpectation: 'required',
+    })
+
+    await manager.publishToUser('manager', 'ack from manager', 'speak_to_user')
+
+    const history = manager.getConversationHistory('manager')
+    const assistantEvent = [...history]
+      .reverse()
+      .find((entry) => entry.type === 'conversation_message' && entry.source === 'speak_to_user')
+
+    expect(assistantEvent).toBeDefined()
+    if (assistantEvent?.type === 'conversation_message') {
+      expect(assistantEvent.sourceContext).toEqual({
+        channel: 'slack',
+        channelId: 'C123',
+        userId: 'U456',
+        threadTs: '173.456',
+      })
+    }
+  })
+
+  it('allows optional chatter to be ignored without missing speak warnings', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await manager.handleUserMessage('ambient channel chatter', {
+      sourceContext: {
+        channel: 'slack',
+        channelId: 'C987',
+      },
+      responseExpectation: 'optional',
+    })
+
+    await (manager as any).handleRuntimeAgentEnd('manager')
+
+    const history = manager.getConversationHistory('manager')
+    expect(
+      history.some(
+        (entry) =>
+          entry.type === 'conversation_message' &&
+          entry.role === 'system' &&
+          entry.text.includes('Manager finished without speak_to_user'),
+      ),
+    ).toBe(false)
+  })
+
   it('does not SYSTEM-prefix direct user messages routed to a worker', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)

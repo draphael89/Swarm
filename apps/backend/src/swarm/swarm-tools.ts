@@ -3,6 +3,9 @@ import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { parseSwarmModelPreset } from "./model-presets.js";
 import {
   type AgentDescriptor,
+  type MessageChannel,
+  type MessageSourceContext,
+  type MessageTargetContext,
   type RequestedDeliveryMode,
   type SendMessageReceipt,
   type SpawnAgentInput
@@ -18,7 +21,12 @@ export interface SwarmToolHost {
     message: string,
     delivery?: RequestedDeliveryMode
   ): Promise<SendMessageReceipt>;
-  publishToUser(agentId: string, text: string, source?: "speak_to_user" | "system"): Promise<void>;
+  publishToUser(
+    agentId: string,
+    text: string,
+    source?: "speak_to_user" | "system",
+    targetContext?: MessageTargetContext
+  ): Promise<{ targetContext: MessageSourceContext }>;
 }
 
 const deliveryModeSchema = Type.Union([
@@ -31,6 +39,15 @@ const spawnModelPresetSchema = Type.Union([
   Type.Literal("codex-5.3"),
   Type.Literal("opus-4.6")
 ]);
+
+const messageChannelSchema = Type.Union([Type.Literal("web"), Type.Literal("slack")]);
+
+const speakToUserTargetSchema = Type.Object({
+  channel: messageChannelSchema,
+  channelId: Type.Optional(Type.String()),
+  userId: Type.Optional(Type.String()),
+  threadTs: Type.Optional(Type.String())
+});
 
 export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor): ToolDefinition[] {
   const shared: ToolDefinition[] = [
@@ -169,22 +186,40 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
     {
       name: "speak_to_user",
       label: "Speak To User",
-      description: "Publish a user-visible manager message into the websocket conversation feed.",
+      description:
+        "Publish a user-visible manager message into the websocket conversation feed. Optional target routes output to a specific channel context.",
       parameters: Type.Object({
-        text: Type.String({ description: "Message content to show to the user." })
+        text: Type.String({ description: "Message content to show to the user." }),
+        target: Type.Optional(speakToUserTargetSchema)
       }),
       async execute(_toolCallId, params) {
-        const parsed = params as { text: string };
-        await host.publishToUser(descriptor.agentId, parsed.text, "speak_to_user");
+        const parsed = params as {
+          text: string;
+          target?: {
+            channel: MessageChannel;
+            channelId?: string;
+            userId?: string;
+            threadTs?: string;
+          };
+        };
+
+        const published = await host.publishToUser(
+          descriptor.agentId,
+          parsed.text,
+          "speak_to_user",
+          parsed.target
+        );
+
         return {
           content: [
             {
               type: "text",
-              text: "Published message to user."
+              text: `Published message to user (${published.targetContext.channel}).`
             }
           ],
           details: {
-            published: true
+            published: true,
+            targetContext: published.targetContext
           }
         };
       }
