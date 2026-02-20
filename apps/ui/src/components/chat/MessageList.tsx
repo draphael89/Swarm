@@ -529,8 +529,8 @@ function MessageFileAttachments({
             className={cn(
               'flex items-center gap-2 rounded-md border px-2 py-1.5',
               isUser
-                ? 'border-primary-foreground/25 bg-primary-foreground/10 text-primary-foreground'
-                : 'border-border bg-muted/35 text-foreground',
+                ? 'border-primary-foreground/25 bg-primary-foreground/20 text-primary-foreground'
+                : 'border-border bg-muted text-foreground',
             )}
           >
             <span
