@@ -1,6 +1,13 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { config as loadDotenv } from "dotenv";
 import { createConfig } from "./config.js";
 import { SwarmManager } from "./swarm/swarm-manager.js";
 import { SwarmWebSocketServer } from "./ws/server.js";
+
+const backendRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repoRoot = resolve(backendRoot, "..", "..");
+loadDotenv({ path: resolve(repoRoot, ".env") });
 
 async function main(): Promise<void> {
   const config = createConfig();
