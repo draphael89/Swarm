@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Check,
@@ -52,13 +52,33 @@ export interface SettingsEnvVariable {
   maskedValue?: string
 }
 
-type SettingsAuthProviderId = 'anthropic' | 'openai'
+type SettingsAuthProviderId = 'anthropic' | 'openai-codex'
 
 interface SettingsAuthProvider {
   provider: SettingsAuthProviderId
   configured: boolean
   authType?: 'api_key' | 'oauth' | 'unknown'
   maskedValue?: string
+}
+
+type SettingsAuthOAuthFlowStatus =
+  | 'idle'
+  | 'starting'
+  | 'waiting_for_auth'
+  | 'waiting_for_code'
+  | 'complete'
+  | 'error'
+
+interface SettingsAuthOAuthFlowState {
+  status: SettingsAuthOAuthFlowStatus
+  authUrl?: string
+  instructions?: string
+  promptMessage?: string
+  promptPlaceholder?: string
+  progressMessage?: string
+  errorMessage?: string
+  codeValue: string
+  isSubmittingCode: boolean
 }
 
 interface SlackSettingsConfig {
@@ -128,15 +148,21 @@ const SETTINGS_AUTH_PROVIDER_META: Record<
     placeholder: 'sk-ant-...',
     helpUrl: 'https://console.anthropic.com/settings/keys',
   },
-  openai: {
-    label: 'OpenAI API key',
+  'openai-codex': {
+    label: 'OpenAI / Codex API key',
     description: 'Stored as openai-codex credentials for pi-codex runtime sessions.',
     placeholder: 'sk-...',
     helpUrl: 'https://platform.openai.com/api-keys',
   },
 }
 
-const SETTINGS_AUTH_PROVIDER_ORDER: SettingsAuthProviderId[] = ['anthropic', 'openai']
+const SETTINGS_AUTH_PROVIDER_ORDER: SettingsAuthProviderId[] = ['anthropic', 'openai-codex']
+
+const DEFAULT_SETTINGS_AUTH_OAUTH_FLOW_STATE: SettingsAuthOAuthFlowState = {
+  status: 'idle',
+  codeValue: '',
+  isSubmittingCode: false,
+}
 
 /* ------------------------------------------------------------------ */
 /*  API helpers                                                       */
@@ -168,18 +194,41 @@ function isSettingsEnvVariable(value: unknown): value is SettingsEnvVariable {
   )
 }
 
-function isSettingsAuthProvider(value: unknown): value is SettingsAuthProvider {
-  if (!value || typeof value !== 'object') return false
-  const provider = value as Partial<SettingsAuthProvider>
+function normalizeSettingsAuthProviderId(value: unknown): SettingsAuthProviderId | undefined {
+  if (value === 'anthropic') return 'anthropic'
+  if (value === 'openai' || value === 'openai-codex') return 'openai-codex'
+  return undefined
+}
 
-  return (
-    (provider.provider === 'anthropic' || provider.provider === 'openai') &&
-    typeof provider.configured === 'boolean' &&
-    (provider.authType === undefined ||
-      provider.authType === 'api_key' ||
-      provider.authType === 'oauth' ||
-      provider.authType === 'unknown')
-  )
+function parseSettingsAuthProvider(value: unknown): SettingsAuthProvider | null {
+  if (!value || typeof value !== 'object') return null
+  const provider = value as {
+    provider?: unknown
+    configured?: unknown
+    authType?: unknown
+    maskedValue?: unknown
+  }
+
+  const providerId = normalizeSettingsAuthProviderId(provider.provider)
+  if (!providerId || typeof provider.configured !== 'boolean') {
+    return null
+  }
+
+  if (
+    provider.authType !== undefined &&
+    provider.authType !== 'api_key' &&
+    provider.authType !== 'oauth' &&
+    provider.authType !== 'unknown'
+  ) {
+    return null
+  }
+
+  return {
+    provider: providerId,
+    configured: provider.configured,
+    authType: provider.authType,
+    maskedValue: typeof provider.maskedValue === 'string' ? provider.maskedValue : undefined,
+  }
 }
 
 function isSlackSettingsConfig(value: unknown): value is SlackSettingsConfig {
@@ -273,7 +322,9 @@ async function fetchSettingsAuthProviders(wsUrl: string): Promise<SettingsAuthPr
   const payload = (await response.json()) as { providers?: unknown }
   if (!payload || !Array.isArray(payload.providers)) return []
 
-  const parsed = payload.providers.filter(isSettingsAuthProvider)
+  const parsed = payload.providers
+    .map((value) => parseSettingsAuthProvider(value))
+    .filter((value): value is SettingsAuthProvider => value !== null)
   const configuredByProvider = new Map(parsed.map((entry) => [entry.provider, entry]))
 
   return SETTINGS_AUTH_PROVIDER_ORDER.map(
@@ -301,6 +352,210 @@ async function updateSettingsAuthProviders(wsUrl: string, values: Partial<Record
 async function deleteSettingsAuthProvider(wsUrl: string, provider: SettingsAuthProviderId): Promise<void> {
   const endpoint = resolveApiEndpoint(wsUrl, `/api/settings/auth/${encodeURIComponent(provider)}`)
   const response = await fetch(endpoint, { method: 'DELETE' })
+  if (!response.ok) {
+    throw new Error(await readApiError(response))
+  }
+}
+
+interface SettingsAuthOAuthAuthUrlEvent {
+  url: string
+  instructions?: string
+}
+
+interface SettingsAuthOAuthPromptEvent {
+  message: string
+  placeholder?: string
+}
+
+interface SettingsAuthOAuthProgressEvent {
+  message: string
+}
+
+interface SettingsAuthOAuthCompleteEvent {
+  provider: SettingsAuthProviderId
+  status: 'connected'
+}
+
+interface SettingsAuthOAuthStreamHandlers {
+  onAuthUrl: (event: SettingsAuthOAuthAuthUrlEvent) => void
+  onPrompt: (event: SettingsAuthOAuthPromptEvent) => void
+  onProgress: (event: SettingsAuthOAuthProgressEvent) => void
+  onComplete: (event: SettingsAuthOAuthCompleteEvent) => void
+  onError: (message: string) => void
+}
+
+function parseSettingsAuthOAuthEventData(rawData: string): Record<string, unknown> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawData)
+  } catch {
+    throw new Error('Invalid OAuth event payload received from backend.')
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Invalid OAuth event payload received from backend.')
+  }
+
+  return parsed as Record<string, unknown>
+}
+
+function createIdleSettingsAuthOAuthFlowState(): SettingsAuthOAuthFlowState {
+  return {
+    ...DEFAULT_SETTINGS_AUTH_OAUTH_FLOW_STATE,
+  }
+}
+
+async function startSettingsAuthOAuthLoginStream(
+  wsUrl: string,
+  provider: SettingsAuthProviderId,
+  handlers: SettingsAuthOAuthStreamHandlers,
+  signal: AbortSignal,
+): Promise<void> {
+  const endpoint = resolveApiEndpoint(wsUrl, `/api/settings/auth/login/${encodeURIComponent(provider)}`)
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    signal,
+  })
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response))
+  }
+
+  if (!response.body) {
+    throw new Error('OAuth login stream is unavailable.')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let lineBuffer = ''
+  let eventName = 'message'
+  let eventDataLines: string[] = []
+
+  const flushEvent = (): void => {
+    if (eventDataLines.length === 0) {
+      eventName = 'message'
+      return
+    }
+
+    const rawData = eventDataLines.join('\n')
+    eventDataLines = []
+
+    if (eventName === 'auth_url') {
+      const payload = parseSettingsAuthOAuthEventData(rawData)
+      if (typeof payload.url !== 'string' || !payload.url.trim()) {
+        throw new Error('OAuth auth_url event is missing a URL.')
+      }
+
+      handlers.onAuthUrl({
+        url: payload.url,
+        instructions: typeof payload.instructions === 'string' ? payload.instructions : undefined,
+      })
+      eventName = 'message'
+      return
+    }
+
+    if (eventName === 'prompt') {
+      const payload = parseSettingsAuthOAuthEventData(rawData)
+      if (typeof payload.message !== 'string' || !payload.message.trim()) {
+        throw new Error('OAuth prompt event is missing a message.')
+      }
+
+      handlers.onPrompt({
+        message: payload.message,
+        placeholder: typeof payload.placeholder === 'string' ? payload.placeholder : undefined,
+      })
+      eventName = 'message'
+      return
+    }
+
+    if (eventName === 'progress') {
+      const payload = parseSettingsAuthOAuthEventData(rawData)
+      if (typeof payload.message === 'string' && payload.message.trim()) {
+        handlers.onProgress({ message: payload.message })
+      }
+      eventName = 'message'
+      return
+    }
+
+    if (eventName === 'complete') {
+      const payload = parseSettingsAuthOAuthEventData(rawData)
+      const providerId = normalizeSettingsAuthProviderId(payload.provider)
+      if (!providerId || payload.status !== 'connected') {
+        throw new Error('OAuth complete event payload is invalid.')
+      }
+
+      handlers.onComplete({
+        provider: providerId,
+        status: 'connected',
+      })
+      eventName = 'message'
+      return
+    }
+
+    if (eventName === 'error') {
+      const payload = parseSettingsAuthOAuthEventData(rawData)
+      const message =
+        typeof payload.message === 'string' && payload.message.trim()
+          ? payload.message
+          : 'OAuth login failed.'
+      handlers.onError(message)
+      eventName = 'message'
+      return
+    }
+
+    eventName = 'message'
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+
+    lineBuffer += decoder.decode(value, { stream: true })
+
+    let newlineIndex = lineBuffer.indexOf('\n')
+    while (newlineIndex >= 0) {
+      let line = lineBuffer.slice(0, newlineIndex)
+      lineBuffer = lineBuffer.slice(newlineIndex + 1)
+
+      if (line.endsWith('\r')) {
+        line = line.slice(0, -1)
+      }
+
+      if (!line) {
+        flushEvent()
+      } else if (line.startsWith(':')) {
+        // Ignore comments/keepalive markers.
+      } else if (line.startsWith('event:')) {
+        eventName = line.slice('event:'.length).trim()
+      } else if (line.startsWith('data:')) {
+        eventDataLines.push(line.slice('data:'.length).trimStart())
+      }
+
+      newlineIndex = lineBuffer.indexOf('\n')
+    }
+  }
+
+  flushEvent()
+}
+
+async function submitSettingsAuthOAuthPrompt(
+  wsUrl: string,
+  provider: SettingsAuthProviderId,
+  value: string,
+): Promise<void> {
+  const endpoint = resolveApiEndpoint(
+    wsUrl,
+    `/api/settings/auth/login/${encodeURIComponent(provider)}/respond`,
+  )
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ value }),
+  })
+
   if (!response.ok) {
     throw new Error(await readApiError(response))
   }
@@ -526,10 +781,15 @@ function AuthProviderRow({
   isRevealed,
   isSaving,
   isDeleting,
+  oauthFlow,
   onDraftChange,
   onToggleReveal,
   onSave,
   onDelete,
+  onStartOAuth,
+  onOAuthCodeChange,
+  onSubmitOAuthCode,
+  onResetOAuth,
 }: {
   provider: SettingsAuthProviderId
   authStatus: SettingsAuthProvider
@@ -537,13 +797,22 @@ function AuthProviderRow({
   isRevealed: boolean
   isSaving: boolean
   isDeleting: boolean
+  oauthFlow: SettingsAuthOAuthFlowState
   onDraftChange: (value: string) => void
   onToggleReveal: () => void
   onSave: () => void
   onDelete: () => void
+  onStartOAuth: () => void
+  onOAuthCodeChange: (value: string) => void
+  onSubmitOAuthCode: () => void
+  onResetOAuth: () => void
 }) {
   const metadata = SETTINGS_AUTH_PROVIDER_META[provider]
   const busy = isSaving || isDeleting
+  const oauthInProgress =
+    oauthFlow.status === 'starting' ||
+    oauthFlow.status === 'waiting_for_auth' ||
+    oauthFlow.status === 'waiting_for_code'
 
   return (
     <div className="rounded-lg border border-border bg-card/50 p-4 transition-colors hover:bg-card/80">
@@ -623,6 +892,113 @@ function AuthProviderRow({
             {isDeleting ? 'Removing' : 'Remove'}
           </Button>
         ) : null}
+      </div>
+
+      <div className="mt-4">
+        <Separator className="mb-3" />
+
+        <div className="space-y-2 rounded-md border border-border/70 bg-background/40 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-foreground">OAuth login</p>
+              <p className="text-[11px] text-muted-foreground">
+                Authorize in your browser and store refresh/access tokens automatically.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {oauthFlow.status === 'complete' ? (
+                <Badge
+                  variant="outline"
+                  className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                >
+                  <Check className="size-3" />
+                  Connected
+                </Badge>
+              ) : null}
+
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onStartOAuth}
+                disabled={busy || oauthInProgress || oauthFlow.isSubmittingCode}
+                className="gap-1.5"
+              >
+                {oauthInProgress ? <Loader2 className="size-3.5 animate-spin" /> : <Plug className="size-3.5" />}
+                {oauthInProgress ? 'Authorizing...' : 'Login with OAuth'}
+              </Button>
+            </div>
+          </div>
+
+          {oauthFlow.authUrl ? (
+            <a
+              href={oauthFlow.authUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 rounded-md border border-border/70 bg-muted/30 px-2 py-1 text-[11px] text-primary hover:bg-muted/50"
+            >
+              Open authorization URL
+              <ExternalLink className="size-3" />
+            </a>
+          ) : null}
+
+          {oauthFlow.instructions ? (
+            <p className="text-[11px] text-muted-foreground">{oauthFlow.instructions}</p>
+          ) : null}
+
+          {oauthFlow.progressMessage ? (
+            <p className="text-[11px] text-muted-foreground">{oauthFlow.progressMessage}</p>
+          ) : null}
+
+          {oauthFlow.status === 'waiting_for_code' ? (
+            <div className="space-y-2">
+              <p className="text-[11px] text-muted-foreground">
+                {oauthFlow.promptMessage ?? 'Paste the authorization code to continue.'}
+              </p>
+
+              <div className="flex items-center gap-2">
+                <Input
+                  type="text"
+                  placeholder={oauthFlow.promptPlaceholder ?? 'Paste authorization code or URL'}
+                  value={oauthFlow.codeValue}
+                  onChange={(event) => onOAuthCodeChange(event.target.value)}
+                  disabled={busy || oauthFlow.isSubmittingCode}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="font-mono text-xs"
+                />
+
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={onSubmitOAuthCode}
+                  disabled={!oauthFlow.codeValue.trim() || busy || oauthFlow.isSubmittingCode}
+                  className="gap-1.5"
+                >
+                  {oauthFlow.isSubmittingCode ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Save className="size-3.5" />
+                  )}
+                  {oauthFlow.isSubmittingCode ? 'Submitting...' : 'Submit'}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {oauthFlow.errorMessage ? (
+            <p className="text-[11px] text-destructive">{oauthFlow.errorMessage}</p>
+          ) : null}
+
+          {(oauthFlow.status === 'complete' || oauthFlow.status === 'error') && !oauthInProgress ? (
+            <div className="flex justify-end">
+              <Button type="button" variant="ghost" size="sm" onClick={onResetOAuth}>
+                Clear
+              </Button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   )
@@ -752,6 +1128,12 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
   const [authProviders, setAuthProviders] = useState<SettingsAuthProvider[]>([])
   const [authDraftByProvider, setAuthDraftByProvider] = useState<Partial<Record<SettingsAuthProviderId, string>>>({})
   const [authRevealByProvider, setAuthRevealByProvider] = useState<Partial<Record<SettingsAuthProviderId, boolean>>>({})
+  const [oauthFlowByProvider, setOauthFlowByProvider] = useState<
+    Partial<Record<SettingsAuthProviderId, SettingsAuthOAuthFlowState>>
+  >({})
+  const oauthAbortControllerByProviderRef = useRef<
+    Partial<Record<SettingsAuthProviderId, AbortController>>
+  >({})
 
   const [slackConfig, setSlackConfig] = useState<SlackSettingsConfig | null>(null)
   const [slackDraft, setSlackDraft] = useState<SlackDraft | null>(null)
@@ -832,6 +1214,22 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
     void Promise.all([loadVariables(), loadSlack(), loadAuth()])
   }, [open, loadVariables, loadSlack, loadAuth])
 
+  const abortAllOAuthLoginFlows = useCallback(() => {
+    for (const provider of SETTINGS_AUTH_PROVIDER_ORDER) {
+      const controller = oauthAbortControllerByProviderRef.current[provider]
+      if (controller) {
+        controller.abort()
+      }
+    }
+    oauthAbortControllerByProviderRef.current = {}
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      abortAllOAuthLoginFlows()
+    }
+  }, [abortAllOAuthLoginFlows])
+
   const handleOpenChange = (next: boolean) => {
     if (
       !next &&
@@ -847,6 +1245,8 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
     }
 
     if (!next) {
+      abortAllOAuthLoginFlows()
+      setOauthFlowByProvider({})
       setAuthError(null)
       setAuthSuccess(null)
       setError(null)
@@ -935,6 +1335,195 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
     } finally {
       setDeletingAuthProvider(null)
     }
+  }
+
+  const handleStartOAuth = async (provider: SettingsAuthProviderId) => {
+    const existingController = oauthAbortControllerByProviderRef.current[provider]
+    if (existingController) {
+      existingController.abort()
+    }
+
+    const controller = new AbortController()
+    oauthAbortControllerByProviderRef.current[provider] = controller
+
+    setAuthError(null)
+    setAuthSuccess(null)
+    setOauthFlowByProvider((prev) => ({
+      ...prev,
+      [provider]: {
+        ...createIdleSettingsAuthOAuthFlowState(),
+        status: 'starting',
+        progressMessage: 'Waiting for authorization instructions...',
+      },
+    }))
+
+    let completed = false
+
+    try {
+      await startSettingsAuthOAuthLoginStream(
+        wsUrl,
+        provider,
+        {
+          onAuthUrl: (event) => {
+            setOauthFlowByProvider((prev) => {
+              const current = prev[provider] ?? createIdleSettingsAuthOAuthFlowState()
+              return {
+                ...prev,
+                [provider]: {
+                  ...current,
+                  status: current.status === 'waiting_for_code' ? 'waiting_for_code' : 'waiting_for_auth',
+                  authUrl: event.url,
+                  instructions: event.instructions,
+                  errorMessage: undefined,
+                },
+              }
+            })
+          },
+          onPrompt: (event) => {
+            setOauthFlowByProvider((prev) => {
+              const current = prev[provider] ?? createIdleSettingsAuthOAuthFlowState()
+              return {
+                ...prev,
+                [provider]: {
+                  ...current,
+                  status: 'waiting_for_code',
+                  promptMessage: event.message,
+                  promptPlaceholder: event.placeholder,
+                  errorMessage: undefined,
+                },
+              }
+            })
+          },
+          onProgress: (event) => {
+            setOauthFlowByProvider((prev) => {
+              const current = prev[provider] ?? createIdleSettingsAuthOAuthFlowState()
+              return {
+                ...prev,
+                [provider]: {
+                  ...current,
+                  status: current.status === 'waiting_for_code' ? 'waiting_for_code' : 'waiting_for_auth',
+                  progressMessage: event.message,
+                },
+              }
+            })
+          },
+          onComplete: () => {
+            completed = true
+            setAuthError(null)
+            setAuthSuccess(`${SETTINGS_AUTH_PROVIDER_META[provider].label} connected via OAuth.`)
+            setOauthFlowByProvider((prev) => ({
+              ...prev,
+              [provider]: {
+                ...(prev[provider] ?? createIdleSettingsAuthOAuthFlowState()),
+                status: 'complete',
+                errorMessage: undefined,
+                progressMessage: 'Connected.',
+                isSubmittingCode: false,
+                codeValue: '',
+              },
+            }))
+          },
+          onError: (message) => {
+            setAuthError(message)
+            setOauthFlowByProvider((prev) => ({
+              ...prev,
+              [provider]: {
+                ...(prev[provider] ?? createIdleSettingsAuthOAuthFlowState()),
+                status: 'error',
+                errorMessage: message,
+                isSubmittingCode: false,
+              },
+            }))
+          },
+        },
+        controller.signal,
+      )
+
+      if (!controller.signal.aborted && completed) {
+        await loadAuth()
+      }
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return
+      }
+
+      const message = toErrorMessage(error)
+      setAuthError(message)
+      setOauthFlowByProvider((prev) => ({
+        ...prev,
+        [provider]: {
+          ...(prev[provider] ?? createIdleSettingsAuthOAuthFlowState()),
+          status: 'error',
+          errorMessage: message,
+          isSubmittingCode: false,
+        },
+      }))
+    } finally {
+      if (oauthAbortControllerByProviderRef.current[provider] === controller) {
+        delete oauthAbortControllerByProviderRef.current[provider]
+      }
+    }
+  }
+
+  const handleSubmitOAuthPrompt = async (provider: SettingsAuthProviderId) => {
+    const flow = oauthFlowByProvider[provider] ?? createIdleSettingsAuthOAuthFlowState()
+    const value = flow.codeValue.trim()
+
+    if (!value) {
+      setAuthError('Enter the authorization code before submitting.')
+      return
+    }
+
+    setAuthError(null)
+    setAuthSuccess(null)
+    setOauthFlowByProvider((prev) => ({
+      ...prev,
+      [provider]: {
+        ...(prev[provider] ?? createIdleSettingsAuthOAuthFlowState()),
+        isSubmittingCode: true,
+        errorMessage: undefined,
+      },
+    }))
+
+    try {
+      await submitSettingsAuthOAuthPrompt(wsUrl, provider, value)
+      setOauthFlowByProvider((prev) => ({
+        ...prev,
+        [provider]: {
+          ...(prev[provider] ?? createIdleSettingsAuthOAuthFlowState()),
+          status: 'waiting_for_auth',
+          codeValue: '',
+          isSubmittingCode: false,
+          progressMessage: 'Authorization code submitted. Waiting for completion...',
+          errorMessage: undefined,
+        },
+      }))
+    } catch (error) {
+      const message = toErrorMessage(error)
+      setAuthError(message)
+      setOauthFlowByProvider((prev) => ({
+        ...prev,
+        [provider]: {
+          ...(prev[provider] ?? createIdleSettingsAuthOAuthFlowState()),
+          status: 'waiting_for_code',
+          isSubmittingCode: false,
+          errorMessage: message,
+        },
+      }))
+    }
+  }
+
+  const handleResetOAuthFlow = (provider: SettingsAuthProviderId) => {
+    const controller = oauthAbortControllerByProviderRef.current[provider]
+    if (controller) {
+      controller.abort()
+      delete oauthAbortControllerByProviderRef.current[provider]
+    }
+
+    setOauthFlowByProvider((prev) => ({
+      ...prev,
+      [provider]: createIdleSettingsAuthOAuthFlowState(),
+    }))
   }
 
   const handleSaveSlack = async () => {
@@ -1443,6 +2032,7 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
                         isRevealed={authRevealByProvider[provider] === true}
                         isSaving={savingAuthProvider === provider}
                         isDeleting={deletingAuthProvider === provider}
+                        oauthFlow={oauthFlowByProvider[provider] ?? DEFAULT_SETTINGS_AUTH_OAUTH_FLOW_STATE}
                         onDraftChange={(value) => {
                           setAuthDraftByProvider((prev) => ({ ...prev, [provider]: value }))
                           setAuthError(null)
@@ -1453,6 +2043,20 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
                         }
                         onSave={() => void handleSaveAuth(provider)}
                         onDelete={() => void handleDeleteAuth(provider)}
+                        onStartOAuth={() => void handleStartOAuth(provider)}
+                        onOAuthCodeChange={(value) => {
+                          setOauthFlowByProvider((prev) => ({
+                            ...prev,
+                            [provider]: {
+                              ...(prev[provider] ?? createIdleSettingsAuthOAuthFlowState()),
+                              codeValue: value,
+                              errorMessage: undefined,
+                            },
+                          }))
+                          setAuthError(null)
+                        }}
+                        onSubmitOAuthCode={() => void handleSubmitOAuthPrompt(provider)}
+                        onResetOAuth={() => handleResetOAuthFlow(provider)}
                       />
                     )
                   })}
