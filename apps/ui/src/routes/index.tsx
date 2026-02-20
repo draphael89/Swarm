@@ -14,6 +14,13 @@ import { ChatHeader } from '@/components/chat/ChatHeader'
 import { MessageInput, type MessageInputHandle } from '@/components/chat/MessageInput'
 import { MessageList } from '@/components/chat/MessageList'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { chooseFallbackAgentId } from '@/lib/agent-hierarchy'
 import { ManagerWsClient, type ManagerWsState } from '@/lib/ws-client'
@@ -361,101 +368,106 @@ export function IndexPage() {
         </div>
       </div>
 
-      <OverlayDialog
+      <Dialog
         open={isCreateManagerDialogOpen}
-        title="Create manager"
-        description="Create a new manager with a name and working directory."
-        onClose={() => {
-          if (isCreatingManager) return
-          setIsCreateManagerDialogOpen(false)
+        onOpenChange={(open) => {
+          if (!open && isCreatingManager) return
+          setIsCreateManagerDialogOpen(open)
         }}
       >
-        <form className="space-y-4" onSubmit={handleCreateManager}>
-          <div className="space-y-2">
-            <label htmlFor="manager-name" className="text-xs font-medium text-muted-foreground">Name</label>
-            <Input
-              id="manager-name"
-              placeholder="release-manager"
-              value={newManagerName}
-              onChange={(event) => setNewManagerName(event.target.value)}
-              autoFocus
-            />
-          </div>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Create manager</DialogTitle>
+            <DialogDescription>Create a new manager with a name and working directory.</DialogDescription>
+          </DialogHeader>
 
-          <div className="space-y-2">
-            <label htmlFor="manager-cwd" className="text-xs font-medium text-muted-foreground">Working directory</label>
-            <div className="flex items-center gap-2">
+          <form className="space-y-4" onSubmit={handleCreateManager}>
+            <div className="space-y-2">
+              <label htmlFor="manager-name" className="text-xs font-medium text-muted-foreground">Name</label>
               <Input
-                id="manager-cwd"
-                placeholder="/path/to/project"
-                value={newManagerCwd}
+                id="manager-name"
+                placeholder="release-manager"
+                value={newManagerName}
+                onChange={(event) => setNewManagerName(event.target.value)}
+                autoFocus
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="manager-cwd" className="text-xs font-medium text-muted-foreground">Working directory</label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="manager-cwd"
+                  placeholder="/path/to/project"
+                  value={newManagerCwd}
+                  onChange={(event) => {
+                    setNewManagerCwd(event.target.value)
+                    setCreateManagerError(null)
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleBrowseDirectory()}
+                  disabled={isPickingDirectory || isCreatingManager}
+                >
+                  {isPickingDirectory ? 'Browsing...' : 'Browse'}
+                </Button>
+              </div>
+
+              {browseError ? (
+                <p className="text-xs text-destructive">{browseError}</p>
+              ) : null}
+
+              <p className="text-[11px] text-muted-foreground">
+                Use Browse to open the native folder picker, or enter a path manually.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="manager-model" className="text-xs font-medium text-muted-foreground">Model</label>
+              <select
+                id="manager-model"
+                value={newManagerModel}
                 onChange={(event) => {
-                  setNewManagerCwd(event.target.value)
+                  setNewManagerModel(event.target.value as ManagerModelPreset)
                   setCreateManagerError(null)
                 }}
-              />
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isCreatingManager || isPickingDirectory}
+              >
+                {MANAGER_MODEL_PRESETS.map((modelPreset) => (
+                  <option key={modelPreset} value={modelPreset}>
+                    {modelPreset}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {createManagerError ? (
+              <p className="text-xs text-destructive">{createManagerError}</p>
+            ) : null}
+
+            <div className="flex items-center justify-end gap-2">
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => void handleBrowseDirectory()}
-                disabled={isPickingDirectory || isCreatingManager}
+                onClick={() => setIsCreateManagerDialogOpen(false)}
+                disabled={isCreatingManager}
               >
-                {isPickingDirectory ? 'Browsing...' : 'Browse'}
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isCreatingManager || isPickingDirectory}>
+                {isCreatingManager
+                  ? isValidatingDirectory
+                    ? 'Validating...'
+                    : 'Creating...'
+                  : 'Create manager'}
               </Button>
             </div>
-
-            {browseError ? (
-              <p className="text-xs text-destructive">{browseError}</p>
-            ) : null}
-
-            <p className="text-[11px] text-muted-foreground">
-              Use Browse to open the native folder picker, or enter a path manually.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="manager-model" className="text-xs font-medium text-muted-foreground">Model</label>
-            <select
-              id="manager-model"
-              value={newManagerModel}
-              onChange={(event) => {
-                setNewManagerModel(event.target.value as ManagerModelPreset)
-                setCreateManagerError(null)
-              }}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isCreatingManager || isPickingDirectory}
-            >
-              {MANAGER_MODEL_PRESETS.map((modelPreset) => (
-                <option key={modelPreset} value={modelPreset}>
-                  {modelPreset}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {createManagerError ? (
-            <p className="text-xs text-destructive">{createManagerError}</p>
-          ) : null}
-
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setIsCreateManagerDialogOpen(false)}
-              disabled={isCreatingManager}
-            >
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isCreatingManager || isPickingDirectory}>
-              {isCreatingManager
-                ? isValidatingDirectory
-                  ? 'Validating...'
-                  : 'Creating...'
-                : 'Create manager'}
-            </Button>
-          </div>
-        </form>
-      </OverlayDialog>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <OverlayDialog
         open={Boolean(managerToDelete)}

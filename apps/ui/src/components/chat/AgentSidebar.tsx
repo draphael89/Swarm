@@ -372,17 +372,6 @@ export function AgentSidebar({
         )}
       </div>
 
-      <div className="flex h-10 items-center px-2 shadow-[inset_0_1px_0_var(--sidebar-border)]">
-        <div
-          className={cn(
-            'flex h-8 w-full items-center gap-2 rounded-md px-2 text-xs',
-            connected ? 'text-muted-foreground' : 'bg-sidebar-accent/70 text-sidebar-accent-foreground',
-          )}
-        >
-          <CircleDashed className={cn('h-3 w-3 shrink-0', connected ? 'opacity-60' : 'animate-spin')} />
-          <span className="truncate">{connected ? 'Realtime connected' : 'Reconnecting to manager runtime'}</span>
-        </div>
-      </div>
     </aside>
   )
 }
