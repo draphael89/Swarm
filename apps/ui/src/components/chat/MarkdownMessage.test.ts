@@ -38,4 +38,19 @@ describe('MarkdownMessage', () => {
     expect(html).not.toContain('href="javascript:alert(1)"')
     expect(html).toContain('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;')
   })
+
+  it('renders artifact links as clickable artifact cards when callback is provided', () => {
+    const content = '[artifact:/Users/example/worktrees/swarm/README.md]'
+
+    const html = renderToStaticMarkup(
+      createElement(MarkdownMessage, {
+        content,
+        onArtifactClick: () => {},
+      }),
+    )
+
+    expect(html).toContain('data-artifact-card="true"')
+    expect(html).toContain('README.md')
+    expect(html).toContain('/Users/example/worktrees/swarm/README.md')
+  })
 })

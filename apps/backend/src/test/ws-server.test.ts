@@ -244,6 +244,88 @@ describe('SwarmWebSocketServer', () => {
     }
   })
 
+  it('reads allowed files through POST /api/read-file', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const artifactPath = join(config.paths.rootDir, 'artifact.md')
+    const artifactContent = '# Artifact\n\nHello from Swarm.\n'
+    await writeFile(artifactPath, artifactContent, 'utf8')
+
+    try {
+      const response = await fetch(`http://${config.host}:${config.port}/api/read-file`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          path: artifactPath,
+        }),
+      })
+
+      expect(response.status).toBe(200)
+      const payload = (await response.json()) as { path: string; content: string }
+
+      expect(payload.path).toBe(artifactPath)
+      expect(payload.content).toBe(artifactContent)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('rejects disallowed files through POST /api/read-file', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const outsideDir = await mkdtemp(join(tmpdir(), 'swarm-ws-outside-file-'))
+    const outsideFile = join(outsideDir, 'outside.txt')
+    await writeFile(outsideFile, 'outside', 'utf8')
+
+    try {
+      const response = await fetch(`http://${config.host}:${config.port}/api/read-file`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          path: outsideFile,
+        }),
+      })
+
+      expect(response.status).toBe(403)
+
+      const payload = (await response.json()) as { error: string }
+      expect(payload.error).toContain('outside allowed roots')
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true })
+      await server.stop()
+    }
+  })
+
   it('accepts attachment-only user messages and broadcasts attachments', async () => {
     const port = await getAvailablePort()
     const config = await makeTempConfig(port)

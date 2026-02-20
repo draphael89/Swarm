@@ -1,15 +1,24 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, type RawData, WebSocket } from "ws";
 import type { ClientCommand, ServerEvent } from "../protocol/ws-types.js";
+import {
+  isPathWithinRoots,
+  normalizeAllowlistRoots,
+  resolveDirectoryPath
+} from "../swarm/cwd-policy.js";
 import { describeSwarmModelPresets, isSwarmModelPreset } from "../swarm/model-presets.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
 
 const REBOOT_ENDPOINT_PATH = "/api/reboot";
+const READ_FILE_ENDPOINT_PATH = "/api/read-file";
 const RESTART_SIGNAL: NodeJS.Signals = "SIGUSR1";
+const MAX_READ_FILE_BODY_BYTES = 64 * 1024;
+const MAX_READ_FILE_CONTENT_BYTES = 2 * 1024 * 1024;
 
 export class SwarmWebSocketServer {
   private readonly swarmManager: SwarmManager;
@@ -142,27 +151,36 @@ export class SwarmWebSocketServer {
       `http://${request.headers.host ?? `${this.host}:${this.port}`}`
     );
 
-    if (requestUrl.pathname !== REBOOT_ENDPOINT_PATH) {
-      response.statusCode = 404;
-      response.end("Not Found");
+    if (requestUrl.pathname === REBOOT_ENDPOINT_PATH) {
+      this.handleRebootHttpRequest(request, response);
       return;
     }
 
+    if (requestUrl.pathname === READ_FILE_ENDPOINT_PATH) {
+      void this.handleReadFileHttpRequest(request, response);
+      return;
+    }
+
+    response.statusCode = 404;
+    response.end("Not Found");
+  }
+
+  private handleRebootHttpRequest(request: IncomingMessage, response: ServerResponse): void {
     if (request.method === "OPTIONS") {
-      this.applyRebootCorsHeaders(request, response);
+      this.applyCorsHeaders(request, response, "POST, OPTIONS");
       response.statusCode = 204;
       response.end();
       return;
     }
 
     if (request.method !== "POST") {
-      this.applyRebootCorsHeaders(request, response);
+      this.applyCorsHeaders(request, response, "POST, OPTIONS");
       response.setHeader("Allow", "POST, OPTIONS");
       this.sendJson(response, 405, { error: "Method Not Allowed" });
       return;
     }
 
-    this.applyRebootCorsHeaders(request, response);
+    this.applyCorsHeaders(request, response, "POST, OPTIONS");
     this.sendJson(response, 200, { ok: true });
 
     const rebootTimer = setTimeout(() => {
@@ -171,13 +189,126 @@ export class SwarmWebSocketServer {
     rebootTimer.unref();
   }
 
-  private applyRebootCorsHeaders(request: IncomingMessage, response: ServerResponse): void {
+  private async handleReadFileHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    if (request.method === "OPTIONS") {
+      this.applyCorsHeaders(request, response, "POST, OPTIONS");
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    if (request.method !== "POST") {
+      this.applyCorsHeaders(request, response, "POST, OPTIONS");
+      response.setHeader("Allow", "POST, OPTIONS");
+      this.sendJson(response, 405, { error: "Method Not Allowed" });
+      return;
+    }
+
+    this.applyCorsHeaders(request, response, "POST, OPTIONS");
+
+    try {
+      const payload = await this.parseJsonBody(request, MAX_READ_FILE_BODY_BYTES);
+      if (!payload || typeof payload !== "object") {
+        this.sendJson(response, 400, { error: "Request body must be a JSON object." });
+        return;
+      }
+
+      const requestedPath = (payload as { path?: unknown }).path;
+      if (typeof requestedPath !== "string" || requestedPath.trim().length === 0) {
+        this.sendJson(response, 400, { error: "path must be a non-empty string." });
+        return;
+      }
+
+      const config = this.swarmManager.getConfig();
+      const resolvedPath = resolveDirectoryPath(requestedPath, config.paths.rootDir);
+      const allowedRoots = normalizeAllowlistRoots([
+        ...config.cwdAllowlistRoots,
+        config.paths.rootDir,
+        homedir()
+      ]);
+
+      if (!isPathWithinRoots(resolvedPath, allowedRoots)) {
+        this.sendJson(response, 403, { error: "Path is outside allowed roots." });
+        return;
+      }
+
+      let fileStats;
+      try {
+        fileStats = await stat(resolvedPath);
+      } catch {
+        this.sendJson(response, 404, { error: "File not found." });
+        return;
+      }
+
+      if (!fileStats.isFile()) {
+        this.sendJson(response, 400, { error: "Requested path must point to a file." });
+        return;
+      }
+
+      if (fileStats.size > MAX_READ_FILE_CONTENT_BYTES) {
+        this.sendJson(response, 413, {
+          error: `File is too large. Maximum supported size is ${MAX_READ_FILE_CONTENT_BYTES} bytes.`
+        });
+        return;
+      }
+
+      const content = await readFile(resolvedPath, "utf8");
+      this.sendJson(response, 200, {
+        path: resolvedPath,
+        content
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to read file.";
+
+      if (message.includes("Request body exceeds")) {
+        this.sendJson(response, 413, { error: message });
+        return;
+      }
+
+      if (message.includes("valid JSON")) {
+        this.sendJson(response, 400, { error: message });
+        return;
+      }
+
+      this.sendJson(response, 500, { error: message });
+    }
+  }
+
+  private applyCorsHeaders(request: IncomingMessage, response: ServerResponse, methods: string): void {
     const origin = typeof request.headers.origin === "string" ? request.headers.origin : "*";
 
     response.setHeader("Access-Control-Allow-Origin", origin);
     response.setHeader("Vary", "Origin");
-    response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    response.setHeader("Access-Control-Allow-Methods", methods);
     response.setHeader("Access-Control-Allow-Headers", "content-type");
+  }
+
+  private async parseJsonBody(request: IncomingMessage, maxBytes: number): Promise<unknown> {
+    const chunks: Buffer[] = [];
+    let byteLength = 0;
+
+    for await (const chunk of request) {
+      const buffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      byteLength += buffer.byteLength;
+
+      if (byteLength > maxBytes) {
+        throw new Error(`Request body exceeds ${maxBytes} bytes.`);
+      }
+
+      chunks.push(buffer);
+    }
+
+    if (chunks.length === 0) {
+      return {};
+    }
+
+    const rawBody = Buffer.concat(chunks).toString("utf8");
+
+    try {
+      return JSON.parse(rawBody);
+    } catch {
+      throw new Error("Request body must be valid JSON.");
+    }
   }
 
   private sendJson(response: ServerResponse, statusCode: number, body: Record<string, unknown>): void {
