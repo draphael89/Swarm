@@ -1,29 +1,64 @@
-import { CircleDashed, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import type { AgentStatus } from '@/lib/ws-types'
 
 interface ChatHeaderProps {
   connected: boolean
   activeAgentId: string | null
   activeAgentLabel: string
+  activeAgentStatus: AgentStatus | null
   showNewChat: boolean
   onNewChat: () => void
 }
 
-export function ChatHeader({ connected, activeAgentId, activeAgentLabel, showNewChat, onNewChat }: ChatHeaderProps) {
+function formatAgentStatus(status: AgentStatus | null): string {
+  if (!status) return 'Idle'
+
+  switch (status) {
+    case 'streaming':
+      return 'Streaming'
+    case 'idle':
+      return 'Idle'
+    case 'terminated':
+      return 'Terminated'
+    case 'stopped_on_restart':
+      return 'Stopped'
+  }
+}
+
+export function ChatHeader({
+  connected,
+  activeAgentId,
+  activeAgentLabel,
+  activeAgentStatus,
+  showNewChat,
+  onNewChat,
+}: ChatHeaderProps) {
+  const isStreaming = connected && activeAgentStatus === 'streaming'
+  const statusLabel = connected ? formatAgentStatus(activeAgentStatus) : 'Reconnecting'
+
   return (
     <header className="sticky top-0 z-10 flex h-[62px] w-full shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-border/80 bg-card/80 px-4 backdrop-blur">
       <div className="flex min-w-0 flex-1 items-center gap-3">
         <div
-          className={cn(
-            'inline-flex size-5 items-center justify-center rounded-full border',
-            connected
-              ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-              : 'border-amber-500/35 bg-amber-500/10 text-amber-700 dark:text-amber-400',
-          )}
-          aria-hidden="true"
+          className="relative inline-flex size-5 shrink-0 items-center justify-center"
+          aria-label={`Agent status: ${statusLabel.toLowerCase()}`}
         >
-          <CircleDashed className={cn('size-3', !connected && 'animate-spin')} />
+          <span
+            className={cn(
+              'absolute inline-flex size-4 rounded-full',
+              isStreaming ? 'animate-ping bg-emerald-500/45' : 'bg-transparent',
+            )}
+            aria-hidden="true"
+          />
+          <span
+            className={cn(
+              'relative inline-flex size-2.5 rounded-full',
+              isStreaming ? 'bg-emerald-500' : 'bg-muted-foreground/45',
+            )}
+            aria-hidden="true"
+          />
         </div>
 
         <div className="flex min-w-0 items-center gap-1.5">
@@ -37,7 +72,7 @@ export function ChatHeader({ connected, activeAgentId, activeAgentLabel, showNew
             ·
           </span>
           <span className="shrink-0 whitespace-nowrap text-xs font-mono text-muted-foreground">
-            {connected ? 'Connected' : 'Reconnecting'}
+            {statusLabel}
           </span>
         </div>
       </div>
