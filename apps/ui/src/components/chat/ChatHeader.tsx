@@ -26,17 +26,19 @@ export function ChatHeader({ connected, activeAgentId, activeAgentLabel, showNew
           <CircleDashed className={cn('size-3', !connected && 'animate-spin')} />
         </div>
 
-        <div className="min-w-0">
-          <h1 className="truncate text-sm font-bold text-foreground">{activeAgentLabel}</h1>
-          <div className="flex h-4 min-w-0 items-center gap-1.5 text-xs font-mono text-muted-foreground">
-            <span className="whitespace-nowrap">{connected ? 'Connected' : 'Reconnecting'}</span>
-            {activeAgentId ? (
-              <>
-                <span aria-hidden="true">·</span>
-                <span className="truncate">{activeAgentId}</span>
-              </>
-            ) : null}
-          </div>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <h1
+            className="min-w-0 truncate text-sm font-bold text-foreground"
+            title={activeAgentId ?? activeAgentLabel}
+          >
+            {activeAgentLabel}
+          </h1>
+          <span aria-hidden="true" className="shrink-0 text-muted-foreground">
+            ·
+          </span>
+          <span className="shrink-0 whitespace-nowrap text-xs font-mono text-muted-foreground">
+            {connected ? 'Connected' : 'Reconnecting'}
+          </span>
         </div>
       </div>
 

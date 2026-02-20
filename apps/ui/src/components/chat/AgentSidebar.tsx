@@ -1,4 +1,4 @@
-import { ChevronRight, CircleDashed, SquarePen, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, CircleDashed, SquarePen, Trash2, UserStar } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { buildManagerTreeRows } from '@/lib/agent-hierarchy'
 import { cn } from '@/lib/utils'
@@ -91,12 +91,14 @@ function AgentRow({
   isSelected,
   onSelect,
   className,
+  nameClassName,
 }: {
   agent: AgentDescriptor
   liveStatus: AgentLiveStatus
   isSelected: boolean
   onSelect: () => void
   className: string
+  nameClassName?: string
 }) {
   const title = agent.displayName || agent.agentId
   const isActive = liveStatus.status === 'streaming'
@@ -115,10 +117,10 @@ function AgentRow({
       )}
       title={title}
     >
-      <div className="flex min-w-0 items-center gap-1.5">
-        <span className="min-w-0 flex-1 truncate text-sm leading-5 font-medium">{title}</span>
-        <ProviderIcon provider={agent.model.provider} className="size-3 shrink-0 opacity-80" />
+      <div className="flex w-full min-w-0 items-center gap-1.5">
         <AgentActivitySlot isActive={isActive} isSelected={isSelected} />
+        <span className={cn('min-w-0 flex-1 truncate text-sm leading-5', nameClassName)}>{title}</span>
+        <ProviderIcon provider={agent.model.provider} className="size-3 shrink-0 opacity-80" />
       </div>
     </button>
   )
@@ -173,7 +175,7 @@ export function AgentSidebar({
 
   return (
     <aside className="flex w-[20rem] min-w-[20rem] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
-      <div className="mb-2 flex h-[55px] shrink-0 items-center gap-2 border-b border-sidebar-border px-2">
+      <div className="mb-2 flex h-[62px] shrink-0 items-center gap-2 border-b border-sidebar-border px-2">
         <button
           type="button"
           onClick={onAddManager}
@@ -226,6 +228,7 @@ export function AgentSidebar({
                       liveStatus={managerLiveStatus}
                       isSelected={managerIsSelected}
                       onSelect={() => onSelectAgent(manager.agentId)}
+                      nameClassName="font-semibold"
                       className="py-1.5 pl-7 pr-8"
                     />
 
@@ -240,10 +243,31 @@ export function AgentSidebar({
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
                       )}
                     >
-                      <ChevronRight
-                        aria-hidden="true"
-                        className={cn('size-3 transition-transform', !managerIsCollapsed && 'rotate-90')}
-                      />
+                      <span className="relative flex h-3.5 w-3.5 items-center justify-center">
+                        {managerIsCollapsed ? (
+                          <>
+                            <UserStar
+                              aria-hidden="true"
+                              className="size-3.5 opacity-70 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
+                            />
+                            <ChevronRight
+                              aria-hidden="true"
+                              className="absolute size-3 opacity-0 transition-opacity group-hover:opacity-70 group-focus-within:opacity-70"
+                            />
+                          </>
+                        ) : (
+                          <>
+                            <UserStar
+                              aria-hidden="true"
+                              className="size-3.5 opacity-70 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
+                            />
+                            <ChevronDown
+                              aria-hidden="true"
+                              className="absolute size-3 opacity-0 transition-opacity group-hover:opacity-70 group-focus-within:opacity-70"
+                            />
+                          </>
+                        )}
+                      </span>
                     </button>
 
                     <button
@@ -262,7 +286,7 @@ export function AgentSidebar({
                   </div>
 
                   {workers.length > 0 && !managerIsCollapsed ? (
-                    <ul className="ml-[13px] mt-0.5 space-y-0.5 border-l border-sidebar-border/80 pl-0">
+                    <ul className="ml-4 mt-0.5 space-y-0.5 border-l border-sidebar-border/80 pl-0">
                       {workers.map((worker) => {
                         const workerLiveStatus = getAgentLiveStatus(worker, statuses)
                         const workerIsSelected = selectedAgentId === worker.agentId
@@ -275,6 +299,7 @@ export function AgentSidebar({
                                 liveStatus={workerLiveStatus}
                                 isSelected={workerIsSelected}
                                 onSelect={() => onSelectAgent(worker.agentId)}
+                                nameClassName="font-normal"
                                 className="py-1.5 pl-3 pr-8"
                               />
 
@@ -319,7 +344,8 @@ export function AgentSidebar({
                             liveStatus={workerLiveStatus}
                             isSelected={workerIsSelected}
                             onSelect={() => onSelectAgent(worker.agentId)}
-                            className="py-1.5 pl-3 pr-8"
+                            nameClassName="font-normal"
+                            className="py-1.5 pl-7 pr-8"
                           />
 
                           <button
