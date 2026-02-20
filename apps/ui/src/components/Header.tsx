@@ -2,6 +2,8 @@ import { Link } from '@tanstack/react-router'
 
 import { useState } from 'react'
 import { Home, Menu, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 export default function Header() {
   const [isOpen, setIsOpen] = useState(false)
@@ -9,13 +11,16 @@ export default function Header() {
   return (
     <>
       <header className="p-4 flex items-center bg-gray-800 text-white shadow-lg">
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={() => setIsOpen(true)}
-          className="p-2 hover:bg-gray-700 rounded-lg transition-colors"
+          className="size-10 rounded-lg text-white hover:bg-gray-700 hover:text-white"
           aria-label="Open menu"
         >
           <Menu size={24} />
-        </button>
+        </Button>
         <h1 className="ml-4 text-xl font-semibold">
           <Link to="/">
             <img
@@ -34,33 +39,38 @@ export default function Header() {
       >
         <div className="flex items-center justify-between p-4 border-b border-gray-700">
           <h2 className="text-xl font-bold">Navigation</h2>
-          <button
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
             onClick={() => setIsOpen(false)}
-            className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+            className="size-10 rounded-lg text-white hover:bg-gray-800 hover:text-white"
             aria-label="Close menu"
           >
             <X size={24} />
-          </button>
+          </Button>
         </div>
 
-        <nav className="flex-1 p-4 overflow-y-auto">
-          <Link
-            to="/"
-            onClick={() => setIsOpen(false)}
-            className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800 transition-colors mb-2"
-            activeProps={{
-              className:
-                'flex items-center gap-3 p-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 transition-colors mb-2',
-            }}
-          >
-            <Home size={20} />
-            <span className="font-medium">Home</span>
-          </Link>
+        <ScrollArea className="flex-1">
+          <nav className="p-4">
+            <Link
+              to="/"
+              onClick={() => setIsOpen(false)}
+              className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800 transition-colors mb-2"
+              activeProps={{
+                className:
+                  'flex items-center gap-3 p-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 transition-colors mb-2',
+              }}
+            >
+              <Home size={20} />
+              <span className="font-medium">Home</span>
+            </Link>
 
-          {/* Demo Links Start */}
+            {/* Demo Links Start */}
 
-          {/* Demo Links End */}
-        </nav>
+            {/* Demo Links End */}
+          </nav>
+        </ScrollArea>
       </aside>
     </>
   )

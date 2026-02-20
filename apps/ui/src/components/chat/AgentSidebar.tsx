@@ -1,6 +1,8 @@
 import { ChevronDown, ChevronRight, CircleDashed, RotateCcw, Settings, SquarePen, Trash2, UserStar } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { buildManagerTreeRows } from '@/lib/agent-hierarchy'
 import { cn } from '@/lib/utils'
@@ -120,11 +122,12 @@ function AgentRow({
   const modelDescription = `${agent.model.provider}/${agent.model.modelId}`
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onSelect}
       className={cn(
-        'flex w-full items-center gap-2 rounded-md text-left transition-colors',
+        'h-auto w-full justify-start rounded-md p-0 text-left text-sm font-normal transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
         isSelected
           ? 'bg-sidebar-accent text-sidebar-accent-foreground'
@@ -167,7 +170,7 @@ function AgentRow({
           </Tooltip>
         </TooltipProvider>
       </div>
-    </button>
+    </Button>
   )
 }
 
@@ -223,16 +226,17 @@ export function AgentSidebar({
   return (
     <aside className="flex w-[20rem] min-w-[20rem] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="mb-2 flex h-[62px] shrink-0 items-center gap-2 border-b border-sidebar-border px-2">
-        <button
+        <Button
           type="button"
+          variant="ghost"
           onClick={onAddManager}
-          className="flex flex-1 items-center gap-2 rounded-md p-2 text-sm transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+          className="h-auto flex-1 items-center justify-start gap-2 rounded-md p-2 text-sm font-normal transition-colors hover:bg-sidebar-accent/50 focus-visible:ring-sidebar-ring/60"
           title="Create manager"
           aria-label="Add manager"
         >
           <SquarePen aria-hidden="true" className="h-4 w-4" />
           <span>New Manager</span>
-        </button>
+        </Button>
         <div className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium text-muted-foreground">
           <span
             className={cn(
@@ -249,13 +253,15 @@ export function AgentSidebar({
         <h2 className="text-xs font-semibold text-muted-foreground">Agents</h2>
       </div>
 
-      <div
-        className="flex-1 overflow-y-auto px-2 pb-2 [color-scheme:light] dark:[color-scheme:dark] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-sidebar-border [&::-webkit-scrollbar-thumb:hover]:bg-sidebar-border/80"
-        style={{
-          scrollbarWidth: 'thin',
-          scrollbarColor: 'var(--sidebar-border) transparent',
-        }}
+      <ScrollArea
+        className={cn(
+          'flex-1',
+          '[&>[data-slot=scroll-area-scrollbar]]:w-2',
+          '[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-sidebar-border',
+          'hover:[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-sidebar-border/80',
+        )}
       >
+        <div className="px-2 pb-2 [color-scheme:light] dark:[color-scheme:dark]">
         {managerRows.length === 0 ? (
           <p className="rounded-md bg-sidebar-accent/50 px-3 py-4 text-center text-xs text-muted-foreground">
             No active agents.
@@ -279,15 +285,17 @@ export function AgentSidebar({
                       className="py-1.5 pl-7 pr-8"
                     />
 
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon"
                       onClick={() => toggleManagerCollapsed(manager.agentId)}
                       aria-label={`${managerIsCollapsed ? 'Expand' : 'Collapse'} manager ${manager.agentId}`}
                       aria-expanded={!managerIsCollapsed}
                       className={cn(
-                        'absolute left-1 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 transition',
+                        'absolute left-1 top-1/2 size-5 -translate-y-1/2 rounded p-0 text-muted-foreground/70 transition',
                         'hover:text-sidebar-foreground',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+                        'focus-visible:ring-sidebar-ring/60',
                       )}
                     >
                       <span className="relative flex h-3.5 w-3.5 items-center justify-center">
@@ -315,21 +323,23 @@ export function AgentSidebar({
                           </>
                         )}
                       </span>
-                    </button>
+                    </Button>
 
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon"
                       onClick={() => onDeleteManager(manager.agentId)}
                       aria-label={`Delete manager ${manager.agentId}`}
                       className={cn(
-                        'absolute right-1 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/50 transition',
+                        'absolute right-1 top-1/2 size-6 -translate-y-1/2 rounded p-0 text-muted-foreground/50 transition',
                         'opacity-0 hover:bg-destructive/10 hover:text-destructive',
                         'group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+                        'focus-visible:ring-sidebar-ring/60',
                       )}
                     >
                       <Trash2 aria-hidden="true" className="size-3" />
-                    </button>
+                    </Button>
                   </div>
 
                   {workers.length > 0 && !managerIsCollapsed ? (
@@ -350,19 +360,21 @@ export function AgentSidebar({
                                 className="py-1.5 pl-11 pr-8"
                               />
 
-                              <button
+                              <Button
                                 type="button"
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => onDeleteAgent(worker.agentId)}
                                 aria-label={`Delete ${worker.agentId}`}
                                 className={cn(
-                                  'absolute right-1 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/50 transition',
+                                  'absolute right-1 top-1/2 size-5 -translate-y-1/2 rounded p-0 text-muted-foreground/50 transition',
                                   'opacity-0 hover:bg-destructive/10 hover:text-destructive',
                                   'group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
-                                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+                                  'focus-visible:ring-sidebar-ring/60',
                                 )}
                               >
                                 <Trash2 aria-hidden="true" className="size-3" />
-                              </button>
+                              </Button>
                             </div>
                           </li>
                         )
@@ -395,19 +407,21 @@ export function AgentSidebar({
                             className="py-1.5 pl-7 pr-8"
                           />
 
-                          <button
+                          <Button
                             type="button"
+                            variant="ghost"
+                            size="icon"
                             onClick={() => onDeleteAgent(worker.agentId)}
                             aria-label={`Delete ${worker.agentId}`}
                             className={cn(
-                              'absolute right-1 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/50 transition',
+                              'absolute right-1 top-1/2 size-5 -translate-y-1/2 rounded p-0 text-muted-foreground/50 transition',
                               'opacity-0 hover:bg-destructive/10 hover:text-destructive',
                               'group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
-                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+                              'focus-visible:ring-sidebar-ring/60',
                             )}
                           >
                             <Trash2 aria-hidden="true" className="size-3" />
-                          </button>
+                          </Button>
                         </div>
                       </li>
                     )
@@ -417,27 +431,30 @@ export function AgentSidebar({
             ) : null}
           </ul>
         )}
-      </div>
+        </div>
+      </ScrollArea>
 
       <div className="shrink-0 border-t border-sidebar-border p-2">
         <div className="space-y-1">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={onOpenSettings}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+            className="h-auto w-full justify-start gap-2 rounded-md px-2 py-2 text-sm font-normal text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:ring-sidebar-ring/60"
           >
             <Settings aria-hidden="true" className="size-4" />
             <span>Settings</span>
-          </button>
+          </Button>
 
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={onReboot}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+            className="h-auto w-full justify-start gap-2 rounded-md px-2 py-2 text-sm font-normal text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:ring-sidebar-ring/60"
           >
             <RotateCcw aria-hidden="true" className="size-4" />
             <span>Reboot</span>
-          </button>
+          </Button>
         </div>
       </div>
     </aside>

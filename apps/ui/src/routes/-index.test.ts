@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { fireEvent, getByLabelText, getByRole } from '@testing-library/dom'
+import { fireEvent, getAllByRole, getByLabelText, getByRole } from '@testing-library/dom'
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
@@ -58,7 +58,7 @@ function click(element: HTMLElement): void {
   })
 }
 
-function changeValue(element: HTMLInputElement | HTMLSelectElement, value: string): void {
+function changeValue(element: HTMLInputElement, value: string): void {
   flushSync(() => {
     fireEvent.change(element, {
       target: { value },
@@ -89,11 +89,17 @@ let container: HTMLDivElement
 let root: Root | null = null
 
 const originalWebSocket = globalThis.WebSocket
+const originalScrollIntoView = HTMLElement.prototype.scrollIntoView
 
 beforeEach(() => {
   FakeWebSocket.instances = []
   vi.useFakeTimers()
   ;(globalThis as any).WebSocket = FakeWebSocket
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    configurable: true,
+    writable: true,
+    value: vi.fn(),
+  })
 
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -111,6 +117,11 @@ afterEach(() => {
 
   vi.useRealTimers()
   ;(globalThis as any).WebSocket = originalWebSocket
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+    configurable: true,
+    writable: true,
+    value: originalScrollIntoView,
+  })
 })
 
 async function renderPage(): Promise<FakeWebSocket> {
@@ -143,10 +154,12 @@ describe('IndexPage create manager model selection', () => {
 
     click(getByRole(container, 'button', { name: 'Add manager' }))
 
-    const modelSelect = getByLabelText(document.body, 'Model') as HTMLSelectElement
-    expect(modelSelect.value).toBe('pi-codex')
+    const modelSelect = getByRole(document.body, 'combobox', { name: 'Model' })
+    expect(modelSelect.textContent).toContain('pi-codex')
 
-    const optionValues = Array.from(modelSelect.options).map((option) => option.value)
+    click(modelSelect as HTMLElement)
+
+    const optionValues = getAllByRole(document.body, 'option').map((option) => option.textContent?.trim() ?? '')
     expect(optionValues).toEqual([...MANAGER_MODEL_PRESETS])
   })
 
@@ -157,7 +170,10 @@ describe('IndexPage create manager model selection', () => {
 
     changeValue(getByLabelText(document.body, 'Name') as HTMLInputElement, 'release-manager')
     changeValue(getByLabelText(document.body, 'Working directory') as HTMLInputElement, '/tmp/release')
-    changeValue(getByLabelText(document.body, 'Model') as HTMLSelectElement, 'pi-opus')
+
+    const modelSelect = getByRole(document.body, 'combobox', { name: 'Model' })
+    click(modelSelect as HTMLElement)
+    click(getByRole(document.body, 'option', { name: 'pi-opus' }))
 
     click(getByRole(document.body, 'button', { name: 'Create manager' }))
 
