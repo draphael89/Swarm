@@ -74,15 +74,26 @@ curl http://127.0.0.1:47322/api/health
 
 ## Shadcn UI
 
-Use [shadcn/ui](https://ui.shadcn.com/) for shared UI primitives and new component additions.
+Use [shadcn/ui](https://ui.shadcn.com/) for shared UI primitives and new component additions. **Always prefer shadcn components over hand-rolled HTML elements.**
 
-Add components using the latest shadcn CLI:
+Add components from the `apps/ui` directory using the shadcn CLI:
 
 ```bash
-pnpm dlx shadcn@latest add button
+cd apps/ui
+pnpm dlx shadcn@latest add <component-name>
 ```
 
-Prefer adding/updating generated UI components under `apps/ui/src/components/ui`.
+For example:
+```bash
+cd apps/ui
+pnpm dlx shadcn@latest add button label switch select tabs separator scroll-area checkbox tooltip textarea
+```
+
+**Important:** The `shadcn` CLI must be run from `apps/ui/` (where `components.json` lives), not from the repo root.
+
+Generated components go to `apps/ui/src/components/ui/`. Check available components and usage at https://ui.shadcn.com/docs.
+
+Currently installed: badge, button, card, checkbox, dialog, input, label, scroll-area, select, separator, switch, tabs, textarea, tooltip.
 
 ## Important Implementation Notes
 

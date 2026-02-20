@@ -1,7 +1,4 @@
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { SessionManager, type ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { CodexJsonRpcClient, type JsonRpcNotificationMessage, type JsonRpcRequestMessage } from "./codex-jsonrpc-client.js";
 import {
@@ -20,31 +17,19 @@ import type {
 import type { AgentDescriptor, AgentStatus, RequestedDeliveryMode, SendMessageReceipt } from "./types.js";
 
 const CODEX_RUNTIME_STATE_ENTRY_TYPE = "swarm_codex_runtime_state";
-const CODEX_SANDBOX_MODE = "workspace-write";
+const CODEX_SANDBOX_MODE = "danger-full-access";
 
 interface CodexRuntimeState {
   threadId: string;
-}
-
-interface CodexSandboxWorkspaceWriteSettings {
-  writable_roots: string[];
-  network_access: boolean;
-  exclude_tmpdir_env_var: boolean;
-  exclude_slash_tmp: boolean;
 }
 
 interface CodexSandboxSettings {
   sandboxMode: typeof CODEX_SANDBOX_MODE;
   threadConfig: {
     sandbox_mode: typeof CODEX_SANDBOX_MODE;
-    sandbox_workspace_write: CodexSandboxWorkspaceWriteSettings;
   };
   turnSandboxPolicy: {
-    type: "workspaceWrite";
-    writableRoots: string[];
-    networkAccess: boolean;
-    excludeTmpdirEnvVar: boolean;
-    excludeSlashTmp: boolean;
+    type: "dangerFullAccess";
   };
 }
 
@@ -94,7 +79,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
 
     this.sessionManager = SessionManager.open(options.descriptor.sessionFile);
     this.toolBridge = createCodexToolBridge(options.tools);
-    this.sandboxSettings = buildCodexSandboxSettings(options.descriptor.cwd);
+    this.sandboxSettings = buildCodexSandboxSettings();
 
     const command = process.env.CODEX_BIN?.trim() || "codex";
 
@@ -716,112 +701,18 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
   }
 }
 
-function buildCodexSandboxSettings(cwd: string): CodexSandboxSettings {
-  const writableRoots = collectCodexWritableRoots(cwd);
-
-  // Codex app-server defaults new threads to read-only sandboxing unless sandbox
-  // mode and workspace roots are explicitly configured on thread/start/resume.
+// Codex app-server defaults new threads to read-only sandboxing.
+// We use danger-full-access so agents have unrestricted filesystem access.
+function buildCodexSandboxSettings(): CodexSandboxSettings {
   return {
     sandboxMode: CODEX_SANDBOX_MODE,
     threadConfig: {
       sandbox_mode: CODEX_SANDBOX_MODE,
-      sandbox_workspace_write: {
-        writable_roots: writableRoots,
-        network_access: true,
-        exclude_tmpdir_env_var: false,
-        exclude_slash_tmp: false
-      }
     },
     turnSandboxPolicy: {
-      type: "workspaceWrite",
-      writableRoots,
-      networkAccess: true,
-      excludeTmpdirEnvVar: false,
-      excludeSlashTmp: false
+      type: "dangerFullAccess",
     }
   };
-}
-
-function collectCodexWritableRoots(cwd: string): string[] {
-  const roots = new Set<string>();
-
-  addCodexWritableRoot(roots, cwd);
-
-  const homeDir = homedir().trim();
-  if (homeDir.length > 0) {
-    addCodexWritableRoot(roots, resolve(homeDir, "worktrees"));
-    addCodexWritableRoot(roots, resolve(homeDir, "swarm"));
-  }
-
-  for (const path of resolveGitWritableRoots(cwd)) {
-    addCodexWritableRoot(roots, path);
-  }
-
-  return Array.from(roots);
-}
-
-function addCodexWritableRoot(roots: Set<string>, path: string | undefined): void {
-  if (!path) {
-    return;
-  }
-
-  const trimmed = path.trim();
-  if (!trimmed) {
-    return;
-  }
-
-  roots.add(isAbsolute(trimmed) ? resolve(trimmed) : resolve(trimmed));
-}
-
-function resolveGitWritableRoots(cwd: string): string[] {
-  const roots = new Set<string>();
-
-  const topLevel = runGitRevParse(cwd, "--show-toplevel");
-  if (topLevel) {
-    roots.add(toAbsolutePath(cwd, topLevel));
-  }
-
-  const commonDir = runGitRevParse(cwd, "--git-common-dir");
-  if (commonDir) {
-    const absoluteCommonDir = toAbsolutePath(cwd, commonDir);
-    roots.add(absoluteCommonDir);
-
-    if (basename(absoluteCommonDir) === ".git") {
-      roots.add(dirname(absoluteCommonDir));
-    }
-  }
-
-  return Array.from(roots);
-}
-
-function runGitRevParse(cwd: string, flag: string): string | undefined {
-  try {
-    const result = spawnSync("git", ["-C", cwd, "rev-parse", flag], {
-      encoding: "utf8"
-    });
-
-    if (result.status !== 0) {
-      return undefined;
-    }
-
-    const value = result.stdout.trim();
-    return value.length > 0 ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function toAbsolutePath(basePath: string, path: string): string {
-  const trimmed = path.trim();
-  if (!trimmed) {
-    return resolve(basePath);
-  }
-
-  if (isAbsolute(trimmed)) {
-    return resolve(trimmed);
-  }
-
-  return resolve(basePath, trimmed);
 }
 
 function normalizeCodexStartupError(error: unknown): Error {
