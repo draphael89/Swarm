@@ -103,9 +103,19 @@ export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: Art
     }
 
     const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        handleAnimatedClose()
+      if (event.key !== 'Escape') {
+        return
       }
+
+      if (event.defaultPrevented) {
+        return
+      }
+
+      if (document.querySelector('[data-content-zoom-dialog="true"]')) {
+        return
+      }
+
+      handleAnimatedClose()
     }
 
     window.addEventListener('keydown', handleKeydown)
