@@ -55,7 +55,11 @@ function makeHost(spawnImpl: (callerAgentId: string, input: SpawnAgentInput) => 
         acceptedMode: 'prompt',
       }
     },
-    async publishToUser(): Promise<void> {},
+    async publishToUser(): Promise<{ targetContext: { channel: 'web' } }> {
+      return {
+        targetContext: { channel: 'web' },
+      }
+    },
   }
 }
 
@@ -113,5 +117,64 @@ describe('buildSwarmTools', () => {
         undefined as any,
       ),
     ).rejects.toThrow('spawn_agent.model must be one of codex-5.3|opus-4.6')
+  })
+
+  it('forwards speak_to_user target metadata and returns resolved target context', async () => {
+    let receivedTarget: { channel: 'web' | 'slack'; channelId?: string; userId?: string; threadTs?: string } | undefined
+
+    const host: SwarmToolHost = {
+      listAgents: () => [makeManagerDescriptor()],
+      spawnAgent: async () => makeWorkerDescriptor('worker'),
+      killAgent: async () => {},
+      sendMessage: async () => ({
+        targetAgentId: 'worker',
+        deliveryId: 'delivery-1',
+        acceptedMode: 'prompt',
+      }),
+      publishToUser: async (_agentId, _text, _source, targetContext) => {
+        receivedTarget = targetContext
+        return {
+          targetContext: {
+            channel: targetContext?.channel ?? 'web',
+            channelId: targetContext?.channelId,
+            userId: targetContext?.userId,
+            threadTs: targetContext?.threadTs,
+          },
+        }
+      },
+    }
+
+    const tools = buildSwarmTools(host, makeManagerDescriptor())
+    const speakTool = tools.find((tool) => tool.name === 'speak_to_user')
+    expect(speakTool).toBeDefined()
+
+    const result = await speakTool!.execute(
+      'tool-call',
+      {
+        text: 'Reply in Slack thread',
+        target: {
+          channel: 'slack',
+          channelId: 'C12345',
+          threadTs: '173.456',
+        },
+      },
+      undefined,
+      undefined,
+      undefined as any,
+    )
+
+    expect(receivedTarget).toEqual({
+      channel: 'slack',
+      channelId: 'C12345',
+      threadTs: '173.456',
+    })
+    expect(result.details).toMatchObject({
+      published: true,
+      targetContext: {
+        channel: 'slack',
+        channelId: 'C12345',
+        threadTs: '173.456',
+      },
+    })
   })
 })

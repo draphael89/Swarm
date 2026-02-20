@@ -3,11 +3,15 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { AgentStatus } from '@/lib/ws-types'
 
+export type ChannelView = 'web' | 'all'
+
 interface ChatHeaderProps {
   connected: boolean
   activeAgentId: string | null
   activeAgentLabel: string
   activeAgentStatus: AgentStatus | null
+  channelView: ChannelView
+  onChannelViewChange: (view: ChannelView) => void
   showNewChat: boolean
   onNewChat: () => void
 }
@@ -27,11 +31,39 @@ function formatAgentStatus(status: AgentStatus | null): string {
   }
 }
 
+function ChannelToggleButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        'h-6 min-w-11 rounded px-2 text-[11px] font-medium transition-colors',
+        active
+          ? 'bg-secondary text-foreground'
+          : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+      )}
+      onClick={onClick}
+      aria-pressed={active}
+    >
+      {label}
+    </button>
+  )
+}
+
 export function ChatHeader({
   connected,
   activeAgentId,
   activeAgentLabel,
   activeAgentStatus,
+  channelView,
+  onChannelViewChange,
   showNewChat,
   onNewChat,
 }: ChatHeaderProps) {
@@ -77,18 +109,33 @@ export function ChatHeader({
         </div>
       </div>
 
-      {showNewChat ? (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
-          onClick={onNewChat}
-          title="Clear conversation"
-          aria-label="Clear conversation"
-        >
-          <Trash2 className="size-3.5" />
-        </Button>
-      ) : null}
+      <div className="flex items-center gap-2">
+        <div className="inline-flex h-8 items-center rounded-md border border-border/70 bg-muted/40 p-1">
+          <ChannelToggleButton
+            label="Web"
+            active={channelView === 'web'}
+            onClick={() => onChannelViewChange('web')}
+          />
+          <ChannelToggleButton
+            label="All"
+            active={channelView === 'all'}
+            onClick={() => onChannelViewChange('all')}
+          />
+        </div>
+
+        {showNewChat ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+            onClick={onNewChat}
+            title="Clear conversation"
+            aria-label="Clear conversation"
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
+        ) : null}
+      </div>
     </header>
   )
 }

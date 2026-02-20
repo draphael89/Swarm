@@ -19,6 +19,7 @@ import type {
   ConversationAttachment,
   ConversationEntry,
   ConversationImageAttachment,
+  MessageSourceContext,
 } from '@/lib/ws-types'
 import { MarkdownMessage } from './MarkdownMessage'
 
@@ -145,6 +146,51 @@ function formatTimestamp(iso: string): string {
   } catch {
     return ''
   }
+}
+
+function formatSourceBadge(sourceContext?: MessageSourceContext): string | null {
+  if (!sourceContext) {
+    return null
+  }
+
+  if (sourceContext.channel === 'web') {
+    return 'Web'
+  }
+
+  const isDm = sourceContext.channelType === 'dm' || sourceContext.channelId?.startsWith('D')
+  let label = 'Slack'
+
+  if (isDm) {
+    label = sourceContext.userId ? `Slack DM ${sourceContext.userId}` : 'Slack DM'
+  } else if (sourceContext.channelId) {
+    label = `Slack #${sourceContext.channelId}`
+  }
+
+  if (sourceContext.threadTs) {
+    return `${label} → thread`
+  }
+
+  return label
+}
+
+function SourceBadge({ sourceContext }: { sourceContext?: MessageSourceContext }) {
+  const label = formatSourceBadge(sourceContext)
+  if (!label || !sourceContext) {
+    return null
+  }
+
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none',
+        sourceContext.channel === 'slack'
+          ? 'border-violet-500/35 bg-violet-500/10 text-violet-700 dark:text-violet-300'
+          : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+      )}
+    >
+      [{label}]
+    </span>
+  )
 }
 
 function truncate(str: string, maxLen: number): string {
@@ -575,6 +621,7 @@ function ConversationMessage({
   }
 
   const timestampLabel = formatTimestamp(message.timestamp)
+  const sourceContext = message.sourceContext
 
   if (message.role === 'system') {
     return (
@@ -585,8 +632,11 @@ function ConversationMessage({
           <MessageImageAttachments attachments={imageAttachments} isUser={false} />
           <MessageFileAttachments attachments={fileAttachments} isUser={false} />
         </div>
-        {timestampLabel ? (
-          <div className="mt-1 text-[11px] text-amber-700/80 dark:text-amber-300/80">{timestampLabel}</div>
+        {timestampLabel || sourceContext ? (
+          <div className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-700/80 dark:text-amber-300/80">
+            <SourceBadge sourceContext={sourceContext} />
+            {timestampLabel ? <span>{timestampLabel}</span> : null}
+          </div>
         ) : null}
       </div>
     )
@@ -601,8 +651,13 @@ function ConversationMessage({
             <MessageFileAttachments attachments={fileAttachments} isUser />
             {hasText ? <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">{normalizedText}</p> : null}
           </div>
-          {timestampLabel ? (
-            <p className="mt-1 text-right text-[10px] leading-none text-primary-foreground/70">{timestampLabel}</p>
+          {timestampLabel || sourceContext ? (
+            <div className="mt-1 flex items-center justify-end gap-1.5">
+              <SourceBadge sourceContext={sourceContext} />
+              {timestampLabel ? (
+                <p className="text-right text-[10px] leading-none text-primary-foreground/70">{timestampLabel}</p>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </div>
@@ -614,7 +669,12 @@ function ConversationMessage({
       {hasText ? <MarkdownMessage content={normalizedText} onArtifactClick={onArtifactClick} /> : null}
       <MessageImageAttachments attachments={imageAttachments} isUser={false} />
       <MessageFileAttachments attachments={fileAttachments} isUser={false} />
-      {timestampLabel ? <p className="text-[11px] leading-none text-muted-foreground/70">{timestampLabel}</p> : null}
+      {timestampLabel || sourceContext ? (
+        <div className="flex items-center gap-1.5 text-[11px] leading-none text-muted-foreground/70">
+          <SourceBadge sourceContext={sourceContext} />
+          {timestampLabel ? <span>{timestampLabel}</span> : null}
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -7,6 +7,13 @@ import type {
   SwarmModelPreset
 } from "../swarm/types.js";
 
+export type {
+  MessageChannel,
+  MessageSourceContext,
+  MessageTargetContext,
+  ResponseExpectation
+} from "../swarm/types.js";
+
 export interface DirectoryItem {
   name: string;
   path: string;

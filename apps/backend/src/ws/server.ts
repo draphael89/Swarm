@@ -673,7 +673,9 @@ export class SwarmWebSocketServer {
         await this.swarmManager.handleUserMessage(command.text, {
           targetAgentId,
           delivery: command.delivery,
-          attachments: command.attachments
+          attachments: command.attachments,
+          sourceContext: { channel: "web" },
+          responseExpectation: "required"
         });
       } catch (error) {
         this.send(socket, {

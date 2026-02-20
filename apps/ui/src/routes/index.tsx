@@ -11,7 +11,7 @@ import {
 import { createFileRoute } from '@tanstack/react-router'
 import { AgentSidebar } from '@/components/chat/AgentSidebar'
 import { ArtifactPanel } from '@/components/chat/ArtifactPanel'
-import { ChatHeader } from '@/components/chat/ChatHeader'
+import { ChatHeader, type ChannelView } from '@/components/chat/ChatHeader'
 import { MessageInput, type MessageInputHandle } from '@/components/chat/MessageInput'
 import { MessageList } from '@/components/chat/MessageList'
 import { SettingsDialog } from '@/components/chat/SettingsDialog'
@@ -74,6 +74,7 @@ export function IndexPage() {
 
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactReference | null>(null)
+  const [channelView, setChannelView] = useState<ChannelView>('web')
   const dragDepthRef = useRef(0)
 
   useEffect(() => {
@@ -118,6 +119,20 @@ export function IndexPage() {
   }, [activeAgentId, state.agents, state.statuses])
 
   const isLoading = activeAgentStatus === 'streaming'
+
+  const visibleMessages = useMemo(() => {
+    if (channelView === 'all') {
+      return state.messages
+    }
+
+    return state.messages.filter((entry) => {
+      if (entry.type !== 'conversation_message') {
+        return true
+      }
+
+      return entry.sourceContext?.channel !== 'slack'
+    })
+  }, [channelView, state.messages])
 
   useEffect(() => {
     setActiveArtifact(null)
@@ -376,6 +391,8 @@ export function IndexPage() {
             activeAgentId={activeAgentId}
             activeAgentLabel={activeAgentLabel}
             activeAgentStatus={activeAgentStatus}
+            channelView={channelView}
+            onChannelViewChange={setChannelView}
             showNewChat={isActiveManager}
             onNewChat={handleNewChat}
           />
@@ -387,7 +404,7 @@ export function IndexPage() {
           ) : null}
 
           <MessageList
-            messages={state.messages}
+            messages={visibleMessages}
             isLoading={isLoading}
             onSuggestionClick={handleSuggestionClick}
             onArtifactClick={handleOpenArtifact}

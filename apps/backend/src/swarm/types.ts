@@ -36,6 +36,21 @@ export type RequestedDeliveryMode = "auto" | "followUp" | "steer";
 
 export type AcceptedDeliveryMode = "prompt" | "followUp" | "steer";
 
+export type MessageChannel = "web" | "slack";
+
+export interface MessageSourceContext {
+  channel: MessageChannel;
+  channelId?: string;
+  userId?: string;
+  threadTs?: string;
+  channelType?: "dm" | "channel" | "group" | "mpim";
+  teamId?: string;
+}
+
+export type MessageTargetContext = Pick<MessageSourceContext, "channel" | "channelId" | "userId" | "threadTs">;
+
+export type ResponseExpectation = "required" | "optional";
+
 export interface SendMessageReceipt {
   targetAgentId: string;
   deliveryId: string;
@@ -124,6 +139,8 @@ export interface ConversationMessageEvent {
   attachments?: ConversationAttachment[];
   timestamp: string;
   source: "user_input" | "speak_to_user" | "system";
+  sourceContext?: MessageSourceContext;
+  responseExpectation?: ResponseExpectation;
 }
 
 export type ConversationLogKind =
