@@ -13,8 +13,6 @@ import {
 import { ArrowUp, Paperclip } from 'lucide-react'
 import { AttachedFiles } from '@/components/chat/AttachedFiles'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
 import {
   fileToPendingAttachment,
   type PendingAttachment,
@@ -196,7 +194,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
         <AttachedFiles attachments={attachedFiles} onRemove={removeAttachment} />
 
         <div className="group flex flex-col">
-          <Textarea
+          <textarea
             ref={textareaRef}
             value={input}
             onChange={(event) => setInput(event.target.value)}
@@ -217,7 +215,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
             )}
           />
 
-          <Input
+          <input
             ref={fileInputRef}
             type="file"
             multiple

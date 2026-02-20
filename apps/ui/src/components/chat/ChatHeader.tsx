@@ -1,6 +1,5 @@
 import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import type { AgentStatus } from '@/lib/ws-types'
 
@@ -32,6 +31,32 @@ function formatAgentStatus(status: AgentStatus | null): string {
   }
 }
 
+function ChannelToggleButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean
+  label: string
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        'h-6 min-w-11 rounded px-2 text-[11px] font-medium transition-colors',
+        active
+          ? 'bg-secondary text-foreground'
+          : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+      )}
+      onClick={onClick}
+      aria-pressed={active}
+    >
+      {label}
+    </button>
+  )
+}
+
 export function ChatHeader({
   connected,
   activeAgentId,
@@ -44,11 +69,6 @@ export function ChatHeader({
 }: ChatHeaderProps) {
   const isStreaming = connected && activeAgentStatus === 'streaming'
   const statusLabel = connected ? formatAgentStatus(activeAgentStatus) : 'Reconnecting'
-  const handleChannelViewChange = (value: string) => {
-    if (value === 'web' || value === 'all') {
-      onChannelViewChange(value)
-    }
-  }
 
   return (
     <header className="sticky top-0 z-10 flex h-[62px] w-full shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-border/80 bg-card/80 px-4 backdrop-blur">
@@ -90,33 +110,18 @@ export function ChatHeader({
       </div>
 
       <div className="flex items-center gap-2">
-        <Tabs
-          value={channelView}
-          onValueChange={handleChannelViewChange}
-          className="w-auto"
-          aria-label="Message source channel filter"
-        >
-          <TabsList className="h-8 rounded-md border border-border/70 bg-muted/40 p-1">
-            <TabsTrigger
-              value="web"
-              className={cn(
-                'h-6 min-w-11 px-2 text-[11px] font-medium',
-                'data-[state=active]:bg-secondary data-[state=active]:text-foreground',
-              )}
-            >
-              Web
-            </TabsTrigger>
-            <TabsTrigger
-              value="all"
-              className={cn(
-                'h-6 min-w-11 px-2 text-[11px] font-medium',
-                'data-[state=active]:bg-secondary data-[state=active]:text-foreground',
-              )}
-            >
-              All
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
+        <div className="inline-flex h-8 items-center rounded-md border border-border/70 bg-muted/40 p-1">
+          <ChannelToggleButton
+            label="Web"
+            active={channelView === 'web'}
+            onClick={() => onChannelViewChange('web')}
+          />
+          <ChannelToggleButton
+            label="All"
+            active={channelView === 'all'}
+            onClick={() => onChannelViewChange('all')}
+          />
+        </div>
 
         {showNewChat ? (
           <Button
