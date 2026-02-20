@@ -78,6 +78,8 @@ const DEFAULT_WORKER_SYSTEM_PROMPT = `You are a worker agent in a swarm.
 const MANAGER_ARCHETYPE_ID = "manager";
 const MERGER_ARCHETYPE_ID = "merger";
 const INTERNAL_MODEL_MESSAGE_PREFIX = "SYSTEM: ";
+const BOOT_WAKEUP_MESSAGE =
+  "Swarm rebooted. You have been restarted. Check on any in-progress workers and resume any interrupted tasks. Use list_agents to see current agent states.";
 const MAX_CONVERSATION_HISTORY = 2000;
 const CONVERSATION_ENTRY_TYPE = "swarm_conversation_entry";
 const LEGACY_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
@@ -202,6 +204,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
 
     const loaded = await this.loadStore();
+    const wakeupManagerIds = this.collectBootWakeupManagerIds(loaded.agents);
     for (const descriptor of loaded.agents) {
       this.descriptors.set(descriptor.agentId, descriptor);
     }
@@ -214,6 +217,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     const managerDescriptor = this.getBootLogManagerDescriptor();
     this.emitAgentsSnapshot();
+    await this.sendBootWakeupMessages(wakeupManagerIds);
 
     this.logDebug("boot:ready", {
       managerId: managerDescriptor?.agentId,
@@ -910,6 +914,74 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
       return a.agentId.localeCompare(b.agentId);
     });
+  }
+
+  private collectBootWakeupManagerIds(loadedAgents: AgentDescriptor[]): string[] {
+    if (loadedAgents.length === 0) {
+      return [];
+    }
+
+    const restoredManagerIds = new Set(
+      loadedAgents
+        .filter(
+          (descriptor) =>
+            descriptor.role === "manager" &&
+            descriptor.status !== "terminated" &&
+            descriptor.status !== "stopped_on_restart"
+        )
+        .map((descriptor) => descriptor.agentId)
+    );
+
+    if (restoredManagerIds.size === 0) {
+      return [];
+    }
+
+    const managerIdsWithActiveWorkers = new Set<string>();
+
+    for (const descriptor of loadedAgents) {
+      if (descriptor.role !== "worker") {
+        continue;
+      }
+
+      if (descriptor.status === "terminated" || descriptor.status === "stopped_on_restart") {
+        continue;
+      }
+
+      if (!restoredManagerIds.has(descriptor.managerId)) {
+        continue;
+      }
+
+      managerIdsWithActiveWorkers.add(descriptor.managerId);
+    }
+
+    return Array.from(managerIdsWithActiveWorkers).sort((left, right) => left.localeCompare(right));
+  }
+
+  private async sendBootWakeupMessages(managerIds: string[]): Promise<void> {
+    for (const managerId of managerIds) {
+      const manager = this.descriptors.get(managerId);
+      if (!manager || manager.role !== "manager") {
+        continue;
+      }
+
+      if (manager.status === "terminated" || manager.status === "stopped_on_restart") {
+        continue;
+      }
+
+      if (!this.runtimes.has(managerId)) {
+        continue;
+      }
+
+      try {
+        await this.sendMessage(managerId, managerId, BOOT_WAKEUP_MESSAGE, "auto", { origin: "internal" });
+        this.logDebug("boot:wakeup_message:sent", { managerId });
+      } catch (error) {
+        this.logDebug("boot:wakeup_message:error", {
+          managerId,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
   }
 
   private async restoreRuntimesForBoot(): Promise<void> {

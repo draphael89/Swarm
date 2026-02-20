@@ -152,6 +152,9 @@ describe('SwarmManager', () => {
       thinkingLevel: 'xhigh',
     })
     expect(manager.createdRuntimeIds).toEqual(['manager'])
+
+    const managerRuntime = manager.runtimeByAgentId.get('manager')
+    expect(managerRuntime?.sendCalls).toEqual([])
   })
 
   it('does not materialize manager SYSTEM.md into the data dir on boot', async () => {
@@ -776,6 +779,80 @@ describe('SwarmManager', () => {
     expect(worker?.status).toBe('idle')
     expect(manager.createdRuntimeIds).toEqual(['manager', 'worker-a'])
     expect(manager.runtimeByAgentId.get('worker-a')).toBeDefined()
+  })
+
+  it('sends a SYSTEM wake-up message to restored managers when active workers exist', async () => {
+    const config = await makeTempConfig()
+
+    const seedAgents = {
+      agents: [
+        {
+          agentId: 'manager',
+          displayName: 'Manager',
+          role: 'manager',
+          managerId: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'manager.jsonl'),
+        },
+        {
+          agentId: 'worker-a',
+          displayName: 'Worker A',
+          role: 'worker',
+          managerId: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'worker-a.jsonl'),
+        },
+      ],
+    }
+
+    await writeFile(config.paths.agentsStoreFile, JSON.stringify(seedAgents, null, 2), 'utf8')
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const managerRuntime = manager.runtimeByAgentId.get('manager')
+    expect(managerRuntime?.sendCalls.at(-1)).toEqual({
+      message:
+        'SYSTEM: Swarm rebooted. You have been restarted. Check on any in-progress workers and resume any interrupted tasks. Use list_agents to see current agent states.',
+      delivery: 'auto',
+    })
+  })
+
+  it('does not send a wake-up message when only a manager is restored', async () => {
+    const config = await makeTempConfig()
+
+    const seedAgents = {
+      agents: [
+        {
+          agentId: 'manager',
+          displayName: 'Manager',
+          role: 'manager',
+          managerId: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'manager.jsonl'),
+        },
+      ],
+    }
+
+    await writeFile(config.paths.agentsStoreFile, JSON.stringify(seedAgents, null, 2), 'utf8')
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const managerRuntime = manager.runtimeByAgentId.get('manager')
+    expect(managerRuntime?.sendCalls).toEqual([])
   })
 
   it('does not implicitly recreate the configured manager when other agents already exist', async () => {
