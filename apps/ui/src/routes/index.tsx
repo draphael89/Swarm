@@ -41,9 +41,24 @@ export const Route = createFileRoute('/')({
 })
 
 const DEFAULT_MANAGER_MODEL: ManagerModelPreset = 'pi-codex'
+const DEFAULT_DEV_WS_URL = 'ws://127.0.0.1:47187'
+
+function resolveDefaultWsUrl(): string {
+  if (typeof window === 'undefined') {
+    return DEFAULT_DEV_WS_URL
+  }
+
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const hostname = window.location.hostname
+  const uiPort = Number(window.location.port) || (window.location.protocol === 'https:' ? 443 : 80)
+  // Dev UI runs on 47188 -> backend 47187, prod UI runs on 47289 -> backend 47287.
+  const wsPort = uiPort <= 47188 ? 47187 : 47287
+
+  return `${protocol}//${hostname}:${wsPort}`
+}
 
 export function IndexPage() {
-  const wsUrl = import.meta.env.VITE_SWARM_WS_URL ?? 'ws://127.0.0.1:47187'
+  const wsUrl = import.meta.env.VITE_SWARM_WS_URL ?? resolveDefaultWsUrl()
   const clientRef = useRef<ManagerWsClient | null>(null)
   const messageInputRef = useRef<MessageInputHandle | null>(null)
 

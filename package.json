@@ -8,12 +8,12 @@
     "apps/ui"
   ],
   "scripts": {
-    "dev": "concurrently --kill-others-on-fail --names backend,ui \"pnpm --filter @swarm/backend dev\" \"pnpm --filter @swarm/ui dev\"",
+    "dev": "concurrently --kill-others-on-fail --names backend,ui \"pnpm --filter @swarm/backend dev\" \"pnpm --filter @swarm/ui dev -- --host ${SWARM_HOST:-$(node --env-file-if-exists=.env -p 'process.env.SWARM_HOST || \"127.0.0.1\"' 2>/dev/null)}\"",
     "dev:backend": "pnpm --filter @swarm/backend dev",
-    "dev:ui": "pnpm --filter @swarm/ui dev",
+    "dev:ui": "pnpm --filter @swarm/ui dev -- --host ${SWARM_HOST:-$(node --env-file-if-exists=.env -p 'process.env.SWARM_HOST || \"127.0.0.1\"' 2>/dev/null)}",
     "build": "pnpm --filter @swarm/backend build && pnpm --filter @swarm/ui build",
-    "prod": "VITE_SWARM_WS_URL=ws://127.0.0.1:47287 pnpm build && pnpm prod:start",
-    "prod:start": "concurrently --kill-others-on-fail --names backend,ui \"NODE_ENV=production SWARM_PORT=47287 pnpm --filter @swarm/backend start\" \"pnpm --filter @swarm/ui preview -- --port 47289 --strictPort\"",
+    "prod": "pnpm build && pnpm prod:start",
+    "prod:start": "concurrently --kill-others-on-fail --names backend,ui \"NODE_ENV=production SWARM_PORT=47287 pnpm --filter @swarm/backend start\" \"pnpm --filter @swarm/ui preview -- --port 47289 --strictPort --host ${SWARM_HOST:-$(node --env-file-if-exists=.env -p 'process.env.SWARM_HOST || \"127.0.0.1\"' 2>/dev/null)}\"",
     "prod:daemon": "node scripts/prod-daemon.mjs",
     "prod:restart": "pnpm i && node scripts/prod-daemon-restart.mjs",
     "test": "pnpm --filter @swarm/backend test && pnpm --filter @swarm/ui test"
