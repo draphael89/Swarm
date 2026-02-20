@@ -77,6 +77,7 @@ const INTERNAL_MODEL_MESSAGE_PREFIX = "SYSTEM: ";
 const MAX_CONVERSATION_HISTORY = 2000;
 const CONVERSATION_ENTRY_TYPE = "swarm_conversation_entry";
 const LEGACY_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
+const SWARM_CONTEXT_FILE_NAME = "SWARM.md";
 const BUILT_IN_MEMORY_SKILL_RELATIVE_PATH = "apps/backend/src/swarm/skills/builtins/memory/SKILL.md";
 const SWARM_MANAGER_DIR = fileURLToPath(new URL(".", import.meta.url));
 const BACKEND_PACKAGE_DIR = resolve(SWARM_MANAGER_DIR, "..", "..");
@@ -1157,12 +1158,57 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     throw new Error(`Missing built-in memory skill file: ${candidatePaths[0]}`);
   }
 
-  private mergeMemoryContextFile(
+  protected async getSwarmContextFiles(cwd: string): Promise<Array<{ path: string; content: string }>> {
+    const contextFiles: Array<{ path: string; content: string }> = [];
+    const seenPaths = new Set<string>();
+    const rootDir = resolve("/");
+    let currentDir = resolve(cwd);
+
+    while (true) {
+      const candidatePath = join(currentDir, SWARM_CONTEXT_FILE_NAME);
+      if (!seenPaths.has(candidatePath) && existsSync(candidatePath)) {
+        try {
+          contextFiles.unshift({
+            path: candidatePath,
+            content: await readFile(candidatePath, "utf8")
+          });
+          seenPaths.add(candidatePath);
+        } catch (error) {
+          this.logDebug("runtime:swarm_context:read:error", {
+            cwd,
+            path: candidatePath,
+            message: error instanceof Error ? error.message : String(error)
+          });
+        }
+      }
+
+      if (currentDir === rootDir) {
+        break;
+      }
+
+      const parentDir = resolve(currentDir, "..");
+      if (parentDir === currentDir) {
+        break;
+      }
+      currentDir = parentDir;
+    }
+
+    return contextFiles;
+  }
+
+  private mergeRuntimeContextFiles(
     baseAgentsFiles: Array<{ path: string; content: string }>,
-    memoryContextFile: { path: string; content: string }
+    options: {
+      memoryContextFile: { path: string; content: string };
+      swarmContextFiles: Array<{ path: string; content: string }>;
+    }
   ): Array<{ path: string; content: string }> {
-    const withoutMemory = baseAgentsFiles.filter((entry) => entry.path !== memoryContextFile.path);
-    return [...withoutMemory, memoryContextFile];
+    const swarmContextPaths = new Set(options.swarmContextFiles.map((entry) => entry.path));
+    const withoutSwarmAndMemory = baseAgentsFiles.filter(
+      (entry) => entry.path !== options.memoryContextFile.path && !swarmContextPaths.has(entry.path)
+    );
+
+    return [...withoutSwarmAndMemory, ...options.swarmContextFiles, options.memoryContextFile];
   }
 
   protected async createRuntimeForDescriptor(
@@ -1190,8 +1236,12 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     const authStorage = AuthStorage.create(this.config.paths.authFile);
     const modelRegistry = new ModelRegistry(authStorage);
     const memoryResources = await this.getMemoryRuntimeResources();
-    const applyMemoryContext = (base: { agentsFiles: Array<{ path: string; content: string }> }) => ({
-      agentsFiles: this.mergeMemoryContextFile(base.agentsFiles, memoryResources.memoryContextFile)
+    const swarmContextFiles = await this.getSwarmContextFiles(descriptor.cwd);
+    const applyRuntimeContext = (base: { agentsFiles: Array<{ path: string; content: string }> }) => ({
+      agentsFiles: this.mergeRuntimeContextFiles(base.agentsFiles, {
+        memoryContextFile: memoryResources.memoryContextFile,
+        swarmContextFiles
+      })
     });
 
     const resourceLoader =
@@ -1200,7 +1250,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
             cwd: descriptor.cwd,
             agentDir: runtimeAgentDir,
             additionalSkillPaths: memoryResources.additionalSkillPaths,
-            agentsFilesOverride: applyMemoryContext,
+            agentsFilesOverride: applyRuntimeContext,
             // Manager prompt comes from the archetype prompt registry.
             systemPrompt,
             appendSystemPromptOverride: () => []
@@ -1209,7 +1259,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
             cwd: descriptor.cwd,
             agentDir: runtimeAgentDir,
             additionalSkillPaths: memoryResources.additionalSkillPaths,
-            agentsFilesOverride: applyMemoryContext,
+            agentsFilesOverride: applyRuntimeContext,
             appendSystemPromptOverride: (base) => [...base, systemPrompt]
           });
     await resourceLoader.reload();

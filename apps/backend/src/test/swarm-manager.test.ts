@@ -68,6 +68,10 @@ class TestSwarmManager extends SwarmManager {
     return this.getMemoryRuntimeResources()
   }
 
+  async getSwarmContextFilesForTest(cwd: string): Promise<Array<{ path: string; content: string }>> {
+    return this.getSwarmContextFiles(cwd)
+  }
+
   protected override async createRuntimeForDescriptor(
     descriptor: AgentDescriptor,
     systemPrompt: string,
@@ -188,6 +192,41 @@ describe('SwarmManager', () => {
 
     const resources = await secondBoot.getMemoryRuntimeResourcesForTest()
     expect(resources.memoryContextFile.content).toBe(persistedMemory)
+  })
+
+  it('loads SWARM.md context files from the cwd ancestor chain', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+
+    const rootSwarmPath = join(config.paths.rootDir, 'SWARM.md')
+    const nestedDir = join(config.paths.rootDir, 'nested', 'deeper')
+    const nestedSwarmPath = join(config.paths.rootDir, 'nested', 'SWARM.md')
+
+    await mkdir(nestedDir, { recursive: true })
+    await writeFile(rootSwarmPath, '# root swarm policy\n', 'utf8')
+    await writeFile(nestedSwarmPath, '# nested swarm policy\n', 'utf8')
+
+    const files = await manager.getSwarmContextFilesForTest(nestedDir)
+
+    expect(files).toEqual([
+      {
+        path: rootSwarmPath,
+        content: '# root swarm policy\n',
+      },
+      {
+        path: nestedSwarmPath,
+        content: '# nested swarm policy\n',
+      },
+    ])
+  })
+
+  it('returns no SWARM.md context files when none are present', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+
+    const files = await manager.getSwarmContextFilesForTest(config.paths.rootDir)
+
+    expect(files).toEqual([])
   })
 
   it('uses manager and default worker prompts with explicit visibility guidance', async () => {
