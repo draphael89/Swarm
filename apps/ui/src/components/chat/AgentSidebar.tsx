@@ -61,11 +61,11 @@ function RuntimeIcon({ agent, className }: { agent: AgentDescriptor; className?:
   const provider = agent.model.provider.toLowerCase()
   const preset = inferModelPreset(agent)
 
-  if (preset === 'pi-codex' || preset === 'pi-opus') {
-    return <img src="/pi-logo.svg" alt="" aria-hidden="true" className={cn('dark:invert', className)} />
+  if (preset === 'pi-opus') {
+    return <img src="/agents/claude-logo.svg" alt="" aria-hidden="true" className={className} />
   }
 
-  if (preset === 'codex-app' || provider.includes('openai')) {
+  if (preset === 'pi-codex' || preset === 'codex-app') {
     return <img src="/agents/codex-logo.svg" alt="" aria-hidden="true" className={cn('dark:invert', className)} />
   }
 
@@ -73,7 +73,33 @@ function RuntimeIcon({ agent, className }: { agent: AgentDescriptor; className?:
     return <img src="/agents/claude-logo.svg" alt="" aria-hidden="true" className={className} />
   }
 
+  if (provider.includes('openai')) {
+    return <img src="/agents/codex-logo.svg" alt="" aria-hidden="true" className={cn('dark:invert', className)} />
+  }
+
   return <span className={cn('inline-block size-1.5 rounded-full bg-current', className)} aria-hidden="true" />
+}
+
+function getModelLabel(agent: AgentDescriptor, preset: ManagerModelPreset | undefined): string {
+  if (preset === 'pi-opus') {
+    return 'opus'
+  }
+
+  if (preset === 'pi-codex' || preset === 'codex-app') {
+    return 'codex'
+  }
+
+  const modelId = agent.model.modelId.trim().toLowerCase()
+
+  if (modelId.startsWith('claude-opus')) {
+    return 'opus'
+  }
+
+  if (modelId.includes('codex')) {
+    return 'codex'
+  }
+
+  return agent.model.modelId
 }
 
 function AgentActivitySlot({
@@ -98,50 +124,13 @@ function AgentActivitySlot({
   )
 }
 
-function DeleteOverlayButton({
-  isSelected,
-  onDelete,
-  ariaLabel,
-}: {
-  isSelected: boolean
-  onDelete: () => void
-  ariaLabel: string
-}) {
-  return (
-    <div
-      className={cn(
-        'pointer-events-none absolute inset-y-0 right-0 flex items-center justify-end rounded-r-md pl-8 pr-1 transition-opacity duration-150',
-        'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
-        isSelected
-          ? 'bg-gradient-to-r from-sidebar-accent/0 to-sidebar-accent'
-          : 'bg-gradient-to-r from-sidebar/0 to-sidebar group-hover:from-sidebar-accent/0 group-hover:to-sidebar-accent/90',
-      )}
-    >
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation()
-          onDelete()
-        }}
-        aria-label={ariaLabel}
-        className={cn(
-          'pointer-events-auto inline-flex size-6 items-center justify-center rounded text-muted-foreground/60 transition',
-          'hover:bg-destructive/10 hover:text-destructive',
-          'focus-visible:opacity-100',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-        )}
-      >
-        <Trash2 aria-hidden="true" className="size-3" />
-      </button>
-    </div>
-  )
-}
-
 function AgentRow({
   agent,
   liveStatus,
   isSelected,
   onSelect,
+  onDelete,
+  deleteAriaLabel,
   className,
   nameClassName,
 }: {
@@ -149,30 +138,33 @@ function AgentRow({
   liveStatus: AgentLiveStatus
   isSelected: boolean
   onSelect: () => void
+  onDelete: () => void
+  deleteAriaLabel: string
   className: string
   nameClassName?: string
 }) {
   const title = agent.displayName || agent.agentId
   const isActive = liveStatus.status === 'streaming'
   const preset = inferModelPreset(agent)
-  const modelLabel = preset ?? agent.model.modelId
+  const modelLabel = getModelLabel(agent, preset)
   const modelDescription = `${agent.model.provider}/${agent.model.modelId}`
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <div
       className={cn(
-        'flex w-full items-center gap-2 rounded-md text-left transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+        'group flex w-full items-center gap-1 rounded-md transition-colors',
         isSelected
           ? 'bg-sidebar-accent text-sidebar-accent-foreground'
           : 'text-sidebar-foreground/90 hover:bg-sidebar-accent/50',
         className,
       )}
-      title={title}
     >
-      <div className="flex w-full min-w-0 items-center gap-1.5">
+      <button
+        type="button"
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+        title={title}
+      >
         <AgentActivitySlot isActive={isActive} isSelected={isSelected} />
         <span className={cn('min-w-0 flex-1 truncate text-sm leading-5', nameClassName)}>{title}</span>
 
@@ -191,7 +183,7 @@ function AgentRow({
                 <Badge
                   variant="outline"
                   className={cn(
-                    'w-[4.25rem] justify-center truncate border-sidebar-border/80 bg-transparent px-1.5 py-0 text-[9px] font-medium leading-4',
+                    'justify-center truncate border-sidebar-border/80 bg-transparent px-1 py-0 text-[9px] font-medium leading-4',
                     isSelected ? 'text-sidebar-accent-foreground/75' : 'text-muted-foreground',
                   )}
                 >
@@ -205,8 +197,27 @@ function AgentRow({
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
-      </div>
-    </button>
+      </button>
+
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation()
+          onDelete()
+        }}
+        aria-label={deleteAriaLabel}
+        className={cn(
+          'inline-flex size-6 shrink-0 items-center justify-center rounded transition-all',
+          isSelected
+            ? 'text-sidebar-accent-foreground/55 opacity-100'
+            : 'text-muted-foreground/55 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+          'hover:bg-destructive/10 hover:text-destructive',
+          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+        )}
+      >
+        <Trash2 aria-hidden="true" className="size-3" />
+      </button>
+    </div>
   )
 }
 
@@ -308,14 +319,16 @@ export function AgentSidebar({
 
               return (
                 <li key={manager.agentId}>
-                  <div className="group relative">
+                  <div className="relative">
                     <AgentRow
                       agent={manager}
                       liveStatus={managerLiveStatus}
                       isSelected={managerIsSelected}
                       onSelect={() => onSelectAgent(manager.agentId)}
+                      onDelete={() => onDeleteManager(manager.agentId)}
+                      deleteAriaLabel={`Delete manager ${manager.agentId}`}
                       nameClassName="font-semibold"
-                      className="py-1.5 pl-7 pr-2"
+                      className="py-1.5 pl-7 pr-1.5"
                     />
 
                     <button
@@ -324,7 +337,7 @@ export function AgentSidebar({
                       aria-label={`${managerIsCollapsed ? 'Expand' : 'Collapse'} manager ${manager.agentId}`}
                       aria-expanded={!managerIsCollapsed}
                       className={cn(
-                        'absolute left-1 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 transition',
+                        'group absolute left-1 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/70 transition',
                         'hover:text-sidebar-foreground',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
                       )}
@@ -334,33 +347,27 @@ export function AgentSidebar({
                           <>
                             <UserStar
                               aria-hidden="true"
-                              className="size-3.5 opacity-70 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
+                              className="size-3.5 opacity-70 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0"
                             />
                             <ChevronRight
                               aria-hidden="true"
-                              className="absolute size-3 opacity-0 transition-opacity group-hover:opacity-70 group-focus-within:opacity-70"
+                              className="absolute size-3 opacity-0 transition-opacity group-hover:opacity-70 group-focus-visible:opacity-70"
                             />
                           </>
                         ) : (
                           <>
                             <UserStar
                               aria-hidden="true"
-                              className="size-3.5 opacity-70 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0"
+                              className="size-3.5 opacity-70 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0"
                             />
                             <ChevronDown
                               aria-hidden="true"
-                              className="absolute size-3 opacity-0 transition-opacity group-hover:opacity-70 group-focus-within:opacity-70"
+                              className="absolute size-3 opacity-0 transition-opacity group-hover:opacity-70 group-focus-visible:opacity-70"
                             />
                           </>
                         )}
                       </span>
                     </button>
-
-                    <DeleteOverlayButton
-                      isSelected={managerIsSelected}
-                      onDelete={() => onDeleteManager(manager.agentId)}
-                      ariaLabel={`Delete manager ${manager.agentId}`}
-                    />
                   </div>
 
                   {workers.length > 0 && !managerIsCollapsed ? (
@@ -373,22 +380,16 @@ export function AgentSidebar({
 
                           return (
                             <li key={worker.agentId}>
-                              <div className="group relative">
-                                <AgentRow
-                                  agent={worker}
-                                  liveStatus={workerLiveStatus}
-                                  isSelected={workerIsSelected}
-                                  onSelect={() => onSelectAgent(worker.agentId)}
-                                  nameClassName="font-normal"
-                                  className="py-1.5 pl-11 pr-2"
-                                />
-
-                                <DeleteOverlayButton
-                                  isSelected={workerIsSelected}
-                                  onDelete={() => onDeleteAgent(worker.agentId)}
-                                  ariaLabel={`Delete ${worker.agentId}`}
-                                />
-                              </div>
+                              <AgentRow
+                                agent={worker}
+                                liveStatus={workerLiveStatus}
+                                isSelected={workerIsSelected}
+                                onSelect={() => onSelectAgent(worker.agentId)}
+                                onDelete={() => onDeleteAgent(worker.agentId)}
+                                deleteAriaLabel={`Delete ${worker.agentId}`}
+                                nameClassName="font-normal"
+                                className="py-1.5 pl-11 pr-1.5"
+                              />
                             </li>
                           )
                         })}
@@ -411,22 +412,16 @@ export function AgentSidebar({
 
                     return (
                       <li key={worker.agentId}>
-                        <div className="group relative">
-                          <AgentRow
-                            agent={worker}
-                            liveStatus={workerLiveStatus}
-                            isSelected={workerIsSelected}
-                            onSelect={() => onSelectAgent(worker.agentId)}
-                            nameClassName="font-normal"
-                            className="py-1.5 pl-7 pr-2"
-                          />
-
-                          <DeleteOverlayButton
-                            isSelected={workerIsSelected}
-                            onDelete={() => onDeleteAgent(worker.agentId)}
-                            ariaLabel={`Delete ${worker.agentId}`}
-                          />
-                        </div>
+                        <AgentRow
+                          agent={worker}
+                          liveStatus={workerLiveStatus}
+                          isSelected={workerIsSelected}
+                          onSelect={() => onSelectAgent(worker.agentId)}
+                          onDelete={() => onDeleteAgent(worker.agentId)}
+                          deleteAriaLabel={`Delete ${worker.agentId}`}
+                          nameClassName="font-normal"
+                          className="py-1.5 pl-7 pr-1.5"
+                        />
                       </li>
                     )
                   })}
