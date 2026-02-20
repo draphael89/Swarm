@@ -10,7 +10,8 @@ import {
   createAgentSession,
   ModelRegistry,
   SessionManager,
-  type AgentSession
+  type AgentSession,
+  type AuthCredential
 } from "@mariozechner/pi-coding-agent";
 import type { ServerEvent } from "../protocol/ws-types.js";
 import {
@@ -62,6 +63,8 @@ import type {
   MessageTargetContext,
   RequestedDeliveryMode,
   SendMessageReceipt,
+  SettingsAuthProvider,
+  SettingsAuthProviderName,
   SkillEnvRequirement,
   SpawnAgentInput,
   SwarmConfig,
@@ -128,7 +131,24 @@ const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
 `;
 const SKILL_FRONTMATTER_BLOCK_PATTERN = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/;
 const SETTINGS_ENV_MASK = "********";
+const SETTINGS_AUTH_MASK = "********";
 const VALID_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const SETTINGS_AUTH_PROVIDER_DEFINITIONS: Array<{
+  provider: SettingsAuthProviderName;
+  storageProvider: string;
+  aliases: string[];
+}> = [
+  {
+    provider: "anthropic",
+    storageProvider: "anthropic",
+    aliases: ["anthropic"]
+  },
+  {
+    provider: "openai",
+    storageProvider: "openai-codex",
+    aliases: ["openai", "openai-codex"]
+  }
+];
 
 interface ParsedSkillEnvDeclaration {
   name: string;
@@ -868,6 +888,63 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     delete this.secrets[normalizedName];
     this.restoreProcessEnvForSecret(normalizedName);
     await this.saveSecretsStore();
+  }
+
+  async listSettingsAuth(): Promise<SettingsAuthProvider[]> {
+    const authStorage = AuthStorage.create(this.config.paths.authFile);
+
+    return SETTINGS_AUTH_PROVIDER_DEFINITIONS.map((definition) => {
+      const credential = authStorage.get(definition.storageProvider);
+      const resolvedToken = extractAuthCredentialToken(credential);
+
+      return {
+        provider: definition.provider,
+        configured: typeof resolvedToken === "string" && resolvedToken.length > 0,
+        authType: resolveAuthCredentialType(credential),
+        maskedValue: resolvedToken ? maskSettingsAuthValue(resolvedToken) : undefined
+      } satisfies SettingsAuthProvider;
+    });
+  }
+
+  async updateSettingsAuth(values: Record<string, string>): Promise<void> {
+    const entries = Object.entries(values);
+    if (entries.length === 0) {
+      return;
+    }
+
+    const authStorage = AuthStorage.create(this.config.paths.authFile);
+
+    for (const [rawProvider, rawValue] of entries) {
+      const resolvedProvider = resolveSettingsAuthProvider(rawProvider);
+      if (!resolvedProvider) {
+        throw new Error(`Invalid auth provider: ${rawProvider}`);
+      }
+
+      const normalizedValue = typeof rawValue === "string" ? rawValue.trim() : "";
+      if (!normalizedValue) {
+        throw new Error(`Auth value for ${resolvedProvider.provider} must be a non-empty string`);
+      }
+
+      const credential = {
+        type: "api_key",
+        key: normalizedValue,
+        access: normalizedValue,
+        refresh: "",
+        expires: ""
+      };
+
+      authStorage.set(resolvedProvider.storageProvider, credential as unknown as AuthCredential);
+    }
+  }
+
+  async deleteSettingsAuth(provider: string): Promise<void> {
+    const resolvedProvider = resolveSettingsAuthProvider(provider);
+    if (!resolvedProvider) {
+      throw new Error(`Invalid auth provider: ${provider}`);
+    }
+
+    const authStorage = AuthStorage.create(this.config.paths.authFile);
+    authStorage.remove(resolvedProvider.storageProvider);
   }
 
   private emitConversationMessage(event: ConversationMessageEvent): void {
@@ -2215,6 +2292,80 @@ function normalizeEnvVarName(name: string): string | undefined {
   }
 
   return normalized;
+}
+
+function resolveSettingsAuthProvider(
+  provider: string
+): { provider: SettingsAuthProviderName; storageProvider: string } | undefined {
+  const normalizedProvider = provider.trim().toLowerCase();
+
+  for (const definition of SETTINGS_AUTH_PROVIDER_DEFINITIONS) {
+    if (definition.aliases.includes(normalizedProvider)) {
+      return {
+        provider: definition.provider,
+        storageProvider: definition.storageProvider
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function resolveAuthCredentialType(
+  credential: AuthCredential | undefined
+): SettingsAuthProvider["authType"] | undefined {
+  if (!credential) {
+    return undefined;
+  }
+
+  if (credential.type === "api_key" || credential.type === "oauth") {
+    return credential.type;
+  }
+
+  return "unknown";
+}
+
+function extractAuthCredentialToken(credential: AuthCredential | undefined): string | undefined {
+  if (!credential || typeof credential !== "object") {
+    return undefined;
+  }
+
+  if (credential.type === "api_key") {
+    const apiKey = normalizeAuthToken((credential as { key?: unknown }).key);
+    if (apiKey) {
+      return apiKey;
+    }
+  }
+
+  const accessToken = normalizeAuthToken((credential as { access?: unknown }).access);
+  if (accessToken) {
+    return accessToken;
+  }
+
+  return undefined;
+}
+
+function normalizeAuthToken(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function maskSettingsAuthValue(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return SETTINGS_AUTH_MASK;
+  }
+
+  const suffix = trimmed.slice(-4);
+  if (!suffix) {
+    return SETTINGS_AUTH_MASK;
+  }
+
+  return `${SETTINGS_AUTH_MASK}${suffix}`;
 }
 
 function parseSkillFrontmatter(markdown: string): { name?: string; env: ParsedSkillEnvDeclaration[] } {

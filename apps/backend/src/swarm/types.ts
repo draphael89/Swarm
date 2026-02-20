@@ -90,6 +90,15 @@ export interface SkillEnvRequirement {
   maskedValue?: string;
 }
 
+export type SettingsAuthProviderName = "anthropic" | "openai";
+
+export interface SettingsAuthProvider {
+  provider: SettingsAuthProviderName;
+  configured: boolean;
+  authType?: "api_key" | "oauth" | "unknown";
+  maskedValue?: string;
+}
+
 export interface SwarmConfig {
   host: string;
   port: number;

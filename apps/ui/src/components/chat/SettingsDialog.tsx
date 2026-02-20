@@ -52,6 +52,15 @@ export interface SettingsEnvVariable {
   maskedValue?: string
 }
 
+type SettingsAuthProviderId = 'anthropic' | 'openai'
+
+interface SettingsAuthProvider {
+  provider: SettingsAuthProviderId
+  configured: boolean
+  authType?: 'api_key' | 'oauth' | 'unknown'
+  maskedValue?: string
+}
+
 interface SlackSettingsConfig {
   enabled: boolean
   mode: 'socket'
@@ -109,6 +118,26 @@ interface SettingsDialogProps {
   slackStatus?: SlackStatusEvent | null
 }
 
+const SETTINGS_AUTH_PROVIDER_META: Record<
+  SettingsAuthProviderId,
+  { label: string; description: string; placeholder: string; helpUrl: string }
+> = {
+  anthropic: {
+    label: 'Anthropic API key',
+    description: 'Used by pi-opus and Anthropic-backed managers/workers.',
+    placeholder: 'sk-ant-...',
+    helpUrl: 'https://console.anthropic.com/settings/keys',
+  },
+  openai: {
+    label: 'OpenAI API key',
+    description: 'Stored as openai-codex credentials for pi-codex runtime sessions.',
+    placeholder: 'sk-...',
+    helpUrl: 'https://platform.openai.com/api-keys',
+  },
+}
+
+const SETTINGS_AUTH_PROVIDER_ORDER: SettingsAuthProviderId[] = ['anthropic', 'openai']
+
 /* ------------------------------------------------------------------ */
 /*  API helpers                                                       */
 /* ------------------------------------------------------------------ */
@@ -136,6 +165,20 @@ function isSettingsEnvVariable(value: unknown): value is SettingsEnvVariable {
     v.skillName.trim().length > 0 &&
     typeof v.required === 'boolean' &&
     typeof v.isSet === 'boolean'
+  )
+}
+
+function isSettingsAuthProvider(value: unknown): value is SettingsAuthProvider {
+  if (!value || typeof value !== 'object') return false
+  const provider = value as Partial<SettingsAuthProvider>
+
+  return (
+    (provider.provider === 'anthropic' || provider.provider === 'openai') &&
+    typeof provider.configured === 'boolean' &&
+    (provider.authType === undefined ||
+      provider.authType === 'api_key' ||
+      provider.authType === 'oauth' ||
+      provider.authType === 'unknown')
   )
 }
 
@@ -216,6 +259,47 @@ async function updateSettingsEnvVariables(wsUrl: string, values: Record<string, 
 
 async function deleteSettingsEnvVariable(wsUrl: string, variableName: string): Promise<void> {
   const endpoint = resolveApiEndpoint(wsUrl, `/api/settings/env/${encodeURIComponent(variableName)}`)
+  const response = await fetch(endpoint, { method: 'DELETE' })
+  if (!response.ok) {
+    throw new Error(await readApiError(response))
+  }
+}
+
+async function fetchSettingsAuthProviders(wsUrl: string): Promise<SettingsAuthProvider[]> {
+  const endpoint = resolveApiEndpoint(wsUrl, '/api/settings/auth')
+  const response = await fetch(endpoint)
+  if (!response.ok) throw new Error(await readApiError(response))
+
+  const payload = (await response.json()) as { providers?: unknown }
+  if (!payload || !Array.isArray(payload.providers)) return []
+
+  const parsed = payload.providers.filter(isSettingsAuthProvider)
+  const configuredByProvider = new Map(parsed.map((entry) => [entry.provider, entry]))
+
+  return SETTINGS_AUTH_PROVIDER_ORDER.map(
+    (provider) =>
+      configuredByProvider.get(provider) ?? {
+        provider,
+        configured: false,
+      },
+  )
+}
+
+async function updateSettingsAuthProviders(wsUrl: string, values: Partial<Record<SettingsAuthProviderId, string>>): Promise<void> {
+  const endpoint = resolveApiEndpoint(wsUrl, '/api/settings/auth')
+  const response = await fetch(endpoint, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(values),
+  })
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response))
+  }
+}
+
+async function deleteSettingsAuthProvider(wsUrl: string, provider: SettingsAuthProviderId): Promise<void> {
+  const endpoint = resolveApiEndpoint(wsUrl, `/api/settings/auth/${encodeURIComponent(provider)}`)
   const response = await fetch(endpoint, { method: 'DELETE' })
   if (!response.ok) {
     throw new Error(await readApiError(response))
@@ -366,6 +450,30 @@ function StatusBadge({ isSet }: { isSet: boolean }) {
   )
 }
 
+function AuthStatusBadge({ configured }: { configured: boolean }) {
+  if (configured) {
+    return (
+      <Badge
+        variant="outline"
+        className="gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+      >
+        <Check className="size-3" />
+        Configured
+      </Badge>
+    )
+  }
+
+  return (
+    <Badge
+      variant="outline"
+      className="gap-1 border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+    >
+      <AlertTriangle className="size-3" />
+      Not configured
+    </Badge>
+  )
+}
+
 function SlackConnectionBadge({ status }: { status: SlackStatusEvent | null }) {
   const state = status?.state ?? 'disabled'
 
@@ -407,6 +515,115 @@ function ToggleRow({
         {description ? <p className="text-[11px] text-muted-foreground">{description}</p> : null}
       </div>
       <Switch id={switchId} checked={checked} onCheckedChange={onChange} />
+    </div>
+  )
+}
+
+function AuthProviderRow({
+  provider,
+  authStatus,
+  draftValue,
+  isRevealed,
+  isSaving,
+  isDeleting,
+  onDraftChange,
+  onToggleReveal,
+  onSave,
+  onDelete,
+}: {
+  provider: SettingsAuthProviderId
+  authStatus: SettingsAuthProvider
+  draftValue: string
+  isRevealed: boolean
+  isSaving: boolean
+  isDeleting: boolean
+  onDraftChange: (value: string) => void
+  onToggleReveal: () => void
+  onSave: () => void
+  onDelete: () => void
+}) {
+  const metadata = SETTINGS_AUTH_PROVIDER_META[provider]
+  const busy = isSaving || isDeleting
+
+  return (
+    <div className="rounded-lg border border-border bg-card/50 p-4 transition-colors hover:bg-card/80">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="text-[13px] font-semibold text-foreground">{metadata.label}</p>
+            <AuthStatusBadge configured={authStatus.configured} />
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">{metadata.description}</p>
+          {authStatus.configured ? (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Stored credential: <code className="font-mono">{authStatus.maskedValue ?? '********'}</code>
+            </p>
+          ) : (
+            <p className="mt-1 text-[11px] text-muted-foreground">No credential stored yet.</p>
+          )}
+        </div>
+
+        <a
+          href={metadata.helpUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          Get key
+          <ExternalLink className="size-3" />
+        </a>
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        <div className="relative flex-1">
+          <Input
+            type={isRevealed ? 'text' : 'password'}
+            placeholder={authStatus.configured ? (authStatus.maskedValue ?? metadata.placeholder) : metadata.placeholder}
+            value={draftValue}
+            onChange={(event) => onDraftChange(event.target.value)}
+            className="pr-9 font-mono text-xs"
+            autoComplete="off"
+            spellCheck={false}
+            disabled={busy}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onToggleReveal}
+            disabled={busy}
+            className="absolute right-1 top-1/2 size-7 -translate-y-1/2 text-muted-foreground/70 hover:text-foreground"
+            title={isRevealed ? 'Hide value' : 'Show value'}
+          >
+            {isRevealed ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+          </Button>
+        </div>
+
+        <Button
+          type="button"
+          size="sm"
+          onClick={onSave}
+          disabled={!draftValue.trim() || busy}
+          className="gap-1.5"
+        >
+          {isSaving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+          {isSaving ? 'Saving' : 'Save'}
+        </Button>
+
+        {authStatus.configured ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onDelete}
+            disabled={busy}
+            className="gap-1.5 text-muted-foreground hover:text-destructive"
+          >
+            {isDeleting ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+            {isDeleting ? 'Removing' : 'Remove'}
+          </Button>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -532,19 +749,27 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
   const [envVariables, setEnvVariables] = useState<SettingsEnvVariable[]>([])
   const [draftByName, setDraftByName] = useState<Record<string, string>>({})
   const [revealByName, setRevealByName] = useState<Record<string, boolean>>({})
+  const [authProviders, setAuthProviders] = useState<SettingsAuthProvider[]>([])
+  const [authDraftByProvider, setAuthDraftByProvider] = useState<Partial<Record<SettingsAuthProviderId, string>>>({})
+  const [authRevealByProvider, setAuthRevealByProvider] = useState<Partial<Record<SettingsAuthProviderId, boolean>>>({})
 
   const [slackConfig, setSlackConfig] = useState<SlackSettingsConfig | null>(null)
   const [slackDraft, setSlackDraft] = useState<SlackDraft | null>(null)
   const [slackChannels, setSlackChannels] = useState<SlackChannelDescriptor[]>([])
   const [slackStatusFromApi, setSlackStatusFromApi] = useState<SlackStatusEvent | null>(null)
 
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [slackError, setSlackError] = useState<string | null>(null)
   const [slackSuccess, setSlackSuccess] = useState<string | null>(null)
 
+  const [isLoadingAuth, setIsLoadingAuth] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingSlack, setIsLoadingSlack] = useState(false)
+  const [savingAuthProvider, setSavingAuthProvider] = useState<SettingsAuthProviderId | null>(null)
+  const [deletingAuthProvider, setDeletingAuthProvider] = useState<SettingsAuthProviderId | null>(null)
   const [savingVar, setSavingVar] = useState<string | null>(null)
   const [deletingVar, setDeletingVar] = useState<string | null>(null)
   const [isSavingSlack, setIsSavingSlack] = useState(false)
@@ -554,6 +779,9 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
 
   const effectiveSlackStatus = slackStatus ?? slackStatusFromApi
   const managerOptions = useMemo(() => managers.filter((agent) => agent.role === 'manager'), [managers])
+  const authProviderById = useMemo(() => {
+    return new Map(authProviders.map((entry) => [entry.provider, entry]))
+  }, [authProviders])
 
   const loadVariables = useCallback(async () => {
     setIsLoading(true)
@@ -585,14 +813,42 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
     }
   }, [wsUrl])
 
+  const loadAuth = useCallback(async () => {
+    setIsLoadingAuth(true)
+    setAuthError(null)
+
+    try {
+      const result = await fetchSettingsAuthProviders(wsUrl)
+      setAuthProviders(result)
+    } catch (err) {
+      setAuthError(toErrorMessage(err))
+    } finally {
+      setIsLoadingAuth(false)
+    }
+  }, [wsUrl])
+
   useEffect(() => {
     if (!open) return
-    void Promise.all([loadVariables(), loadSlack()])
-  }, [open, loadVariables, loadSlack])
+    void Promise.all([loadVariables(), loadSlack(), loadAuth()])
+  }, [open, loadVariables, loadSlack, loadAuth])
 
   const handleOpenChange = (next: boolean) => {
-    if (!next && (savingVar || deletingVar || isSavingSlack || isTestingSlack || isDisablingSlack)) return
+    if (
+      !next &&
+      (savingAuthProvider ||
+        deletingAuthProvider ||
+        savingVar ||
+        deletingVar ||
+        isSavingSlack ||
+        isTestingSlack ||
+        isDisablingSlack)
+    ) {
+      return
+    }
+
     if (!next) {
+      setAuthError(null)
+      setAuthSuccess(null)
       setError(null)
       setSuccess(null)
       setSlackError(null)
@@ -638,6 +894,46 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
       setError(toErrorMessage(err))
     } finally {
       setDeletingVar(null)
+    }
+  }
+
+  const handleSaveAuth = async (provider: SettingsAuthProviderId) => {
+    const value = authDraftByProvider[provider]?.trim() ?? ''
+    if (!value) {
+      setAuthError(`Enter a value for ${SETTINGS_AUTH_PROVIDER_META[provider].label} before saving.`)
+      return
+    }
+
+    setAuthError(null)
+    setAuthSuccess(null)
+    setSavingAuthProvider(provider)
+
+    try {
+      await updateSettingsAuthProviders(wsUrl, { [provider]: value })
+      setAuthDraftByProvider((prev) => ({ ...prev, [provider]: '' }))
+      setAuthSuccess(`${SETTINGS_AUTH_PROVIDER_META[provider].label} saved.`)
+      await loadAuth()
+    } catch (err) {
+      setAuthError(toErrorMessage(err))
+    } finally {
+      setSavingAuthProvider(null)
+    }
+  }
+
+  const handleDeleteAuth = async (provider: SettingsAuthProviderId) => {
+    setAuthError(null)
+    setAuthSuccess(null)
+    setDeletingAuthProvider(provider)
+
+    try {
+      await deleteSettingsAuthProvider(wsUrl, provider)
+      setAuthDraftByProvider((prev) => ({ ...prev, [provider]: '' }))
+      setAuthSuccess(`${SETTINGS_AUTH_PROVIDER_META[provider].label} removed.`)
+      await loadAuth()
+    } catch (err) {
+      setAuthError(toErrorMessage(err))
+    } finally {
+      setDeletingAuthProvider(null)
     }
   }
 
@@ -739,7 +1035,7 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
         <DialogHeader className="space-y-1 border-b border-border px-6 py-4">
           <DialogTitle className="text-base">Settings</DialogTitle>
           <DialogDescription>
-            Configure runtime integrations and environment variables used by your agents.
+            Configure authentication, runtime integrations, and environment variables used by your agents.
           </DialogDescription>
         </DialogHeader>
 
@@ -1093,6 +1389,73 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
                       {isSavingSlack ? 'Saving...' : 'Save Slack settings'}
                     </Button>
                   </div>
+                </div>
+              )}
+            </section>
+
+            <Separator />
+
+            <section>
+              <div className="mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="flex size-7 items-center justify-center rounded-md bg-primary/10">
+                    <KeyRound className="size-3.5 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold leading-tight">Authentication</h3>
+                    <p className="text-[11px] text-muted-foreground">Stored in ~/.swarm/auth/auth.json</p>
+                  </div>
+                </div>
+              </div>
+
+              {authError ? (
+                <div className="mb-3 flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
+                  <p className="text-xs text-destructive">{authError}</p>
+                </div>
+              ) : null}
+
+              {authSuccess ? (
+                <div className="mb-3 flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-3 py-2">
+                  <Check className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400">{authSuccess}</p>
+                </div>
+              ) : null}
+
+              {isLoadingAuth ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {SETTINGS_AUTH_PROVIDER_ORDER.map((provider) => {
+                    const authStatus = authProviderById.get(provider) ?? {
+                      provider,
+                      configured: false,
+                    }
+
+                    return (
+                      <AuthProviderRow
+                        key={provider}
+                        provider={provider}
+                        authStatus={authStatus}
+                        draftValue={authDraftByProvider[provider] ?? ''}
+                        isRevealed={authRevealByProvider[provider] === true}
+                        isSaving={savingAuthProvider === provider}
+                        isDeleting={deletingAuthProvider === provider}
+                        onDraftChange={(value) => {
+                          setAuthDraftByProvider((prev) => ({ ...prev, [provider]: value }))
+                          setAuthError(null)
+                          setAuthSuccess(null)
+                        }}
+                        onToggleReveal={() =>
+                          setAuthRevealByProvider((prev) => ({ ...prev, [provider]: !prev[provider] }))
+                        }
+                        onSave={() => void handleSaveAuth(provider)}
+                        onDelete={() => void handleDeleteAuth(provider)}
+                      />
+                    )
+                  })}
                 </div>
               )}
             </section>
