@@ -116,7 +116,7 @@ function DeleteOverlayButton({
         'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
         isSelected
           ? 'bg-gradient-to-r from-sidebar-accent/0 to-sidebar-accent'
-          : 'bg-gradient-to-r from-sidebar/0 to-sidebar group-hover:from-sidebar-accent/0 group-hover:to-sidebar-accent/50',
+          : 'bg-gradient-to-r from-sidebar/0 to-sidebar group-hover:from-sidebar-accent/0 group-hover:to-sidebar-accent/90',
       )}
     >
       <button
