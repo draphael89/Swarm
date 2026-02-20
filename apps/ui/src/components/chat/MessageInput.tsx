@@ -49,8 +49,13 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     const textarea = textareaRef.current
     if (!textarea) return
 
+    // Temporarily hide overflow so scrollbar gutter doesn't affect scrollHeight
+    textarea.style.overflowY = 'hidden'
     textarea.style.height = 'auto'
-    textarea.style.height = `${Math.min(textarea.scrollHeight, TEXTAREA_MAX_HEIGHT)}px`
+    const nextHeight = Math.min(textarea.scrollHeight, TEXTAREA_MAX_HEIGHT)
+    textarea.style.height = `${nextHeight}px`
+    // Only enable scrolling when content actually exceeds max height
+    textarea.style.overflowY = textarea.scrollHeight > TEXTAREA_MAX_HEIGHT ? 'auto' : 'hidden'
   }, [])
 
   const blockedByLoading = isLoading && !allowWhileLoading
@@ -184,7 +189,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       : `Message ${agentLabel}...`
 
   return (
-    <form onSubmit={handleSubmit} className="sticky bottom-0 bg-background p-3">
+    <form onSubmit={handleSubmit} className="sticky bottom-0 shrink-0 bg-background p-3">
       <div className="overflow-hidden rounded-2xl border border-border">
         <AttachedFiles attachments={attachedFiles} onRemove={removeAttachment} />
 
@@ -199,8 +204,8 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
             disabled={disabled}
             rows={1}
             className={cn(
-              'flex-1 resize-none border-0 bg-transparent text-sm text-foreground shadow-none focus:outline-none',
-              'min-h-[44px] max-h-[186px] overflow-y-auto',
+              'w-full resize-none border-0 bg-transparent text-sm leading-normal text-foreground shadow-none focus:outline-none',
+              'min-h-[44px]',
               'px-4 pt-3 pb-2',
               '[&::-webkit-scrollbar]:w-1.5',
               '[&::-webkit-scrollbar-track]:bg-transparent',
