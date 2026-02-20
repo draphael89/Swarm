@@ -12,6 +12,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
+import type { ArtifactReference } from '@/lib/artifacts'
 import { isImageAttachment } from '@/lib/file-attachments'
 import { cn } from '@/lib/utils'
 import type {
@@ -25,6 +26,7 @@ interface MessageListProps {
   messages: ConversationEntry[]
   isLoading: boolean
   onSuggestionClick?: (suggestion: string) => void
+  onArtifactClick?: (artifact: ArtifactReference) => void
 }
 
 const suggestions = ['Plan a swarm workflow', 'Debug manager state', 'Summarize latest run']
@@ -554,7 +556,13 @@ function MessageFileAttachments({
   )
 }
 
-function ConversationMessage({ message }: { message: ConversationMessageEntry }) {
+function ConversationMessage({
+  message,
+  onArtifactClick,
+}: {
+  message: ConversationMessageEntry
+  onArtifactClick?: (artifact: ArtifactReference) => void
+}) {
   const normalizedText = message.text.trim()
   const hasText = normalizedText.length > 0 && normalizedText !== '.'
   const attachments = message.attachments ?? []
@@ -603,7 +611,7 @@ function ConversationMessage({ message }: { message: ConversationMessageEntry })
 
   return (
     <div className="space-y-2 text-foreground">
-      {hasText ? <MarkdownMessage content={normalizedText} /> : null}
+      {hasText ? <MarkdownMessage content={normalizedText} onArtifactClick={onArtifactClick} /> : null}
       <MessageImageAttachments attachments={imageAttachments} isUser={false} />
       <MessageFileAttachments attachments={fileAttachments} isUser={false} />
       {timestampLabel ? <p className="text-[11px] leading-none text-muted-foreground/70">{timestampLabel}</p> : null}
@@ -646,7 +654,7 @@ function EmptyState({ onSuggestionClick }: { onSuggestionClick?: (suggestion: st
   )
 }
 
-export function MessageList({ messages, isLoading, onSuggestionClick }: MessageListProps) {
+export function MessageList({ messages, isLoading, onSuggestionClick, onArtifactClick }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
   const displayEntries = useMemo(() => buildDisplayEntries(messages), [messages])
@@ -672,7 +680,13 @@ export function MessageList({ messages, isLoading, onSuggestionClick }: MessageL
       <div className="space-y-2 p-3">
         {displayEntries.map((entry) => {
           if (entry.type === 'conversation_message') {
-            return <ConversationMessage key={entry.id} message={entry.message} />
+            return (
+              <ConversationMessage
+                key={entry.id}
+                message={entry.message}
+                onArtifactClick={onArtifactClick}
+              />
+            )
           }
 
           if (entry.type === 'tool_execution') {

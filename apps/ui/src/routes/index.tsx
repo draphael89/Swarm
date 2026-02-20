@@ -10,6 +10,7 @@ import {
 } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { AgentSidebar } from '@/components/chat/AgentSidebar'
+import { ArtifactPanel } from '@/components/chat/ArtifactPanel'
 import { ChatHeader } from '@/components/chat/ChatHeader'
 import { MessageInput, type MessageInputHandle } from '@/components/chat/MessageInput'
 import { MessageList } from '@/components/chat/MessageList'
@@ -23,6 +24,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { chooseFallbackAgentId } from '@/lib/agent-hierarchy'
+import type { ArtifactReference } from '@/lib/artifacts'
 import { ManagerWsClient, type ManagerWsState } from '@/lib/ws-client'
 import {
   MANAGER_MODEL_PRESETS,
@@ -68,6 +70,7 @@ export function IndexPage() {
   const [isDeletingManager, setIsDeletingManager] = useState(false)
 
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
+  const [activeArtifact, setActiveArtifact] = useState<ArtifactReference | null>(null)
   const dragDepthRef = useRef(0)
 
   useEffect(() => {
@@ -112,6 +115,10 @@ export function IndexPage() {
   }, [activeAgentId, state.agents, state.statuses])
 
   const isLoading = activeAgentStatus === 'streaming'
+
+  useEffect(() => {
+    setActiveArtifact(null)
+  }, [activeAgentId])
 
   const handleSend = (text: string, attachments?: ConversationAttachment[]) => {
     if (!activeAgentId) return
@@ -286,6 +293,14 @@ export function IndexPage() {
     messageInputRef.current?.setInput(prompt)
   }
 
+  const handleOpenArtifact = useCallback((artifact: ArtifactReference) => {
+    setActiveArtifact(artifact)
+  }, [])
+
+  const handleCloseArtifact = useCallback(() => {
+    setActiveArtifact(null)
+  }, [])
+
   const handleDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
     if (!event.dataTransfer?.types.includes('Files')) return
     event.preventDefault()
@@ -367,6 +382,7 @@ export function IndexPage() {
             messages={state.messages}
             isLoading={isLoading}
             onSuggestionClick={handleSuggestionClick}
+            onArtifactClick={handleOpenArtifact}
           />
 
           <MessageInput
@@ -379,6 +395,13 @@ export function IndexPage() {
           />
         </div>
       </div>
+
+      <ArtifactPanel
+        artifact={activeArtifact}
+        wsUrl={wsUrl}
+        onClose={handleCloseArtifact}
+        onArtifactClick={handleOpenArtifact}
+      />
 
       <Dialog
         open={isCreateManagerDialogOpen}

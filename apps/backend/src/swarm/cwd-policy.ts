@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { basename, resolve, sep } from "node:path";
 
 const CWD_ERROR_MESSAGES = {
   REQUIRED: "Directory path must be a non-empty string.",
@@ -157,6 +157,21 @@ export async function validateDirectory(
       message: CWD_ERROR_MESSAGES.NOT_FOUND
     };
   }
+}
+
+export function isPathWithinRoots(pathValue: string, roots: string[]): boolean {
+  return roots.some((root) => isPathWithinRoot(pathValue, root));
+}
+
+export function isPathWithinRoot(pathValue: string, rootPath: string): boolean {
+  const normalizedPath = resolveToRealPath(pathValue);
+  const normalizedRoot = resolveToRealPath(rootPath);
+
+  if (normalizedPath === normalizedRoot) {
+    return true;
+  }
+
+  return normalizedPath.startsWith(`${normalizedRoot}${sep}`);
 }
 
 function resolveToRealPath(pathValue: string): string {
