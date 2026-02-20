@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const RESTART_SIGNAL = "SIGUSR1";
 const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 const FORCE_KILL_AFTER_MS = 15_000;
-const DEFAULT_COMMAND = "pnpm prod";
+const DEFAULT_COMMAND = "pnpm i && pnpm prod";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoHash = createHash("sha1").update(repoRoot).digest("hex").slice(0, 10);
