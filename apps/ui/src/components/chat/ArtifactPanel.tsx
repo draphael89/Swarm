@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ExternalLink, Loader2, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ExternalLink, FileCode2, FileText, Loader2, X } from 'lucide-react'
 import type { ArtifactReference } from '@/lib/artifacts'
 import { toVscodeInsidersHref } from '@/lib/artifacts'
 import { cn } from '@/lib/utils'
@@ -21,19 +21,23 @@ const MARKDOWN_FILE_PATTERN = /\.(md|markdown|mdx)$/i
 
 export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: ArtifactPanelProps) {
   const [isVisible, setIsVisible] = useState(false)
+  const [isClosing, setIsClosing] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [content, setContent] = useState('')
   const [resolvedPath, setResolvedPath] = useState<string | null>(null)
+  const closingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const artifactPath = artifact?.path ?? null
 
   useEffect(() => {
     if (!artifactPath) {
       setIsVisible(false)
+      setIsClosing(false)
       return
     }
 
+    setIsClosing(false)
     setIsVisible(false)
     const frame = window.requestAnimationFrame(() => {
       setIsVisible(true)
@@ -100,7 +104,7 @@ export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: Art
 
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        onClose()
+        handleAnimatedClose()
       }
     }
 
@@ -110,87 +114,148 @@ export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: Art
     }
   }, [artifactPath, onClose])
 
+  useEffect(() => {
+    return () => {
+      if (closingTimerRef.current) {
+        clearTimeout(closingTimerRef.current)
+      }
+    }
+  }, [])
+
+  const handleAnimatedClose = () => {
+    setIsClosing(true)
+    setIsVisible(false)
+    if (closingTimerRef.current) {
+      clearTimeout(closingTimerRef.current)
+    }
+    closingTimerRef.current = setTimeout(() => {
+      setIsClosing(false)
+      onClose()
+    }, 260)
+  }
+
   const displayPath = resolvedPath ?? artifactPath ?? ''
   const isMarkdown = useMemo(() => MARKDOWN_FILE_PATTERN.test(displayPath), [displayPath])
 
-  if (!artifact) {
+  if (!artifact && !isClosing) {
     return null
   }
 
+  const FileIcon = isMarkdown ? FileText : FileCode2
+
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label={`Artifact: ${artifact.fileName}`}>
+    <div
+      className={cn(
+        'fixed inset-0 z-50 flex justify-end',
+        'transition-[backdrop-filter,background-color] duration-300 ease-out',
+        isVisible
+          ? 'bg-background/60 backdrop-blur-[2px]'
+          : 'pointer-events-none bg-transparent backdrop-blur-0',
+        isClosing && !isVisible && 'pointer-events-none',
+      )}
+      role="dialog"
+      aria-modal="true"
+      aria-label={artifact ? `Artifact: ${artifact.fileName}` : 'Artifact panel'}
+    >
       <button
         type="button"
-        className="flex-1 bg-background/55 backdrop-blur-[1px]"
+        className="flex-1"
         aria-label="Close artifact panel"
-        onClick={onClose}
+        onClick={handleAnimatedClose}
+        tabIndex={isVisible ? 0 : -1}
       />
 
       <aside
         className={cn(
-          'relative h-full w-full max-w-[min(920px,92vw)] border-l border-border bg-background shadow-2xl',
-          'transition-transform duration-200 ease-out',
-          isVisible ? 'translate-x-0' : 'translate-x-full',
+          'relative flex h-full w-full max-w-[min(880px,90vw)] flex-col',
+          'border-l border-border/80 bg-background',
+          'shadow-[-8px_0_32px_-4px_rgba(0,0,0,0.12)]',
+          'transition-all duration-[260ms] ease-[cubic-bezier(0.32,0.72,0,1)]',
+          isVisible
+            ? 'translate-x-0 opacity-100'
+            : 'translate-x-[40%] opacity-0',
         )}
       >
-        <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-          <div className="min-w-0 space-y-0.5">
-            <h2 className="truncate text-sm font-semibold text-foreground">{artifact.fileName}</h2>
-            <p className="truncate text-xs text-muted-foreground">{displayPath}</p>
+        {/* Header */}
+        <header className="flex h-[62px] shrink-0 items-center justify-between gap-3 border-b border-border/80 bg-card/80 px-5 backdrop-blur">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <FileIcon className="size-3.5" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-bold text-foreground">{artifact?.fileName}</h2>
+              <p className="truncate font-mono text-[11px] text-muted-foreground">{displayPath}</p>
+            </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5">
             <a
-              href={toVscodeInsidersHref(displayPath || artifact.path)}
+              href={toVscodeInsidersHref(displayPath || artifact?.path || '')}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted"
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium',
+                'text-muted-foreground transition-colors',
+                'hover:bg-muted hover:text-foreground',
+              )}
             >
               <ExternalLink className="size-3" aria-hidden="true" />
-              VS Code
+              <span className="hidden sm:inline">Open in VS Code</span>
+              <span className="sm:hidden">VS Code</span>
             </a>
+
+            <div className="mx-0.5 h-4 w-px bg-border/60" aria-hidden="true" />
 
             <button
               type="button"
-              className="inline-flex size-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted"
-              onClick={onClose}
+              className={cn(
+                'inline-flex size-8 items-center justify-center rounded-md',
+                'text-muted-foreground transition-colors',
+                'hover:bg-muted hover:text-foreground',
+              )}
+              onClick={handleAnimatedClose}
               aria-label="Close artifact panel"
             >
-              <X className="size-3.5" aria-hidden="true" />
+              <X className="size-4" aria-hidden="true" />
             </button>
           </div>
         </header>
 
+        {/* Content */}
         <div
           className={cn(
-            'h-[calc(100%-61px)] overflow-y-auto px-4 py-4',
+            'min-h-0 flex-1 overflow-y-auto',
             '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent',
-            '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border/70',
+            '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent',
+            '[scrollbar-width:thin] [scrollbar-color:transparent_transparent]',
+            'hover:[&::-webkit-scrollbar-thumb]:bg-border hover:[scrollbar-color:var(--color-border)_transparent]',
           )}
         >
-          {isLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-              <span>Loading file…</span>
-            </div>
-          ) : error ? (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </div>
-          ) : isMarkdown ? (
-            <article className="mx-auto max-w-3xl">
-              <MarkdownMessage
-                content={content}
-                variant="document"
-                enableMermaid
-                onArtifactClick={onArtifactClick}
-              />
-            </article>
-          ) : (
-            <pre className="overflow-x-auto rounded-md border border-border/70 bg-muted/30 p-3">
-              <code className="font-mono text-[13px] leading-relaxed whitespace-pre">{content}</code>
-            </pre>
-          )}
+          <div className="px-6 py-6">
+            {isLoading ? (
+              <div className="flex items-center gap-2.5 py-12 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                <span>Loading file…</span>
+              </div>
+            ) : error ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                {error}
+              </div>
+            ) : isMarkdown ? (
+              <article className="mx-auto max-w-[680px]">
+                <MarkdownMessage
+                  content={content}
+                  variant="document"
+                  enableMermaid
+                  onArtifactClick={onArtifactClick}
+                />
+              </article>
+            ) : (
+              <pre className="overflow-x-auto rounded-lg border border-border/60 bg-muted/25 p-4">
+                <code className="font-mono text-[13px] leading-relaxed whitespace-pre text-foreground/90">{content}</code>
+              </pre>
+            )}
+          </div>
         </div>
       </aside>
     </div>

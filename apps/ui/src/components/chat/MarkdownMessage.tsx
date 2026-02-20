@@ -1,5 +1,5 @@
 import { memo, useEffect, useId, useMemo, useState } from 'react'
-import { AlertCircle, Eye, FileText } from 'lucide-react'
+import { AlertCircle, ChevronRight, FileCode2, FileText } from 'lucide-react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -10,6 +10,8 @@ import {
 import { cn } from '@/lib/utils'
 
 const EXTRA_ALLOWED_PROTOCOLS = /^(vscode-insiders|vscode|swarm-file):\/\//i
+
+const MARKDOWN_EXTENSION_PATTERN = /\.(md|markdown|mdx)$/i
 
 let mermaidInitialized = false
 
@@ -35,7 +37,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
   const normalizedContent = useMemo(() => normalizeArtifactShortcodes(content), [content])
 
   return (
-    <div className={cn(isDocument ? 'text-[15px] leading-7' : 'text-sm leading-relaxed')}>
+    <div className={cn(isDocument ? 'text-[15px] leading-[1.8]' : 'text-sm leading-relaxed')}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         urlTransform={urlTransform}
@@ -44,9 +46,10 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             return (
               <p
                 className={cn(
+                  'break-words whitespace-pre-wrap',
                   isDocument
-                    ? 'mb-4 last:mb-0 break-words whitespace-pre-wrap'
-                    : 'mb-2 last:mb-0 break-words whitespace-pre-wrap',
+                    ? 'mb-5 text-foreground/90 last:mb-0'
+                    : 'mb-2 last:mb-0',
                 )}
               >
                 {children}
@@ -57,7 +60,9 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             return (
               <h1
                 className={cn(
-                  isDocument ? 'mb-4 text-3xl font-semibold tracking-tight' : 'mb-2 text-base font-semibold',
+                  isDocument
+                    ? 'mb-4 mt-8 border-b border-border/50 pb-3 text-2xl font-bold tracking-tight text-foreground first:mt-0'
+                    : 'mb-2 text-base font-semibold',
                 )}
               >
                 {children}
@@ -68,7 +73,9 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             return (
               <h2
                 className={cn(
-                  isDocument ? 'mb-3 text-2xl font-semibold tracking-tight' : 'mb-2 text-[15px] font-semibold',
+                  isDocument
+                    ? 'mb-3 mt-7 border-b border-border/40 pb-2 text-xl font-semibold tracking-tight text-foreground first:mt-0'
+                    : 'mb-2 text-[15px] font-semibold',
                 )}
               >
                 {children}
@@ -79,11 +86,26 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             return (
               <h3
                 className={cn(
-                  isDocument ? 'mb-2 text-xl font-semibold tracking-tight' : 'mb-2 text-sm font-semibold',
+                  isDocument
+                    ? 'mb-2 mt-6 text-lg font-semibold tracking-tight text-foreground first:mt-0'
+                    : 'mb-2 text-sm font-semibold',
                 )}
               >
                 {children}
               </h3>
+            )
+          },
+          h4({ children }) {
+            return (
+              <h4
+                className={cn(
+                  isDocument
+                    ? 'mb-2 mt-5 text-base font-semibold text-foreground first:mt-0'
+                    : 'mb-2 text-sm font-semibold',
+                )}
+              >
+                {children}
+              </h4>
             )
           },
           ul({ children }) {
@@ -91,7 +113,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
               <ul
                 className={cn(
                   isDocument
-                    ? 'mb-4 list-disc space-y-1 pl-6 last:mb-0'
+                    ? 'mb-5 list-disc space-y-1.5 pl-6 text-foreground/90 last:mb-0'
                     : 'mb-2 list-disc space-y-0.5 pl-5 last:mb-0',
                 )}
               >
@@ -104,7 +126,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
               <ol
                 className={cn(
                   isDocument
-                    ? 'mb-4 list-decimal space-y-1 pl-6 last:mb-0'
+                    ? 'mb-5 list-decimal space-y-1.5 pl-6 text-foreground/90 last:mb-0'
                     : 'mb-2 list-decimal space-y-0.5 pl-5 last:mb-0',
                 )}
               >
@@ -113,7 +135,22 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             )
           },
           li({ children }) {
-            return <li className="break-words">{children}</li>
+            return <li className="break-words [&>p]:mb-1.5 [&>p]:last:mb-0">{children}</li>
+          },
+          blockquote({ children }) {
+            return (
+              <blockquote
+                className={cn(
+                  'my-4 border-l-2 pl-4 italic text-muted-foreground',
+                  isDocument ? 'border-primary/30 text-[15px]' : 'border-border text-sm',
+                )}
+              >
+                {children}
+              </blockquote>
+            )
+          },
+          hr() {
+            return <hr className={cn('my-6 border-border/50', isDocument && 'my-8')} />
           },
           a({ children, href }) {
             const artifact = parseArtifactReference(href)
@@ -127,9 +164,9 @@ export const MarkdownMessage = memo(function MarkdownMessage({
                 target="_blank"
                 rel="noopener noreferrer"
                 className={cn(
-                  isDocument
-                    ? 'break-all text-primary underline underline-offset-2 hover:text-primary/80'
-                    : 'break-all text-primary underline underline-offset-2',
+                  'break-all text-primary underline decoration-primary/30 underline-offset-2',
+                  'transition-colors hover:decoration-primary/60',
+                  isDocument && 'hover:text-primary/80',
                 )}
               >
                 {children}
@@ -150,26 +187,33 @@ export const MarkdownMessage = memo(function MarkdownMessage({
               }
 
               return (
-                <pre
-                  className={cn(
-                    isDocument
-                      ? 'my-3 overflow-x-auto rounded-md border border-border/70 bg-muted/35 p-3'
-                      : 'my-2 overflow-x-auto rounded-md border border-border/70 bg-muted/45 p-2',
-                  )}
-                >
-                  <code className={cn(isDocument ? 'font-mono text-[13px] text-foreground' : 'font-mono text-xs text-foreground')}>
-                    {normalizedCode}
-                  </code>
-                </pre>
+                <div className={cn(isDocument ? 'my-5' : 'my-2')}>
+                  {language ? (
+                    <div className="flex items-center rounded-t-lg border border-b-0 border-border/50 bg-muted/40 px-3 py-1.5">
+                      <span className="font-mono text-[11px] font-medium text-muted-foreground">{language}</span>
+                    </div>
+                  ) : null}
+                  <pre
+                    className={cn(
+                      'overflow-x-auto border border-border/50 bg-muted/25 p-4',
+                      language ? 'rounded-b-lg' : 'rounded-lg',
+                    )}
+                  >
+                    <code className={cn('font-mono text-foreground/90', isDocument ? 'text-[13px] leading-6' : 'text-xs leading-5')}>
+                      {normalizedCode}
+                    </code>
+                  </pre>
+                </div>
               )
             }
 
             return (
               <code
                 className={cn(
+                  'rounded bg-muted/70 font-mono text-foreground',
                   isDocument
-                    ? 'rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[13px] text-foreground'
-                    : 'rounded-sm bg-muted px-1 py-0.5 font-mono text-xs text-foreground',
+                    ? 'px-1.5 py-0.5 text-[13px]'
+                    : 'px-1 py-0.5 text-xs',
                 )}
               >
                 {children}
@@ -179,8 +223,31 @@ export const MarkdownMessage = memo(function MarkdownMessage({
           pre({ children }) {
             return <>{children}</>
           },
+          table({ children }) {
+            return (
+              <div className={cn('my-4 overflow-x-auto', isDocument && 'my-5')}>
+                <table className="w-full border-collapse text-sm">
+                  {children}
+                </table>
+              </div>
+            )
+          },
+          th({ children }) {
+            return (
+              <th className="border border-border/50 bg-muted/40 px-3 py-2 text-left text-xs font-semibold text-foreground">
+                {children}
+              </th>
+            )
+          },
+          td({ children }) {
+            return (
+              <td className="border border-border/50 px-3 py-2 text-foreground/90">
+                {children}
+              </td>
+            )
+          },
           strong({ children }) {
-            return <strong className="font-semibold">{children}</strong>
+            return <strong className="font-semibold text-foreground">{children}</strong>
           },
           em({ children }) {
             return <em className="italic">{children}</em>
@@ -200,28 +267,33 @@ function ArtifactReferenceCard({
   artifact: ArtifactReference
   onClick: (artifact: ArtifactReference) => void
 }) {
+  const isMarkdownFile = MARKDOWN_EXTENSION_PATTERN.test(artifact.fileName)
+  const CardIcon = isMarkdownFile ? FileText : FileCode2
+
   return (
     <button
       type="button"
       onClick={() => onClick(artifact)}
       className={cn(
-        'my-2 flex w-full items-start gap-2 rounded-md border px-2.5 py-2 text-left transition-colors',
-        'border-sky-500/35 bg-sky-500/10 hover:bg-sky-500/15',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500/40',
+        'group/card my-2.5 flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left',
+        'border-primary/20 bg-primary/[0.04] transition-all duration-150',
+        'hover:border-primary/35 hover:bg-primary/[0.07] hover:shadow-sm',
+        'active:scale-[0.995]',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
       )}
       data-artifact-card="true"
     >
-      <span className="mt-0.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md bg-sky-500/20 text-sky-700 dark:text-sky-200">
-        <FileText className="size-3.5" aria-hidden="true" />
+      <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors group-hover/card:bg-primary/15">
+        <CardIcon className="size-4" aria-hidden="true" />
       </span>
 
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-xs font-semibold text-foreground">{artifact.fileName}</span>
-        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{artifact.path}</span>
+        <span className="block truncate text-[13px] font-semibold text-foreground">{artifact.fileName}</span>
+        <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">{artifact.path}</span>
       </span>
 
-      <span className="inline-flex size-6 shrink-0 items-center justify-center rounded bg-sky-500/15 text-sky-700 dark:text-sky-200">
-        <Eye className="size-3.5" aria-hidden="true" />
+      <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 transition-all group-hover/card:text-primary">
+        <ChevronRight className="size-4" aria-hidden="true" />
       </span>
     </button>
   )
@@ -275,20 +347,25 @@ function MermaidDiagram({ code }: { code: string }) {
   }, [code, diagramId])
 
   return (
-    <div className="my-3 overflow-auto rounded-md border border-border/70 bg-muted/20 p-3">
-      {error ? (
-        <div className="flex items-center gap-1.5 text-xs text-destructive">
-          <AlertCircle className="size-3.5" />
-          <span>Mermaid render error: {error}</span>
-        </div>
-      ) : svg ? (
-        <div
-          className="[&_svg]:h-auto [&_svg]:max-w-full"
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
-      ) : (
-        <p className="text-xs text-muted-foreground">Rendering Mermaid diagram…</p>
-      )}
+    <div className="my-5 overflow-hidden rounded-lg border border-border/50 bg-background">
+      <div className="flex items-center border-b border-border/40 bg-muted/30 px-3 py-1.5">
+        <span className="font-mono text-[11px] font-medium text-muted-foreground">mermaid</span>
+      </div>
+      <div className="overflow-auto p-4">
+        {error ? (
+          <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <AlertCircle className="size-3.5 shrink-0" />
+            <span>Mermaid render error: {error}</span>
+          </div>
+        ) : svg ? (
+          <div
+            className="flex justify-center [&_svg]:h-auto [&_svg]:max-w-full"
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        ) : (
+          <p className="py-4 text-center text-xs text-muted-foreground">Rendering diagram…</p>
+        )}
+      </div>
     </div>
   )
 }
