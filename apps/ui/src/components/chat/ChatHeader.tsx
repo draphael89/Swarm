@@ -14,39 +14,46 @@ interface ChatHeaderProps {
 export function ChatHeader({ connected, activeAgentId, activeAgentLabel, showNewChat, onNewChat }: ChatHeaderProps) {
   return (
     <header
-      className={cn(
-        'sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background px-3 py-2',
-      )}
+      className="sticky top-0 z-10 flex h-[53px] shrink-0 items-center justify-between border-b border-border/60 bg-background px-4"
     >
-      <div className="min-w-0 flex-1 mr-2">
-        <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Swarm</p>
-        <h1 className="truncate text-base font-semibold">{activeAgentLabel}</h1>
+      {/* Left: title */}
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <h1 className="truncate text-sm font-semibold">{activeAgentLabel}</h1>
       </div>
 
+      {/* Right: status badges & actions */}
       <div className="flex shrink-0 items-center gap-2">
-        <Badge variant={connected ? 'secondary' : 'outline'}>
+        <Badge
+          variant="outline"
+          className={cn(
+            'gap-1.5 border-border/60 px-2 py-0.5 text-[10px] font-medium',
+            connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400',
+          )}
+        >
           <span
             className={cn(
-              'mr-2 inline-block h-2 w-2 rounded-full',
+              'inline-block size-1.5 rounded-full',
               connected ? 'bg-emerald-500' : 'bg-amber-500',
             )}
           />
           {connected ? 'Connected' : 'Reconnecting'}
         </Badge>
 
-        <Badge variant="outline" className="hidden sm:inline-flex">
-          {activeAgentId ?? 'Unsubscribed'}
-        </Badge>
+        {activeAgentId ? (
+          <Badge variant="outline" className="hidden border-border/60 px-2 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-flex">
+            {activeAgentId}
+          </Badge>
+        ) : null}
 
         {showNewChat ? (
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className="h-8 gap-1.5 px-2.5"
+            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
             onClick={onNewChat}
             title="Clear conversation"
           >
-            <Trash2 className="size-3.5" />
+            <Trash2 className="size-3" />
             Clear
           </Button>
         ) : null}
