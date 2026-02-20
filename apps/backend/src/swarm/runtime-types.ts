@@ -1,0 +1,78 @@
+import type {
+  AgentDescriptor,
+  AgentStatus,
+  RequestedDeliveryMode,
+  SendMessageReceipt
+} from "./types.js";
+
+export interface RuntimeImageAttachment {
+  mimeType: string;
+  data: string;
+}
+
+export interface RuntimeUserMessage {
+  text: string;
+  images?: RuntimeImageAttachment[];
+}
+
+export type RuntimeUserMessageInput = string | RuntimeUserMessage;
+
+export interface RuntimeSessionMessage {
+  role: "user" | "assistant" | "system";
+  content: unknown;
+}
+
+export type RuntimeSessionEvent =
+  | { type: "agent_start" }
+  | { type: "agent_end" }
+  | { type: "turn_start" }
+  | { type: "turn_end"; toolResults: unknown[] }
+  | { type: "message_start"; message: RuntimeSessionMessage }
+  | { type: "message_update"; message: RuntimeSessionMessage }
+  | { type: "message_end"; message: RuntimeSessionMessage }
+  | {
+      type: "tool_execution_start";
+      toolName: string;
+      toolCallId: string;
+      args: unknown;
+    }
+  | {
+      type: "tool_execution_update";
+      toolName: string;
+      toolCallId: string;
+      partialResult: unknown;
+    }
+  | {
+      type: "tool_execution_end";
+      toolName: string;
+      toolCallId: string;
+      result: unknown;
+      isError: boolean;
+    }
+  | { type: "auto_compaction_start" }
+  | { type: "auto_compaction_end" }
+  | { type: "auto_retry_start" }
+  | { type: "auto_retry_end" };
+
+export interface SwarmRuntimeCallbacks {
+  onStatusChange: (agentId: string, status: AgentStatus, pendingCount: number) => void | Promise<void>;
+  onSessionEvent?: (agentId: string, event: RuntimeSessionEvent) => void | Promise<void>;
+  onAgentEnd?: (agentId: string) => void | Promise<void>;
+}
+
+export interface SwarmAgentRuntime {
+  readonly descriptor: AgentDescriptor;
+
+  getStatus(): AgentStatus;
+  getPendingCount(): number;
+
+  sendMessage(
+    input: RuntimeUserMessageInput,
+    requestedMode?: RequestedDeliveryMode
+  ): Promise<SendMessageReceipt>;
+
+  terminate(options?: { abort?: boolean }): Promise<void>;
+
+  getCustomEntries(customType: string): unknown[];
+  appendCustomEntry(customType: string, data?: unknown): void;
+}

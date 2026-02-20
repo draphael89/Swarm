@@ -38,7 +38,7 @@ export const Route = createFileRoute('/')({
   component: IndexPage,
 })
 
-const DEFAULT_MANAGER_MODEL: ManagerModelPreset = 'codex-5.3'
+const DEFAULT_MANAGER_MODEL: ManagerModelPreset = 'pi-codex'
 
 export function IndexPage() {
   const wsUrl = import.meta.env.VITE_SWARM_WS_URL ?? 'ws://127.0.0.1:47187'

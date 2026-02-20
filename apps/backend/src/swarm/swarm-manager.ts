@@ -10,8 +10,7 @@ import {
   createAgentSession,
   ModelRegistry,
   SessionManager,
-  type AgentSession,
-  type AgentSessionEvent
+  type AgentSession
 } from "@mariozechner/pi-coding-agent";
 import type { ServerEvent } from "../protocol/ws-types.js";
 import {
@@ -19,11 +18,8 @@ import {
   normalizeArchetypeId,
   type ArchetypePromptRegistry
 } from "./archetypes/archetype-prompt-registry.js";
-import {
-  AgentRuntime,
-  type RuntimeImageAttachment,
-  type RuntimeUserMessage
-} from "./agent-runtime.js";
+import { AgentRuntime } from "./agent-runtime.js";
+import { CodexAgentRuntime } from "./codex-agent-runtime.js";
 import {
   listDirectories,
   normalizeAllowlistRoots,
@@ -40,6 +36,12 @@ import {
   parseSwarmModelPreset,
   resolveModelDescriptorFromPreset
 } from "./model-presets.js";
+import type {
+  RuntimeImageAttachment,
+  RuntimeSessionEvent,
+  RuntimeUserMessage,
+  SwarmAgentRuntime
+} from "./runtime-types.js";
 import { buildSwarmTools, type SwarmToolHost } from "./swarm-tools.js";
 import type {
   AcceptedDeliveryMode,
@@ -165,7 +167,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private readonly defaultModelPreset: SwarmModelPreset;
 
   private readonly descriptors = new Map<string, AgentDescriptor>();
-  private readonly runtimes = new Map<string, AgentRuntime>();
+  private readonly runtimes = new Map<string, SwarmAgentRuntime>();
   private readonly conversationEntriesByAgentId = new Map<string, ConversationEntryEvent[]>();
   private readonly pendingReplyContextsByManagerId = new Map<string, PendingReplyContext[]>();
   private readonly originalProcessEnvByName = new Map<string, string | undefined>();
@@ -380,7 +382,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.descriptors.set(descriptor.agentId, descriptor);
     this.pendingReplyContextsByManagerId.set(managerId, []);
 
-    let runtime: AgentRuntime;
+    let runtime: SwarmAgentRuntime;
     try {
       runtime = await this.createRuntimeForDescriptor(
         descriptor,
@@ -838,6 +840,19 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
           maskedValue: resolvedValue ? SETTINGS_ENV_MASK : undefined
         });
       }
+    }
+
+    if (!requirements.some((requirement) => requirement.name === "CODEX_API_KEY")) {
+      const codexApiKey = this.resolveEnvValue("CODEX_API_KEY");
+      requirements.push({
+        name: "CODEX_API_KEY",
+        description: "API key used by the codex-app runtime when no existing Codex login session is available.",
+        required: false,
+        helpUrl: "https://platform.openai.com/api-keys",
+        skillName: "codex-app-runtime",
+        isSet: typeof codexApiKey === "string" && codexApiKey.trim().length > 0,
+        maskedValue: codexApiKey ? SETTINGS_ENV_MASK : undefined
+      });
     }
 
     requirements.sort((left, right) => {
@@ -1745,13 +1760,25 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   protected async createRuntimeForDescriptor(
     descriptor: AgentDescriptor,
     systemPrompt: string
-  ): Promise<AgentRuntime> {
+  ): Promise<SwarmAgentRuntime> {
+    if (isCodexAppServerModelDescriptor(descriptor.model)) {
+      return this.createCodexRuntimeForDescriptor(descriptor, systemPrompt);
+    }
+
+    return this.createPiRuntimeForDescriptor(descriptor, systemPrompt);
+  }
+
+  private async createPiRuntimeForDescriptor(
+    descriptor: AgentDescriptor,
+    systemPrompt: string
+  ): Promise<SwarmAgentRuntime> {
     const swarmTools = buildSwarmTools(this, descriptor);
     const thinkingLevel = normalizeThinkingLevel(descriptor.model.thinkingLevel);
     const runtimeAgentDir =
       descriptor.role === "manager" ? this.config.paths.managerAgentDir : this.config.paths.agentDir;
 
     this.logDebug("runtime:create:start", {
+      runtime: "pi",
       agentId: descriptor.agentId,
       role: descriptor.role,
       model: descriptor.model,
@@ -1822,6 +1849,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     session.setActiveToolsByName(Array.from(activeToolNames));
 
     this.logDebug("runtime:create:ready", {
+      runtime: "pi",
       agentId: descriptor.agentId,
       activeTools: session.getActiveToolNames(),
       systemPromptPreview: previewForLog(session.systemPrompt, 240),
@@ -1845,6 +1873,101 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       },
       now: this.now
     });
+  }
+
+  private async createCodexRuntimeForDescriptor(
+    descriptor: AgentDescriptor,
+    systemPrompt: string
+  ): Promise<SwarmAgentRuntime> {
+    const swarmTools = buildSwarmTools(this, descriptor);
+    const memoryResources = await this.getMemoryRuntimeResources();
+    const swarmContextFiles = await this.getSwarmContextFiles(descriptor.cwd);
+
+    const codexSystemPrompt = this.buildCodexRuntimeSystemPrompt(systemPrompt, {
+      memoryContextFile: memoryResources.memoryContextFile,
+      swarmContextFiles
+    });
+
+    this.logDebug("runtime:create:start", {
+      runtime: "codex-app-server",
+      agentId: descriptor.agentId,
+      role: descriptor.role,
+      model: descriptor.model,
+      archetypeId: descriptor.archetypeId,
+      cwd: descriptor.cwd
+    });
+
+    const runtime = await CodexAgentRuntime.create({
+      descriptor,
+      callbacks: {
+        onStatusChange: async (agentId, status, pendingCount) => {
+          await this.handleRuntimeStatus(agentId, status, pendingCount);
+        },
+        onSessionEvent: async (agentId, event) => {
+          await this.handleRuntimeSessionEvent(agentId, event);
+        },
+        onAgentEnd: async (agentId) => {
+          await this.handleRuntimeAgentEnd(agentId);
+        }
+      },
+      now: this.now,
+      systemPrompt: codexSystemPrompt,
+      tools: swarmTools
+    });
+
+    this.logDebug("runtime:create:ready", {
+      runtime: "codex-app-server",
+      agentId: descriptor.agentId,
+      activeTools: swarmTools.map((tool) => tool.name),
+      systemPromptPreview: previewForLog(codexSystemPrompt, 240)
+    });
+
+    return runtime;
+  }
+
+  private buildCodexRuntimeSystemPrompt(
+    baseSystemPrompt: string,
+    options: {
+      memoryContextFile: { path: string; content: string };
+      swarmContextFiles: Array<{ path: string; content: string }>;
+    }
+  ): string {
+    const sections: string[] = [];
+
+    const trimmedBase = baseSystemPrompt.trim();
+    if (trimmedBase.length > 0) {
+      sections.push(trimmedBase);
+    }
+
+    for (const contextFile of options.swarmContextFiles) {
+      const content = contextFile.content.trim();
+      if (!content) {
+        continue;
+      }
+
+      sections.push(
+        [
+          `Repository swarm policy (${contextFile.path}):`,
+          "----- BEGIN SWARM CONTEXT -----",
+          content,
+          "----- END SWARM CONTEXT -----"
+        ].join("\n")
+      );
+    }
+
+    const memoryContent = options.memoryContextFile.content.trim();
+    if (memoryContent) {
+      sections.push(
+        [
+          `Persistent swarm memory (${options.memoryContextFile.path}):`,
+          "----- BEGIN SWARM MEMORY -----",
+          memoryContent,
+          "----- END SWARM MEMORY -----"
+        ].join("\n")
+      );
+    }
+
+    return sections.join("\n\n");
   }
 
   private resolveModel(modelRegistry: ModelRegistry, descriptor: AgentModelDescriptor): Model<any> | undefined {
@@ -1880,7 +2003,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
   }
 
-  private async handleRuntimeSessionEvent(agentId: string, event: AgentSessionEvent): Promise<void> {
+  private async handleRuntimeSessionEvent(agentId: string, event: RuntimeSessionEvent): Promise<void> {
     this.captureConversationEventFromRuntime(agentId, event);
 
     if (!this.config.debug) return;
@@ -1938,7 +2061,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
   }
 
-  private captureConversationEventFromRuntime(agentId: string, event: AgentSessionEvent): void {
+  private captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent): void {
     const descriptor = this.descriptors.get(agentId);
     if (descriptor?.role === "manager") {
       return;
@@ -2706,6 +2829,10 @@ function normalizeOptionalMetadataValue(value: string | undefined): string | und
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function isCodexAppServerModelDescriptor(descriptor: Pick<AgentModelDescriptor, "provider">): boolean {
+  return descriptor.provider.trim().toLowerCase() === "openai-codex-app-server";
 }
 
 function normalizeThinkingLevel(level: string): string {

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { SessionManager } from '@mariozechner/pi-coding-agent'
 import { SwarmManager } from '../swarm/swarm-manager.js'
 import type { AgentDescriptor, RequestedDeliveryMode, SendMessageReceipt, SwarmConfig } from '../swarm/types.js'
-import type { AgentRuntime, RuntimeUserMessage } from '../swarm/agent-runtime.js'
+import type { RuntimeUserMessage, SwarmAgentRuntime } from '../swarm/runtime-types.js'
 
 class FakeRuntime {
   readonly descriptor: AgentDescriptor
@@ -18,6 +18,10 @@ class FakeRuntime {
   constructor(descriptor: AgentDescriptor) {
     this.descriptor = descriptor
     this.sessionManager = SessionManager.open(descriptor.sessionFile)
+  }
+
+  getStatus(): AgentDescriptor['status'] {
+    return this.descriptor.status
   }
 
   getPendingCount(): number {
@@ -75,12 +79,12 @@ class TestSwarmManager extends SwarmManager {
   protected override async createRuntimeForDescriptor(
     descriptor: AgentDescriptor,
     systemPrompt: string,
-  ): Promise<AgentRuntime> {
+  ): Promise<SwarmAgentRuntime> {
     const runtime = new FakeRuntime(descriptor)
     this.createdRuntimeIds.push(descriptor.agentId)
     this.runtimeByAgentId.set(descriptor.agentId, runtime)
     this.systemPromptByAgentId.set(descriptor.agentId, systemPrompt)
-    return runtime as unknown as AgentRuntime
+    return runtime as unknown as SwarmAgentRuntime
   }
 }
 
@@ -1128,13 +1132,19 @@ describe('SwarmManager', () => {
     const codexManager = await manager.createManager('manager', {
       name: 'Codex Manager',
       cwd: config.defaultCwd,
-      model: 'codex-5.3',
+      model: 'pi-codex',
     })
 
     const opusManager = await manager.createManager('manager', {
       name: 'Opus Manager',
       cwd: config.defaultCwd,
-      model: 'opus-4.6',
+      model: 'pi-opus',
+    })
+
+    const codexAppManager = await manager.createManager('manager', {
+      name: 'Codex App Manager',
+      cwd: config.defaultCwd,
+      model: 'codex-app',
     })
 
     expect(codexManager.model).toEqual({
@@ -1147,9 +1157,14 @@ describe('SwarmManager', () => {
       modelId: 'claude-opus-4-6',
       thinkingLevel: 'xhigh',
     })
+    expect(codexAppManager.model).toEqual({
+      provider: 'openai-codex-app-server',
+      modelId: 'default',
+      thinkingLevel: 'xhigh',
+    })
   })
 
-  it('defaults create_manager to codex-5.3 mapping when model is omitted', async () => {
+  it('defaults create_manager to pi-codex mapping when model is omitted', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
@@ -1177,7 +1192,7 @@ describe('SwarmManager', () => {
         cwd: config.defaultCwd,
         model: 'invalid-model' as any,
       }),
-    ).rejects.toThrow('create_manager.model must be one of codex-5.3|opus-4.6')
+    ).rejects.toThrow('create_manager.model must be one of pi-codex|pi-opus|codex-app')
   })
 
   it('maps spawn_agent model presets to canonical runtime models with highest reasoning', async () => {
@@ -1187,12 +1202,17 @@ describe('SwarmManager', () => {
 
     const codexWorker = await manager.spawnAgent('manager', {
       agentId: 'Codex Worker',
-      model: 'codex-5.3',
+      model: 'pi-codex',
     })
 
     const opusWorker = await manager.spawnAgent('manager', {
       agentId: 'Opus Worker',
-      model: 'opus-4.6',
+      model: 'pi-opus',
+    })
+
+    const codexAppWorker = await manager.spawnAgent('manager', {
+      agentId: 'Codex App Worker',
+      model: 'codex-app',
     })
 
     expect(codexWorker.model).toEqual({
@@ -1203,6 +1223,11 @@ describe('SwarmManager', () => {
     expect(opusWorker.model).toEqual({
       provider: 'anthropic',
       modelId: 'claude-opus-4-6',
+      thinkingLevel: 'xhigh',
+    })
+    expect(codexAppWorker.model).toEqual({
+      provider: 'openai-codex-app-server',
+      modelId: 'default',
       thinkingLevel: 'xhigh',
     })
   })
@@ -1217,7 +1242,7 @@ describe('SwarmManager', () => {
         agentId: 'Invalid Worker',
         model: 'invalid-model' as any,
       }),
-    ).rejects.toThrow('spawn_agent.model must be one of codex-5.3|opus-4.6')
+    ).rejects.toThrow('spawn_agent.model must be one of pi-codex|pi-opus|codex-app')
   })
 
   it('allows deleting the default manager when requested', async () => {

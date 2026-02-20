@@ -43,7 +43,7 @@ Swarm currently assumes pi `AgentSession` runtime for all agents:
   - status transitions (`idle`/`streaming`/`terminated`)
 - Conversation persistence is tied to `SessionManager` custom entries in `descriptor.sessionFile`
 - Tool injection happens via `buildSwarmTools(...)` passed as pi `customTools`
-- Model preset system only supports `codex-5.3` and `opus-4.6`
+- Model preset system only supports `pi-codex` and `pi-opus`
 
 This means there is no runtime boundary yet; “runtime” is effectively “pi session.”
 
@@ -157,18 +157,18 @@ This keeps SwarmManager orchestration unchanged while enabling runtime routing.
 - `apps/backend/src/swarm/codex-tool-bridge.ts` (dynamic tools + approvals handling)
 
 ## 4) `apps/backend/src/swarm/model-presets.ts` + `types.ts`
-- Add preset: `codex`
-- Keep existing `codex-5.3`, `opus-4.6`
+- Add preset: `codex-app`
+- Keep existing `pi-codex`, `pi-opus`
 - Add runtime-aware descriptor mapping (see below)
 
 ## 5) `apps/backend/src/swarm/swarm-tools.ts`
-- Expand allowed spawn model schema to include `codex`
+- Expand allowed spawn model schema to include `codex-app`
 - Keep manager/worker tool behavior identical
 
 ## 6) WS + UI contracts
 - `apps/backend/src/ws/server.ts`: preset validation auto-updates via preset set
-- `apps/ui/src/lib/ws-types.ts`: add `codex` to `MANAGER_MODEL_PRESETS`
-- `apps/ui/src/routes/index.tsx`: model selector includes `codex`
+- `apps/ui/src/lib/ws-types.ts`: add `codex-app` to `MANAGER_MODEL_PRESETS`
+- `apps/ui/src/routes/index.tsx`: model selector includes `codex-app`
 - Existing sidebar/chat behavior should work without structural changes
 
 ---
@@ -177,11 +177,11 @@ This keeps SwarmManager orchestration unchanged while enabling runtime routing.
 
 Add a new preset with runtime meaning:
 
-- `codex-5.3` -> existing pi runtime path (current behavior)
-- `opus-4.6` -> existing pi runtime path
-- `codex` -> **Codex App Server runtime path**
+- `pi-codex` -> existing pi runtime path (current behavior)
+- `pi-opus` -> existing pi runtime path
+- `codex-app` -> **Codex App Server runtime path**
 
-Recommended descriptor mapping for `codex`:
+Recommended descriptor mapping for `codex-app`:
 - `provider: "openai-codex-app-server"`
 - `modelId: "default"` (or resolved default from `model/list` at runtime)
 - `thinkingLevel`: preserved field for compatibility (not authoritative for codex runtime)
@@ -303,9 +303,9 @@ Acceptance: Claude manager can delegate tasks to codex worker and receive report
 ## Phase 3 — Presets + contract plumbing
 - Add `codex-app-server` runtime across backend+UI
 - Update spawn/create validation + tests
-- preserve `codex-5.3` and `opus-4.6`
+- preserve `pi-codex` and `pi-opus`
 
-Acceptance: create manager / spawn worker with model `codex` from UI and tools.
+Acceptance: create manager / spawn worker with model `codex-app` from UI and tools.
 
 ## Phase 4 — Auth hardening
 - Add startup auth checks (`account/read`)

@@ -542,14 +542,14 @@ describe('ManagerWsClient', () => {
     const creationPromise = client.createManager({
       name: 'release-manager',
       cwd: '/tmp/release',
-      model: 'codex-5.3',
+      model: 'pi-codex',
     })
 
     const sentCreatePayload = JSON.parse(socket.sentPayloads.at(-1) ?? '{}')
     expect(sentCreatePayload.type).toBe('create_manager')
     expect(sentCreatePayload.name).toBe('release-manager')
     expect(sentCreatePayload.cwd).toBe('/tmp/release')
-    expect(sentCreatePayload.model).toBe('codex-5.3')
+    expect(sentCreatePayload.model).toBe('pi-codex')
     expect(typeof sentCreatePayload.requestId).toBe('string')
 
     emitServerEvent(socket, {
