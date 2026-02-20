@@ -98,6 +98,45 @@ function AgentActivitySlot({
   )
 }
 
+function DeleteOverlayButton({
+  isSelected,
+  onDelete,
+  ariaLabel,
+}: {
+  isSelected: boolean
+  onDelete: () => void
+  ariaLabel: string
+}) {
+  return (
+    <div
+      className={cn(
+        'pointer-events-none absolute inset-y-0 right-0 flex items-center justify-end rounded-r-md pl-8 pr-1 transition-opacity duration-150',
+        'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+        isSelected
+          ? 'bg-gradient-to-r from-sidebar-accent/0 to-sidebar-accent'
+          : 'bg-gradient-to-r from-sidebar/0 to-sidebar group-hover:from-sidebar-accent/0 group-hover:to-sidebar-accent/50',
+      )}
+    >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          onDelete()
+        }}
+        aria-label={ariaLabel}
+        className={cn(
+          'pointer-events-auto inline-flex size-6 items-center justify-center rounded text-muted-foreground/60 transition',
+          'hover:bg-destructive/10 hover:text-destructive',
+          'focus-visible:opacity-100',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+        )}
+      >
+        <Trash2 aria-hidden="true" className="size-3" />
+      </button>
+    </div>
+  )
+}
+
 function AgentRow({
   agent,
   liveStatus,
@@ -276,7 +315,7 @@ export function AgentSidebar({
                       isSelected={managerIsSelected}
                       onSelect={() => onSelectAgent(manager.agentId)}
                       nameClassName="font-semibold"
-                      className="py-1.5 pl-7 pr-8"
+                      className="py-1.5 pl-7 pr-2"
                     />
 
                     <button
@@ -317,57 +356,44 @@ export function AgentSidebar({
                       </span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => onDeleteManager(manager.agentId)}
-                      aria-label={`Delete manager ${manager.agentId}`}
-                      className={cn(
-                        'absolute right-1 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/50 transition',
-                        'opacity-0 hover:bg-destructive/10 hover:text-destructive',
-                        'group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-                      )}
-                    >
-                      <Trash2 aria-hidden="true" className="size-3" />
-                    </button>
+                    <DeleteOverlayButton
+                      isSelected={managerIsSelected}
+                      onDelete={() => onDeleteManager(manager.agentId)}
+                      ariaLabel={`Delete manager ${manager.agentId}`}
+                    />
                   </div>
 
                   {workers.length > 0 && !managerIsCollapsed ? (
-                    <ul className="mt-0.5 space-y-0.5">
-                      {workers.map((worker) => {
-                        const workerLiveStatus = getAgentLiveStatus(worker, statuses)
-                        const workerIsSelected = selectedAgentId === worker.agentId
+                    <div className="relative mt-0.5">
+                      <div className="absolute bottom-1 left-3.5 top-0 w-px bg-sidebar-border/40" />
+                      <ul className="space-y-0.5">
+                        {workers.map((worker) => {
+                          const workerLiveStatus = getAgentLiveStatus(worker, statuses)
+                          const workerIsSelected = selectedAgentId === worker.agentId
 
-                        return (
-                          <li key={worker.agentId}>
-                            <div className="group relative">
-                              <AgentRow
-                                agent={worker}
-                                liveStatus={workerLiveStatus}
-                                isSelected={workerIsSelected}
-                                onSelect={() => onSelectAgent(worker.agentId)}
-                                nameClassName="font-normal"
-                                className="py-1.5 pl-11 pr-8"
-                              />
+                          return (
+                            <li key={worker.agentId}>
+                              <div className="group relative">
+                                <AgentRow
+                                  agent={worker}
+                                  liveStatus={workerLiveStatus}
+                                  isSelected={workerIsSelected}
+                                  onSelect={() => onSelectAgent(worker.agentId)}
+                                  nameClassName="font-normal"
+                                  className="py-1.5 pl-11 pr-2"
+                                />
 
-                              <button
-                                type="button"
-                                onClick={() => onDeleteAgent(worker.agentId)}
-                                aria-label={`Delete ${worker.agentId}`}
-                                className={cn(
-                                  'absolute right-1 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/50 transition',
-                                  'opacity-0 hover:bg-destructive/10 hover:text-destructive',
-                                  'group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
-                                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-                                )}
-                              >
-                                <Trash2 aria-hidden="true" className="size-3" />
-                              </button>
-                            </div>
-                          </li>
-                        )
-                      })}
-                    </ul>
+                                <DeleteOverlayButton
+                                  isSelected={workerIsSelected}
+                                  onDelete={() => onDeleteAgent(worker.agentId)}
+                                  ariaLabel={`Delete ${worker.agentId}`}
+                                />
+                              </div>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                    </div>
                   ) : null}
                 </li>
               )
@@ -392,22 +418,14 @@ export function AgentSidebar({
                             isSelected={workerIsSelected}
                             onSelect={() => onSelectAgent(worker.agentId)}
                             nameClassName="font-normal"
-                            className="py-1.5 pl-7 pr-8"
+                            className="py-1.5 pl-7 pr-2"
                           />
 
-                          <button
-                            type="button"
-                            onClick={() => onDeleteAgent(worker.agentId)}
-                            aria-label={`Delete ${worker.agentId}`}
-                            className={cn(
-                              'absolute right-1 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded text-muted-foreground/50 transition',
-                              'opacity-0 hover:bg-destructive/10 hover:text-destructive',
-                              'group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100',
-                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-                            )}
-                          >
-                            <Trash2 aria-hidden="true" className="size-3" />
-                          </button>
+                          <DeleteOverlayButton
+                            isSelected={workerIsSelected}
+                            onDelete={() => onDeleteAgent(worker.agentId)}
+                            ariaLabel={`Delete ${worker.agentId}`}
+                          />
                         </div>
                       </li>
                     )
