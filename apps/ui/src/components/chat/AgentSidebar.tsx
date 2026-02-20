@@ -83,7 +83,12 @@ function RuntimeIcon({ agent, className }: { agent: AgentDescriptor; className?:
   }
 
   if (preset === 'codex-app') {
-    return <img src="/agents/codex-logo.svg" alt="" aria-hidden="true" className={cn('dark:invert', className)} />
+    return (
+      <span className={cn('inline-flex items-center gap-0.5', className)}>
+        <img src="/agents/codex-app-logo.svg" alt="" className={cn('size-3 shrink-0 object-contain dark:invert', className)} />
+        <img src="/agents/codex-logo.svg" alt="" className={cn('size-3 shrink-0 object-contain dark:invert', className)} />
+      </span>
+    )
   }
 
   if (provider.includes('anthropic') || provider.includes('claude')) {
