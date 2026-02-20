@@ -95,7 +95,6 @@ interface SlackDraft {
   includePrivateChannels: boolean
   respondInThread: boolean
   replyBroadcast: boolean
-  wakeWords: string
   maxFileBytes: string
   allowImages: boolean
   allowText: boolean
@@ -956,50 +955,26 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
                     </div>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="slack-wake-words" className="text-xs font-medium text-muted-foreground">
-                        Wake words
-                      </Label>
-                      <Input
-                        id="slack-wake-words"
-                        value={slackDraft.wakeWords}
-                        onChange={(event) =>
-                          setSlackDraft((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  wakeWords: event.target.value,
-                                }
-                              : prev,
-                          )
-                        }
-                        placeholder="swarm, bot"
-                      />
-                      <p className="text-[11px] text-muted-foreground">Comma separated wake words for channel heuristics.</p>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label htmlFor="slack-max-file-bytes" className="text-xs font-medium text-muted-foreground">
-                        Max attachment size (bytes)
-                      </Label>
-                      <Input
-                        id="slack-max-file-bytes"
-                        value={slackDraft.maxFileBytes}
-                        onChange={(event) =>
-                          setSlackDraft((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  maxFileBytes: event.target.value,
-                                }
-                              : prev,
-                          )
-                        }
-                        placeholder="10485760"
-                        inputMode="numeric"
-                      />
-                    </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="slack-max-file-bytes" className="text-xs font-medium text-muted-foreground">
+                      Max attachment size (bytes)
+                    </Label>
+                    <Input
+                      id="slack-max-file-bytes"
+                      value={slackDraft.maxFileBytes}
+                      onChange={(event) =>
+                        setSlackDraft((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                maxFileBytes: event.target.value,
+                              }
+                            : prev,
+                        )
+                      }
+                      placeholder="10485760"
+                      inputMode="numeric"
+                    />
                   </div>
 
                   <div className="space-y-2 rounded-md border border-border/70 p-3">
@@ -1216,7 +1191,6 @@ function toSlackDraft(config: SlackSettingsConfig): SlackDraft {
     includePrivateChannels: config.listen.includePrivateChannels,
     respondInThread: config.response.respondInThread,
     replyBroadcast: config.response.replyBroadcast,
-    wakeWords: config.response.wakeWords.join(', '),
     maxFileBytes: String(config.attachments.maxFileBytes),
     allowImages: config.attachments.allowImages,
     allowText: config.attachments.allowText,
@@ -1238,7 +1212,6 @@ function buildSlackPatch(draft: SlackDraft): Record<string, unknown> {
     response: {
       respondInThread: draft.respondInThread,
       replyBroadcast: draft.replyBroadcast,
-      wakeWords: parseCommaSeparated(draft.wakeWords).map((word) => word.toLowerCase()),
     },
     attachments: {
       maxFileBytes: Number.isFinite(maxFileBytes) && maxFileBytes > 0 ? maxFileBytes : 10 * 1024 * 1024,

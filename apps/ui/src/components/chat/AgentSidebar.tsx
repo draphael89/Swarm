@@ -333,7 +333,7 @@ export function AgentSidebar({
                   </div>
 
                   {workers.length > 0 && !managerIsCollapsed ? (
-                    <ul className="ml-4 mt-0.5 space-y-0.5 border-l border-sidebar-border/80 pl-0">
+                    <ul className="mt-0.5 space-y-0.5">
                       {workers.map((worker) => {
                         const workerLiveStatus = getAgentLiveStatus(worker, statuses)
                         const workerIsSelected = selectedAgentId === worker.agentId
@@ -347,7 +347,7 @@ export function AgentSidebar({
                                 isSelected={workerIsSelected}
                                 onSelect={() => onSelectAgent(worker.agentId)}
                                 nameClassName="font-normal"
-                                className="py-1.5 pl-3 pr-8"
+                                className="py-1.5 pl-11 pr-8"
                               />
 
                               <button
