@@ -11,14 +11,17 @@ import {
   type KeyboardEvent,
 } from 'react'
 import { ArrowUp, Paperclip } from 'lucide-react'
-import { AttachedImages } from '@/components/chat/AttachedImages'
+import { AttachedFiles } from '@/components/chat/AttachedFiles'
 import { Button } from '@/components/ui/button'
+import {
+  fileToPendingAttachment,
+  type PendingAttachment,
+} from '@/lib/file-attachments'
 import { cn } from '@/lib/utils'
-import { fileToPendingImageAttachment, isImageFile, type PendingImageAttachment } from '@/lib/image-attachments'
-import type { ConversationImageAttachment } from '@/lib/ws-types'
+import type { ConversationAttachment } from '@/lib/ws-types'
 
 interface MessageInputProps {
-  onSend: (message: string, attachments?: ConversationImageAttachment[]) => void
+  onSend: (message: string, attachments?: ConversationAttachment[]) => void
   isLoading: boolean
   disabled?: boolean
   agentLabel?: string
@@ -36,7 +39,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   ref,
 ) {
   const [input, setInput] = useState('')
-  const [attachedImages, setAttachedImages] = useState<PendingImageAttachment[]>([])
+  const [attachedFiles, setAttachedFiles] = useState<PendingAttachment[]>([])
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -64,19 +67,14 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     async (files: File[]) => {
       if (disabled || files.length === 0) return
 
-      const imageFiles = files.filter(isImageFile)
-      if (imageFiles.length === 0) {
-        return
-      }
-
-      const uploaded = await Promise.all(imageFiles.map(fileToPendingImageAttachment))
-      const nextAttachments = uploaded.filter((attachment): attachment is PendingImageAttachment => attachment !== null)
+      const uploaded = await Promise.all(files.map(fileToPendingAttachment))
+      const nextAttachments = uploaded.filter((attachment): attachment is PendingAttachment => attachment !== null)
 
       if (nextAttachments.length === 0) {
         return
       }
 
-      setAttachedImages((previous) => [...previous, ...nextAttachments])
+      setAttachedFiles((previous) => [...previous, ...nextAttachments])
     },
     [disabled],
   )
@@ -104,7 +102,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
 
   const handlePaste = async (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const files = Array.from(event.clipboardData.items)
-      .filter((item) => item.type.startsWith('image/'))
+      .filter((item) => item.kind === 'file')
       .map((item) => item.getAsFile())
       .filter((file): file is File => file !== null)
 
@@ -115,30 +113,50 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   }
 
   const removeAttachment = (attachmentId: string) => {
-    setAttachedImages((previous) => previous.filter((attachment) => attachment.id !== attachmentId))
+    setAttachedFiles((previous) => previous.filter((attachment) => attachment.id !== attachmentId))
   }
 
   const submitMessage = useCallback(() => {
     const trimmed = input.trim()
-    const hasContent = trimmed.length > 0 || attachedImages.length > 0
+    const hasContent = trimmed.length > 0 || attachedFiles.length > 0
     if (!hasContent || disabled || blockedByLoading) {
       return
     }
 
     onSend(
       trimmed,
-      attachedImages.length > 0
-        ? attachedImages.map((attachment) => ({
-            mimeType: attachment.mimeType,
-            data: attachment.data,
-            fileName: attachment.fileName,
-          }))
+      attachedFiles.length > 0
+        ? attachedFiles.map((attachment) => {
+            if (attachment.type === 'text') {
+              return {
+                type: 'text' as const,
+                mimeType: attachment.mimeType,
+                text: attachment.text,
+                fileName: attachment.fileName,
+              }
+            }
+
+            if (attachment.type === 'binary') {
+              return {
+                type: 'binary' as const,
+                mimeType: attachment.mimeType,
+                data: attachment.data,
+                fileName: attachment.fileName,
+              }
+            }
+
+            return {
+              mimeType: attachment.mimeType,
+              data: attachment.data,
+              fileName: attachment.fileName,
+            }
+          })
         : undefined,
     )
 
     setInput('')
-    setAttachedImages([])
-  }, [attachedImages, blockedByLoading, disabled, input, onSend])
+    setAttachedFiles([])
+  }, [attachedFiles, blockedByLoading, disabled, input, onSend])
 
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
@@ -155,7 +173,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     }
   }
 
-  const hasContent = input.trim().length > 0 || attachedImages.length > 0
+  const hasContent = input.trim().length > 0 || attachedFiles.length > 0
   const canSubmit = hasContent && !disabled && !blockedByLoading
   const placeholder = disabled
     ? 'Waiting for connection...'
@@ -166,7 +184,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   return (
     <form onSubmit={handleSubmit} className="sticky bottom-0 bg-background p-3">
       <div className="overflow-hidden rounded-2xl border border-border">
-        <AttachedImages attachments={attachedImages} onRemove={removeAttachment} />
+        <AttachedFiles attachments={attachedFiles} onRemove={removeAttachment} />
 
         <div className="group relative flex">
           <textarea
@@ -193,11 +211,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*"
             multiple
             className="hidden"
             onChange={handleFileSelect}
-            aria-label="Attach images"
+            aria-label="Attach files"
           />
 
           <div className="absolute bottom-1.5 left-1.5 right-1.5 z-10 flex items-center justify-between">
@@ -208,7 +225,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
               className="size-7 rounded-full text-muted-foreground/60 hover:text-foreground"
               onClick={() => fileInputRef.current?.click()}
               disabled={disabled}
-              aria-label="Attach images"
+              aria-label="Attach files"
             >
               <Paperclip className="size-3.5" />
             </Button>

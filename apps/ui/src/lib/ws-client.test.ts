@@ -205,6 +205,61 @@ describe('ManagerWsClient', () => {
     client.destroy()
   })
 
+  it('sends text and binary attachments in user messages', () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('open')
+
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
+    })
+
+    client.sendUserMessage('', {
+      attachments: [
+        {
+          type: 'text',
+          mimeType: 'text/markdown',
+          text: '# Notes',
+          fileName: 'notes.md',
+        },
+        {
+          type: 'binary',
+          mimeType: 'application/pdf',
+          data: 'aGVsbG8=',
+          fileName: 'design.pdf',
+        },
+      ],
+    })
+
+    expect(JSON.parse(socket.sentPayloads.at(-1) ?? '')).toEqual({
+      type: 'user_message',
+      text: '',
+      attachments: [
+        {
+          type: 'text',
+          mimeType: 'text/markdown',
+          text: '# Notes',
+          fileName: 'notes.md',
+        },
+        {
+          type: 'binary',
+          mimeType: 'application/pdf',
+          data: 'aGVsbG8=',
+          fileName: 'design.pdf',
+        },
+      ],
+      agentId: 'manager',
+    })
+
+    client.destroy()
+  })
+
   it('can switch subscriptions and route outgoing/incoming messages by selected agent', () => {
     const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
     const snapshots: ReturnType<typeof client.getState>[] = []

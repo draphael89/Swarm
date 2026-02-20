@@ -532,6 +532,76 @@ describe('SwarmManager', () => {
     }
   })
 
+  it('injects text attachments into the runtime prompt', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', { agentId: 'Text Attachment Worker' })
+
+    await manager.handleUserMessage('Please review this file.', {
+      targetAgentId: worker.agentId,
+      attachments: [
+        {
+          type: 'text',
+          mimeType: 'text/markdown',
+          fileName: 'notes.md',
+          text: '# Notes\n\n- item',
+        },
+      ],
+    })
+
+    const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
+    expect(workerRuntime).toBeDefined()
+
+    const sentMessage = workerRuntime?.sendCalls.at(-1)?.message
+    expect(typeof sentMessage).toBe('string')
+    if (typeof sentMessage === 'string') {
+      expect(sentMessage).toContain('Please review this file.')
+      expect(sentMessage).toContain('Name: notes.md')
+      expect(sentMessage).toContain('# Notes')
+    }
+  })
+
+  it('writes binary attachments to disk and passes their path to the runtime', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', { agentId: 'Binary Attachment Worker' })
+
+    await manager.handleUserMessage('', {
+      targetAgentId: worker.agentId,
+      attachments: [
+        {
+          type: 'binary',
+          mimeType: 'application/pdf',
+          fileName: 'spec.pdf',
+          data: 'aGVsbG8=',
+        },
+      ],
+    })
+
+    const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
+    expect(workerRuntime).toBeDefined()
+
+    const sentMessage = workerRuntime?.sendCalls.at(-1)?.message
+    expect(typeof sentMessage).toBe('string')
+
+    if (typeof sentMessage === 'string') {
+      const savedPathMatch = sentMessage.match(/Saved to: (.+)/)
+      expect(savedPathMatch).toBeTruthy()
+
+      const savedPath = savedPathMatch?.[1]?.trim()
+      expect(savedPath).toBeTruthy()
+
+      if (savedPath) {
+        const binaryContents = await readFile(savedPath)
+        expect(binaryContents.toString('utf8')).toBe('hello')
+      }
+    }
+  })
+
   it('does not double-prefix internal messages that already start with SYSTEM:', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
