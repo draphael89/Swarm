@@ -126,6 +126,53 @@ function getModelLabel(agent: AgentDescriptor, preset: ManagerModelPreset | unde
   return agent.model.modelId
 }
 
+function StreamingWorkersBadge({
+  count,
+  isSelected,
+}: {
+  count: number
+  isSelected: boolean
+}) {
+  if (count === 0) return null
+
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className="relative ml-auto inline-flex size-5 shrink-0 items-center justify-center"
+            aria-label={`${count} active worker${count !== 1 ? 's' : ''}`}
+          >
+            {/* Spinning ring */}
+            <span
+              className={cn(
+                'absolute inset-0 animate-spin rounded-full border-[1.5px] border-transparent',
+                isSelected
+                  ? 'border-t-sidebar-accent-foreground/70'
+                  : 'border-t-primary/70',
+              )}
+              style={{ animationDuration: '1s' }}
+              aria-hidden="true"
+            />
+            {/* Static count */}
+            <span
+              className={cn(
+                'relative text-[9px] font-semibold leading-none',
+                isSelected ? 'text-sidebar-accent-foreground' : 'text-primary',
+              )}
+            >
+              {count}
+            </span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6} className="px-2 py-1 text-[10px]">
+          {count} worker{count !== 1 ? 's' : ''} active
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 function AgentActivitySlot({
   isActive,
   isSelected,
@@ -318,10 +365,13 @@ export function AgentSidebar({
               const managerLiveStatus = getAgentLiveStatus(manager, statuses)
               const managerIsSelected = !isSettingsActive && selectedAgentId === manager.agentId
               const managerIsCollapsed = collapsedManagerIds.has(manager.agentId)
+              const streamingWorkerCount = managerIsCollapsed
+                ? workers.filter((w) => getAgentLiveStatus(w, statuses).status === 'streaming').length
+                : 0
 
               return (
                 <li key={manager.agentId}>
-                  <div className="relative">
+                  <div className="relative flex items-center">
                     <AgentRow
                       agent={manager}
                       liveStatus={managerLiveStatus}
@@ -329,8 +379,9 @@ export function AgentSidebar({
                       onSelect={() => onSelectAgent(manager.agentId)}
                       onDelete={() => onDeleteManager(manager.agentId)}
                       nameClassName="font-semibold"
-                      className="py-1.5 pl-7 pr-1.5"
+                      className="min-w-0 flex-1 py-1.5 pl-7 pr-1.5"
                     />
+                    <StreamingWorkersBadge count={streamingWorkerCount} isSelected={managerIsSelected} />
 
                     <button
                       type="button"
