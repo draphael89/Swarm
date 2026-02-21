@@ -413,6 +413,110 @@ describe('SwarmWebSocketServer', () => {
     }
   })
 
+  it('returns schedules through GET /api/schedules', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    await writeFile(
+      config.paths.schedulesFile,
+      JSON.stringify(
+        {
+          schedules: [
+            {
+              id: 'daily-standup',
+              name: 'Daily standup',
+              cron: '0 9 * * *',
+              message: 'Post standup summary to the team.',
+              oneShot: false,
+              timezone: 'America/Los_Angeles',
+              createdAt: '2026-02-20T08:00:00.000Z',
+              nextFireAt: '2026-02-21T17:00:00.000Z',
+            },
+            {
+              id: '',
+              name: 'invalid',
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+
+    try {
+      const response = await fetch(`http://${config.host}:${config.port}/api/schedules`)
+      expect(response.status).toBe(200)
+
+      const payload = (await response.json()) as {
+        schedules: Array<{
+          id: string
+          name: string
+          cron: string
+          message: string
+          oneShot: boolean
+          timezone: string
+          createdAt: string
+          nextFireAt: string
+        }>
+      }
+
+      expect(payload.schedules).toEqual([
+        {
+          id: 'daily-standup',
+          name: 'Daily standup',
+          cron: '0 9 * * *',
+          message: 'Post standup summary to the team.',
+          oneShot: false,
+          timezone: 'America/Los_Angeles',
+          createdAt: '2026-02-20T08:00:00.000Z',
+          nextFireAt: '2026-02-21T17:00:00.000Z',
+        },
+      ])
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('returns an empty schedule list when schedules.json is missing', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    try {
+      const response = await fetch(`http://${config.host}:${config.port}/api/schedules`)
+      expect(response.status).toBe(200)
+
+      const payload = (await response.json()) as { schedules: unknown[] }
+      expect(payload.schedules).toEqual([])
+    } finally {
+      await server.stop()
+    }
+  })
+
   it('manages skill env settings through REST endpoints', async () => {
     const previousBraveApiKey = process.env.BRAVE_API_KEY
     delete process.env.BRAVE_API_KEY

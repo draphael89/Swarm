@@ -27,6 +27,7 @@ import type { SwarmManager } from "../swarm/swarm-manager.js";
 
 const REBOOT_ENDPOINT_PATH = "/api/reboot";
 const READ_FILE_ENDPOINT_PATH = "/api/read-file";
+const SCHEDULES_ENDPOINT_PATH = "/api/schedules";
 const AGENT_COMPACT_ENDPOINT_PATTERN = /^\/api\/agents\/([^/]+)\/compact$/;
 const SETTINGS_ENV_ENDPOINT_PATH = "/api/settings/env";
 const SETTINGS_AUTH_ENDPOINT_PATH = "/api/settings/auth";
@@ -60,6 +61,18 @@ type SettingsAuthLoginEventPayload = {
   complete: { provider: OAuthLoginProviderId; status: "connected" };
   error: { message: string };
 };
+
+interface ScheduleHttpRecord {
+  id: string;
+  name: string;
+  cron: string;
+  message: string;
+  oneShot: boolean;
+  timezone: string;
+  createdAt: string;
+  nextFireAt: string;
+  lastFiredAt?: string;
+}
 
 interface SettingsAuthLoginFlow {
   providerId: OAuthLoginProviderId;
@@ -251,6 +264,11 @@ export class SwarmWebSocketServer {
         return;
       }
 
+      if (requestUrl.pathname === SCHEDULES_ENDPOINT_PATH) {
+        await this.handleSchedulesHttpRequest(request, response);
+        return;
+      }
+
       if (AGENT_COMPACT_ENDPOINT_PATTERN.test(requestUrl.pathname)) {
         await this.handleCompactAgentHttpRequest(request, response, requestUrl);
         return;
@@ -328,6 +346,8 @@ export class SwarmWebSocketServer {
         this.applyCorsHeaders(request, response, SETTINGS_AUTH_METHODS);
       } else if (requestUrl.pathname === READ_FILE_ENDPOINT_PATH) {
         this.applyCorsHeaders(request, response, READ_FILE_METHODS);
+      } else if (requestUrl.pathname === SCHEDULES_ENDPOINT_PATH) {
+        this.applyCorsHeaders(request, response, "GET, OPTIONS");
       } else if (AGENT_COMPACT_ENDPOINT_PATTERN.test(requestUrl.pathname)) {
         this.applyCorsHeaders(request, response, "POST, OPTIONS");
       } else if (
@@ -492,6 +512,54 @@ export class SwarmWebSocketServer {
         return;
       }
 
+      this.sendJson(response, 500, { error: message });
+    }
+  }
+
+  private async handleSchedulesHttpRequest(
+    request: IncomingMessage,
+    response: ServerResponse
+  ): Promise<void> {
+    const methods = "GET, OPTIONS";
+
+    if (request.method === "OPTIONS") {
+      this.applyCorsHeaders(request, response, methods);
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    if (request.method !== "GET") {
+      this.applyCorsHeaders(request, response, methods);
+      response.setHeader("Allow", methods);
+      this.sendJson(response, 405, { error: "Method Not Allowed" });
+      return;
+    }
+
+    this.applyCorsHeaders(request, response, methods);
+
+    try {
+      const schedulesFile = this.swarmManager.getConfig().paths.schedulesFile;
+      const raw = await readFile(schedulesFile, "utf8");
+      const parsed = JSON.parse(raw) as { schedules?: unknown };
+
+      if (!parsed || !Array.isArray(parsed.schedules)) {
+        this.sendJson(response, 200, { schedules: [] });
+        return;
+      }
+
+      const schedules = parsed.schedules
+        .map((entry) => normalizeScheduleRecord(entry))
+        .filter((entry): entry is ScheduleHttpRecord => entry !== undefined);
+
+      this.sendJson(response, 200, { schedules });
+    } catch (error) {
+      if (isEnoentError(error)) {
+        this.sendJson(response, 200, { schedules: [] });
+        return;
+      }
+
+      const message = error instanceof Error ? error.message : "Unable to load schedules";
       this.sendJson(response, 500, { error: message });
     }
   }
@@ -2198,6 +2266,56 @@ function resolveReadFileContentType(path: string): string {
     default:
       return "application/octet-stream";
   }
+}
+
+function normalizeScheduleRecord(entry: unknown): ScheduleHttpRecord | undefined {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return undefined;
+  }
+
+  const maybe = entry as Partial<ScheduleHttpRecord>;
+  const id = normalizeScheduleRequiredString(maybe.id);
+  const name = normalizeScheduleRequiredString(maybe.name);
+  const cron = normalizeScheduleRequiredString(maybe.cron);
+  const message = normalizeScheduleRequiredString(maybe.message);
+  const timezone = normalizeScheduleRequiredString(maybe.timezone);
+  const createdAt = normalizeScheduleRequiredString(maybe.createdAt);
+  const nextFireAt = normalizeScheduleRequiredString(maybe.nextFireAt);
+  const lastFiredAt = normalizeScheduleRequiredString(maybe.lastFiredAt);
+
+  if (!id || !name || !cron || !message || !timezone || !createdAt || !nextFireAt) {
+    return undefined;
+  }
+
+  return {
+    id,
+    name,
+    cron,
+    message,
+    oneShot: typeof maybe.oneShot === "boolean" ? maybe.oneShot : false,
+    timezone,
+    createdAt,
+    nextFireAt,
+    lastFiredAt
+  };
+}
+
+function normalizeScheduleRequiredString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function isEnoentError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "ENOENT"
+  );
 }
 
 function parseConversationAttachments(

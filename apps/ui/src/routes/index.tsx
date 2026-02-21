@@ -642,7 +642,6 @@ export function IndexPage() {
                   onCompact={() => void handleCompactManager()}
                   showNewChat={isActiveManager}
                   onNewChat={handleNewChat}
-                  artifactCount={collectedArtifacts.length}
                   isArtifactsPanelOpen={isArtifactsPanelOpen}
                   onToggleArtifactsPanel={handleToggleArtifactsPanel}
                 />
@@ -674,6 +673,7 @@ export function IndexPage() {
 
           {activeView === 'chat' && (
             <ArtifactsSidebar
+              wsUrl={wsUrl}
               artifacts={collectedArtifacts}
               isOpen={isArtifactsPanelOpen}
               onClose={() => setIsArtifactsPanelOpen(false)}

@@ -1,13 +1,8 @@
-import {
-  Code2,
-  Database,
-  FileCode2,
-  FileText,
-  Image,
-  X,
-} from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Clock3, Code2, Database, FileCode2, FileText, Image, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ArtifactReference } from '@/lib/artifacts'
 import {
   categorizeArtifact,
@@ -16,11 +11,26 @@ import {
 import { cn } from '@/lib/utils'
 
 interface ArtifactsSidebarProps {
+  wsUrl: string
   artifacts: ArtifactReference[]
   isOpen: boolean
   onClose: () => void
   onArtifactClick: (artifact: ArtifactReference) => void
 }
+
+interface ScheduleRecord {
+  id: string
+  name: string
+  cron: string
+  message: string
+  oneShot: boolean
+  timezone: string
+  createdAt: string
+  nextFireAt: string
+  lastFiredAt?: string
+}
+
+type SidebarTab = 'artifacts' | 'schedules'
 
 function getCategoryIcon(category: ArtifactCategory) {
   switch (category) {
@@ -60,12 +70,277 @@ function truncatePath(path: string, maxLength = 40): string {
   return prefix ? `${prefix}…/${fileName}` : `…/${fileName}`
 }
 
+function normalizeRequiredString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function normalizeSchedule(value: unknown): ScheduleRecord | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null
+  }
+
+  const entry = value as Partial<ScheduleRecord>
+  const id = normalizeRequiredString(entry.id)
+  const name = normalizeRequiredString(entry.name)
+  const cron = normalizeRequiredString(entry.cron)
+  const message = normalizeRequiredString(entry.message)
+  const timezone = normalizeRequiredString(entry.timezone)
+  const createdAt = normalizeRequiredString(entry.createdAt)
+  const nextFireAt = normalizeRequiredString(entry.nextFireAt)
+
+  if (!id || !name || !cron || !message || !timezone || !createdAt || !nextFireAt) {
+    return null
+  }
+
+  const lastFiredAt = normalizeRequiredString(entry.lastFiredAt) ?? undefined
+
+  return {
+    id,
+    name,
+    cron,
+    message,
+    oneShot: typeof entry.oneShot === 'boolean' ? entry.oneShot : false,
+    timezone,
+    createdAt,
+    nextFireAt,
+    lastFiredAt,
+  }
+}
+
+function resolveApiEndpoint(wsUrl: string, path: string): string {
+  try {
+    const parsed = new URL(wsUrl)
+    parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:'
+    parsed.pathname = path
+    parsed.search = ''
+    parsed.hash = ''
+    return parsed.toString()
+  } catch {
+    return path
+  }
+}
+
+async function fetchSchedules(wsUrl: string, signal: AbortSignal): Promise<ScheduleRecord[]> {
+  const response = await fetch(resolveApiEndpoint(wsUrl, '/api/schedules'), { signal })
+  if (!response.ok) {
+    throw new Error(`Unable to load schedules (${response.status})`)
+  }
+
+  const payload = (await response.json()) as { schedules?: unknown }
+  if (!payload || !Array.isArray(payload.schedules)) {
+    return []
+  }
+
+  return payload.schedules
+    .map((entry) => normalizeSchedule(entry))
+    .filter((entry): entry is ScheduleRecord => entry !== null)
+}
+
+function sortSchedules(left: ScheduleRecord, right: ScheduleRecord): number {
+  const leftTs = Date.parse(left.nextFireAt)
+  const rightTs = Date.parse(right.nextFireAt)
+
+  if (!Number.isNaN(leftTs) && !Number.isNaN(rightTs)) {
+    return leftTs - rightTs
+  }
+
+  if (!Number.isNaN(leftTs)) return -1
+  if (!Number.isNaN(rightTs)) return 1
+
+  return left.name.localeCompare(right.name)
+}
+
+function formatDateTime(value: string, timeZone?: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown'
+  }
+
+  try {
+    return date.toLocaleString([], {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      ...(timeZone ? { timeZone } : {}),
+    })
+  } catch {
+    return date.toLocaleString([], {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    })
+  }
+}
+
+function formatMessagePreview(message: string, maxLength = 80): string {
+  const normalized = message.replace(/\s+/g, ' ').trim()
+  if (!normalized) {
+    return '(No message)'
+  }
+
+  return normalized.length <= maxLength
+    ? normalized
+    : `${normalized.slice(0, maxLength - 1)}…`
+}
+
+function format24HourTime(hour: string, minute: string): string | null {
+  const numericHour = Number.parseInt(hour, 10)
+  const numericMinute = Number.parseInt(minute, 10)
+
+  if (
+    Number.isNaN(numericHour) ||
+    Number.isNaN(numericMinute) ||
+    numericHour < 0 ||
+    numericHour > 23 ||
+    numericMinute < 0 ||
+    numericMinute > 59
+  ) {
+    return null
+  }
+
+  return `${numericHour.toString().padStart(2, '0')}:${numericMinute.toString().padStart(2, '0')}`
+}
+
+function isWildcard(value: string): boolean {
+  return value === '*'
+}
+
+function isStep(value: string): boolean {
+  return /^\*\/\d+$/.test(value)
+}
+
+function isNumeric(value: string): boolean {
+  return /^\d+$/.test(value)
+}
+
+function parseDayOfWeek(value: string): string | null {
+  const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+  if (!isNumeric(value)) {
+    return null
+  }
+
+  const dayIndex = Number.parseInt(value, 10)
+  if (dayIndex < 0 || dayIndex > 7) {
+    return null
+  }
+
+  return weekdays[dayIndex % 7] ?? null
+}
+
+function describeCronExpression(cron: string): string {
+  const segments = cron.trim().split(/\s+/)
+  if (segments.length < 5 || segments.length > 6) {
+    return 'Custom cron schedule'
+  }
+
+  const startIndex = segments.length === 6 ? 1 : 0
+  const minute = segments[startIndex] ?? '*'
+  const hour = segments[startIndex + 1] ?? '*'
+  const dayOfMonth = segments[startIndex + 2] ?? '*'
+  const month = segments[startIndex + 3] ?? '*'
+  const dayOfWeek = segments[startIndex + 4] ?? '*'
+
+  if ([minute, hour, dayOfMonth, month, dayOfWeek].every(isWildcard)) {
+    return 'Every minute'
+  }
+
+  if (isStep(minute) && isWildcard(hour) && isWildcard(dayOfMonth) && isWildcard(month) && isWildcard(dayOfWeek)) {
+    return `Every ${minute.slice(2)} minutes`
+  }
+
+  if (isNumeric(minute) && isWildcard(hour) && isWildcard(dayOfMonth) && isWildcard(month) && isWildcard(dayOfWeek)) {
+    return `At minute ${minute} past every hour`
+  }
+
+  if (isNumeric(minute) && isNumeric(hour) && isWildcard(dayOfMonth) && isWildcard(month) && isWildcard(dayOfWeek)) {
+    const time = format24HourTime(hour, minute)
+    return time ? `Every day at ${time}` : 'Custom cron schedule'
+  }
+
+  if (isNumeric(minute) && isNumeric(hour) && isWildcard(dayOfMonth) && isWildcard(month)) {
+    const time = format24HourTime(hour, minute)
+    const weekday = parseDayOfWeek(dayOfWeek)
+    if (time && weekday) {
+      return `Every ${weekday} at ${time}`
+    }
+  }
+
+  if (isNumeric(minute) && isNumeric(hour) && isNumeric(dayOfMonth) && isWildcard(month) && isWildcard(dayOfWeek)) {
+    const time = format24HourTime(hour, minute)
+    return time ? `Day ${dayOfMonth} of each month at ${time}` : 'Custom cron schedule'
+  }
+
+  return 'Custom cron schedule'
+}
+
+function isSidebarTab(value: string): value is SidebarTab {
+  return value === 'artifacts' || value === 'schedules'
+}
+
 export function ArtifactsSidebar({
+  wsUrl,
   artifacts,
   isOpen,
   onClose,
   onArtifactClick,
 }: ArtifactsSidebarProps) {
+  const [activeTab, setActiveTab] = useState<SidebarTab>('artifacts')
+  const [schedules, setSchedules] = useState<ScheduleRecord[]>([])
+  const [isLoadingSchedules, setIsLoadingSchedules] = useState(false)
+  const [schedulesError, setSchedulesError] = useState<string | null>(null)
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
+
+  const sortedSchedules = useMemo(
+    () => [...schedules].sort(sortSchedules),
+    [schedules],
+  )
+
+  const selectedSchedule = useMemo(() => {
+    if (sortedSchedules.length === 0) return null
+    if (!selectedScheduleId) return sortedSchedules[0]
+    return sortedSchedules.find((schedule) => schedule.id === selectedScheduleId) ?? sortedSchedules[0]
+  }, [selectedScheduleId, sortedSchedules])
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'schedules') {
+      return
+    }
+
+    const abortController = new AbortController()
+    setIsLoadingSchedules(true)
+    setSchedulesError(null)
+
+    void fetchSchedules(wsUrl, abortController.signal)
+      .then((nextSchedules) => {
+        if (abortController.signal.aborted) return
+        setSchedules(nextSchedules)
+        setSelectedScheduleId((current) => {
+          if (current && nextSchedules.some((schedule) => schedule.id === current)) {
+            return current
+          }
+          return nextSchedules[0]?.id ?? null
+        })
+      })
+      .catch((error: unknown) => {
+        if (abortController.signal.aborted) return
+        const message = error instanceof Error ? error.message : 'Unable to load schedules'
+        setSchedules([])
+        setSchedulesError(message)
+        setSelectedScheduleId(null)
+      })
+      .finally(() => {
+        if (abortController.signal.aborted) return
+        setIsLoadingSchedules(false)
+      })
+
+    return () => {
+      abortController.abort()
+    }
+  }, [activeTab, isOpen, wsUrl])
+
   return (
     <div
       className={cn(
@@ -76,61 +351,215 @@ export function ArtifactsSidebar({
       aria-label="Artifacts panel"
       aria-hidden={!isOpen}
     >
-      {/* Header */}
-      <div className="flex h-[62px] shrink-0 items-center justify-between gap-2 px-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <FileCode2 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <h2 className="text-xs font-semibold text-foreground truncate">
-            Artifacts
-          </h2>
-          {artifacts.length > 0 && (
-            <span className="inline-flex items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {artifacts.length}
-            </span>
-          )}
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
-          onClick={onClose}
-          aria-label="Close artifacts panel"
-        >
-          <X className="size-3.5" />
-        </Button>
-      </div>
-
-      {/* Content */}
-      <ScrollArea
-        className={cn(
-          'min-h-0 flex-1',
-          '[&>[data-slot=scroll-area-scrollbar]]:w-1.5',
-          '[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-transparent',
-          'hover:[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-border',
-        )}
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => {
+          if (isSidebarTab(value)) {
+            setActiveTab(value)
+          }
+        }}
+        className="h-full gap-0"
       >
-        {artifacts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center px-4 py-12 text-center">
-            <FileText className="mb-2 size-8 text-muted-foreground/40" aria-hidden="true" />
-            <p className="text-xs text-muted-foreground">
-              No artifacts yet
-            </p>
-            <p className="mt-1 text-[11px] text-muted-foreground/70">
-              Files and links from the conversation will appear here.
-            </p>
+        <div className="flex h-[62px] shrink-0 items-center gap-2 px-3">
+          <TabsList className="h-7 w-full bg-muted/60 p-0.5">
+            <TabsTrigger
+              value="artifacts"
+              className="h-6 rounded-sm px-2.5 text-[11px] font-medium"
+            >
+              Artifacts
+            </TabsTrigger>
+            <TabsTrigger
+              value="schedules"
+              className="h-6 rounded-sm px-2.5 text-[11px] font-medium"
+            >
+              Schedules
+            </TabsTrigger>
+          </TabsList>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+            onClick={onClose}
+            aria-label="Close artifacts panel"
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+
+        <TabsContent value="artifacts" className="mt-0 min-h-0 flex-1">
+          <ScrollArea
+            className={cn(
+              'min-h-0 flex-1',
+              '[&>[data-slot=scroll-area-scrollbar]]:w-1.5',
+              '[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-transparent',
+              'hover:[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-border',
+            )}
+          >
+            {artifacts.length === 0 ? (
+              <div className="flex flex-col items-center justify-center px-4 py-12 text-center">
+                <FileText className="mb-2 size-8 text-muted-foreground/40" aria-hidden="true" />
+                <p className="text-xs text-muted-foreground">
+                  No artifacts yet
+                </p>
+                <p className="mt-1 text-[11px] text-muted-foreground/70">
+                  Files and links from the conversation will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-0.5 p-2">
+                {artifacts.map((artifact) => (
+                  <ArtifactRow
+                    key={artifact.path}
+                    artifact={artifact}
+                    onClick={onArtifactClick}
+                  />
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="schedules" className="mt-0 min-h-0 flex-1">
+          <div className="flex h-full min-h-0 flex-col">
+            {isLoadingSchedules ? (
+              <div className="flex h-full items-center justify-center px-4 py-12 text-center">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                  Loading schedules...
+                </div>
+              </div>
+            ) : null}
+
+            {!isLoadingSchedules && schedulesError ? (
+              <div className="flex h-full flex-col items-center justify-center px-4 py-12 text-center">
+                <Clock3 className="mb-2 size-8 text-muted-foreground/40" aria-hidden="true" />
+                <p className="text-xs text-muted-foreground">
+                  Unable to load schedules
+                </p>
+                <p className="mt-1 text-[11px] text-muted-foreground/70">
+                  {schedulesError}
+                </p>
+              </div>
+            ) : null}
+
+            {!isLoadingSchedules && !schedulesError && sortedSchedules.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center px-4 py-12 text-center">
+                <Clock3 className="mb-2 size-8 text-muted-foreground/40" aria-hidden="true" />
+                <p className="text-xs text-muted-foreground">
+                  No schedules yet
+                </p>
+                <p className="mt-1 text-[11px] text-muted-foreground/70">
+                  Cron jobs will appear here once scheduled.
+                </p>
+              </div>
+            ) : null}
+
+            {!isLoadingSchedules && !schedulesError && sortedSchedules.length > 0 ? (
+              <>
+                <ScrollArea
+                  className={cn(
+                    'min-h-0 flex-1',
+                    '[&>[data-slot=scroll-area-scrollbar]]:w-1.5',
+                    '[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-transparent',
+                    'hover:[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-border',
+                  )}
+                >
+                  <div className="space-y-1 p-2">
+                    {sortedSchedules.map((schedule) => (
+                      <Button
+                        key={schedule.id}
+                        type="button"
+                        variant="ghost"
+                        className={cn(
+                          'h-auto w-full justify-start rounded-md px-2 py-2 text-left',
+                          selectedSchedule?.id === schedule.id
+                            ? 'bg-accent/80 text-foreground hover:bg-accent/80'
+                            : 'text-foreground hover:bg-accent/70',
+                        )}
+                        onClick={() => setSelectedScheduleId(schedule.id)}
+                        title={schedule.name}
+                      >
+                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <span className="truncate text-xs font-semibold">
+                            {schedule.name}
+                          </span>
+                          <span className="truncate text-[10px] text-muted-foreground">
+                            {describeCronExpression(schedule.cron)}
+                          </span>
+                          <span className="truncate font-mono text-[10px] text-muted-foreground/80">
+                            {schedule.cron}
+                          </span>
+                          <span className="truncate text-[10px] text-muted-foreground">
+                            Next: {formatDateTime(schedule.nextFireAt, schedule.timezone)}
+                          </span>
+                          <span className="truncate text-[10px] text-muted-foreground/80">
+                            {formatMessagePreview(schedule.message)}
+                          </span>
+                        </span>
+                      </Button>
+                    ))}
+                  </div>
+                </ScrollArea>
+
+                {selectedSchedule ? (
+                  <div className="shrink-0 border-t border-border/80 px-3 py-2">
+                    <div className="space-y-2">
+                      <h3 className="truncate text-xs font-semibold text-foreground">
+                        {selectedSchedule.name}
+                      </h3>
+
+                      <div className="space-y-1 text-[11px]">
+                        <p className="text-muted-foreground">
+                          <span className="font-medium text-foreground">Cron:</span>{' '}
+                          <span className="font-mono">{selectedSchedule.cron}</span>
+                        </p>
+                        <p className="text-muted-foreground">
+                          <span className="font-medium text-foreground">Pattern:</span>{' '}
+                          {describeCronExpression(selectedSchedule.cron)}
+                        </p>
+                        <p className="text-muted-foreground">
+                          <span className="font-medium text-foreground">Next fire:</span>{' '}
+                          {formatDateTime(selectedSchedule.nextFireAt, selectedSchedule.timezone)}
+                        </p>
+                        <p className="text-muted-foreground">
+                          <span className="font-medium text-foreground">Timezone:</span>{' '}
+                          {selectedSchedule.timezone}
+                        </p>
+                        <p className="text-muted-foreground">
+                          <span className="font-medium text-foreground">Created:</span>{' '}
+                          {formatDateTime(selectedSchedule.createdAt)}
+                        </p>
+                        {selectedSchedule.lastFiredAt ? (
+                          <p className="text-muted-foreground">
+                            <span className="font-medium text-foreground">Last fired:</span>{' '}
+                            {formatDateTime(selectedSchedule.lastFiredAt)}
+                          </p>
+                        ) : null}
+                        <p className="text-muted-foreground">
+                          <span className="font-medium text-foreground">Type:</span>{' '}
+                          {selectedSchedule.oneShot ? 'One-time' : 'Recurring'}
+                        </p>
+                      </div>
+
+                      <div>
+                        <p className="mb-1 text-[11px] font-medium text-foreground">
+                          Message
+                        </p>
+                        <ScrollArea className="max-h-28 rounded-md border border-border/70 bg-background/60 p-2">
+                          <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">
+                            {selectedSchedule.message}
+                          </p>
+                        </ScrollArea>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
           </div>
-        ) : (
-          <div className="space-y-0.5 p-2">
-            {artifacts.map((artifact) => (
-              <ArtifactRow
-                key={artifact.path}
-                artifact={artifact}
-                onClick={onArtifactClick}
-              />
-            ))}
-          </div>
-        )}
-      </ScrollArea>
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

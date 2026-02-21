@@ -17,7 +17,6 @@ interface ChatHeaderProps {
   onCompact: () => void
   showNewChat: boolean
   onNewChat: () => void
-  artifactCount: number
   isArtifactsPanelOpen: boolean
   onToggleArtifactsPanel: () => void
 }
@@ -75,7 +74,6 @@ export function ChatHeader({
   onCompact,
   showNewChat,
   onNewChat,
-  artifactCount,
   isArtifactsPanelOpen,
   onToggleArtifactsPanel,
 }: ChatHeaderProps) {
@@ -166,7 +164,7 @@ export function ChatHeader({
           variant="ghost"
           size="icon"
           className={cn(
-            'relative h-8 w-8 shrink-0 transition-colors',
+            'h-8 w-8 shrink-0 transition-colors',
             isArtifactsPanelOpen
               ? 'bg-accent/80 text-foreground'
               : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
@@ -177,11 +175,6 @@ export function ChatHeader({
           aria-pressed={isArtifactsPanelOpen}
         >
           <PanelRight className="size-3.5" />
-          {artifactCount > 0 && !isArtifactsPanelOpen ? (
-            <span className="absolute -right-0.5 -top-0.5 inline-flex size-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">
-              {artifactCount > 99 ? '99+' : artifactCount}
-            </span>
-          ) : null}
         </Button>
       </div>
     </header>
