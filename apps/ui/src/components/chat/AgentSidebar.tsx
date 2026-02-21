@@ -1,4 +1,5 @@
-import { ChevronDown, ChevronRight, CircleDashed, RotateCcw, Settings, SquarePen, Trash2, UserStar } from 'lucide-react'
+import { ChevronDown, ChevronRight, CircleDashed, RotateCcw, Settings, SquarePen, UserStar } from 'lucide-react'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { useEffect, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { buildManagerTreeRows } from '@/lib/agent-hierarchy'
@@ -153,7 +154,6 @@ function AgentRow({
   isSelected,
   onSelect,
   onDelete,
-  deleteAriaLabel,
   className,
   nameClassName,
 }: {
@@ -162,7 +162,6 @@ function AgentRow({
   isSelected: boolean
   onSelect: () => void
   onDelete: () => void
-  deleteAriaLabel: string
   className: string
   nameClassName?: string
 }) {
@@ -173,63 +172,53 @@ function AgentRow({
   const modelDescription = `${agent.model.provider}/${agent.model.modelId}`
 
   return (
-    <div
-      className={cn(
-        'group flex w-full items-center gap-1 rounded-md transition-colors',
-        isSelected
-          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-          : 'text-sidebar-foreground/90 hover:bg-sidebar-accent/50',
-        className,
-      )}
-    >
-      <button
-        type="button"
-        onClick={onSelect}
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
-        title={title}
-      >
-        <AgentActivitySlot isActive={isActive} isSelected={isSelected} />
-        <span className={cn('min-w-0 flex-1 truncate text-sm leading-5', nameClassName)}>{title}</span>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={cn(
+            'flex w-full items-center gap-1 rounded-md transition-colors',
+            isSelected
+              ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+              : 'text-sidebar-foreground/90 hover:bg-sidebar-accent/50',
+            className,
+          )}
+        >
+          <button
+            type="button"
+            onClick={onSelect}
+            className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+            title={title}
+          >
+            <AgentActivitySlot isActive={isActive} isSelected={isSelected} />
+            <span className={cn('min-w-0 flex-1 truncate text-sm leading-5', nameClassName)}>{title}</span>
 
-        <TooltipProvider delayDuration={200}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span
-                className={cn(
-                  'ml-1 inline-flex h-5 min-w-7 shrink-0 items-center justify-center rounded-sm border border-sidebar-border/80 bg-sidebar-accent/40 px-0.5',
-                  isSelected ? 'border-sidebar-ring/60 bg-sidebar-accent-foreground/10' : '',
-                )}
-              >
-                <RuntimeIcon agent={agent} className="size-3 shrink-0 object-contain opacity-90" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={6} className="px-2 py-1 text-[10px]">
-              <p className="font-medium">{modelLabel}</p>
-              <p className="opacity-80">{modelDescription}</p>
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      </button>
-
-      <button
-        type="button"
-        onClick={(event) => {
-          event.stopPropagation()
-          onDelete()
-        }}
-        aria-label={deleteAriaLabel}
-        className={cn(
-          'inline-flex size-6 shrink-0 items-center justify-center rounded transition-all',
-          isSelected
-            ? 'text-sidebar-accent-foreground/55 opacity-100'
-            : 'text-muted-foreground/55 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
-          'hover:bg-destructive/10 hover:text-destructive',
-          'focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
-        )}
-      >
-        <Trash2 aria-hidden="true" className="size-3" />
-      </button>
-    </div>
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span
+                    className={cn(
+                      'ml-1 inline-flex h-5 min-w-7 shrink-0 items-center justify-center rounded-sm border border-sidebar-border/80 bg-sidebar-accent/40 px-0.5',
+                      isSelected ? 'border-sidebar-ring/60 bg-sidebar-accent-foreground/10' : '',
+                    )}
+                  >
+                    <RuntimeIcon agent={agent} className="size-3 shrink-0 object-contain opacity-90" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6} className="px-2 py-1 text-[10px]">
+                  <p className="font-medium">{modelLabel}</p>
+                  <p className="opacity-80">{modelDescription}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </button>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem variant="destructive" onClick={onDelete}>
+          Delete
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 }
 
@@ -339,7 +328,6 @@ export function AgentSidebar({
                       isSelected={managerIsSelected}
                       onSelect={() => onSelectAgent(manager.agentId)}
                       onDelete={() => onDeleteManager(manager.agentId)}
-                      deleteAriaLabel={`Delete manager ${manager.agentId}`}
                       nameClassName="font-semibold"
                       className="py-1.5 pl-7 pr-1.5"
                     />
@@ -399,7 +387,6 @@ export function AgentSidebar({
                                 isSelected={workerIsSelected}
                                 onSelect={() => onSelectAgent(worker.agentId)}
                                 onDelete={() => onDeleteAgent(worker.agentId)}
-                                deleteAriaLabel={`Delete ${worker.agentId}`}
                                 nameClassName="font-normal"
                                 className="py-1.5 pl-7 pr-1.5"
                               />
@@ -431,7 +418,6 @@ export function AgentSidebar({
                           isSelected={workerIsSelected}
                           onSelect={() => onSelectAgent(worker.agentId)}
                           onDelete={() => onDeleteAgent(worker.agentId)}
-                          deleteAriaLabel={`Delete ${worker.agentId}`}
                           nameClassName="font-normal"
                           className="py-1.5 pl-7 pr-1.5"
                         />
