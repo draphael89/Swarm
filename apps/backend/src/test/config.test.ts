@@ -56,6 +56,7 @@ describe('createConfig', () => {
       expect(config.paths.dataDir).toBe(resolve(homedir(), '.swarm-dev'))
       expect(config.paths.swarmDir).toBe(resolve(homedir(), '.swarm-dev', 'swarm'))
       expect(config.paths.sessionsDir).toBe(resolve(homedir(), '.swarm-dev', 'sessions'))
+      expect(config.paths.uploadsDir).toBe(resolve(homedir(), '.swarm-dev', 'uploads'))
       expect(config.paths.authDir).toBe(resolve(homedir(), '.swarm-dev', 'auth'))
       expect(config.paths.authFile).toBe(resolve(homedir(), '.swarm-dev', 'auth', 'auth.json'))
       expect(config.paths.managerAgentDir).toBe(resolve(homedir(), '.swarm-dev', 'agent', 'manager'))
@@ -75,6 +76,7 @@ describe('createConfig', () => {
 
       expect(config.paths.dataDir).toBe(resolve(homedir(), '.swarm'))
       expect(config.paths.managerAgentDir).toBe(resolve(homedir(), '.swarm', 'agent', 'manager'))
+      expect(config.paths.uploadsDir).toBe(resolve(homedir(), '.swarm', 'uploads'))
       expect(config.paths.authFile).toBe(resolve(homedir(), '.swarm', 'auth', 'auth.json'))
       expect(config.paths.repoArchetypesDir).toBe(resolve(config.paths.rootDir, '.swarm', 'archetypes'))
       expect(config.paths.memoryFile).toBe(resolve(homedir(), '.swarm', 'MEMORY.md'))

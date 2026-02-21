@@ -103,6 +103,7 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
   const dataDir = join(root, 'data')
   const swarmDir = join(dataDir, 'swarm')
   const sessionsDir = join(dataDir, 'sessions')
+  const uploadsDir = join(dataDir, 'uploads')
   const authDir = join(dataDir, 'auth')
   const agentDir = join(dataDir, 'agent')
   const managerAgentDir = join(agentDir, 'manager')
@@ -112,6 +113,7 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
 
   await mkdir(swarmDir, { recursive: true })
   await mkdir(sessionsDir, { recursive: true })
+  await mkdir(uploadsDir, { recursive: true })
   await mkdir(authDir, { recursive: true })
   await mkdir(agentDir, { recursive: true })
   await mkdir(managerAgentDir, { recursive: true })
@@ -136,6 +138,7 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
       dataDir,
       swarmDir,
       sessionsDir,
+      uploadsDir,
       authDir,
       authFile: join(authDir, 'auth.json'),
       agentDir,
@@ -876,6 +879,56 @@ describe('SwarmManager', () => {
       expect(sentMessage).toContain('Please review this file.')
       expect(sentMessage).toContain('Name: notes.md')
       expect(sentMessage).toContain('# Notes')
+    }
+  })
+
+  it('appends persisted attachment paths to runtime text while preserving image payloads', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', { agentId: 'Persisted Path Worker' })
+    const imagePath = join(config.paths.uploadsDir, 'diagram.png')
+    const textPath = join(config.paths.uploadsDir, 'notes.txt')
+
+    await writeFile(imagePath, Buffer.from('hello'))
+    await writeFile(textPath, 'hello from text attachment', 'utf8')
+
+    await manager.handleUserMessage('Review these files', {
+      targetAgentId: worker.agentId,
+      attachments: [
+        {
+          mimeType: 'image/png',
+          data: 'aGVsbG8=',
+          fileName: 'diagram.png',
+          filePath: imagePath,
+        },
+        {
+          type: 'text',
+          mimeType: 'text/plain',
+          fileName: 'notes.txt',
+          filePath: textPath,
+          text: 'hello from text attachment',
+        },
+      ],
+    })
+
+    const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
+    expect(workerRuntime).toBeDefined()
+
+    const sentMessage = workerRuntime?.sendCalls.at(-1)?.message
+    expect(typeof sentMessage).toBe('object')
+
+    if (sentMessage && typeof sentMessage !== 'string') {
+      expect(sentMessage.images).toEqual([
+        {
+          mimeType: 'image/png',
+          data: 'aGVsbG8=',
+        },
+      ])
+      expect(sentMessage.text).toContain('Review these files')
+      expect(sentMessage.text).toContain(`[Attached file saved to: ${imagePath}]`)
+      expect(sentMessage.text).toContain(`[Attached file saved to: ${textPath}]`)
     }
   })
 

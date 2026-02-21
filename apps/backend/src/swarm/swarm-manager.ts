@@ -636,10 +636,16 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     const images = toRuntimeImageAttachments(attachments);
     const fileMessages: string[] = [];
+    const attachmentPathMessages: string[] = [];
     let binaryAttachmentDir: string | undefined;
 
     for (let index = 0; index < attachments.length; index += 1) {
       const attachment = attachments[index];
+      const persistedPath = normalizeOptionalAttachmentPath(attachment.filePath);
+
+      if (persistedPath) {
+        attachmentPathMessages.push(`[Attached file saved to: ${persistedPath}]`);
+      }
 
       if (isConversationImageAttachment(attachment)) {
         continue;
@@ -651,23 +657,37 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       }
 
       if (isConversationBinaryAttachment(attachment)) {
-        const directory = binaryAttachmentDir ?? (await this.createBinaryAttachmentDir(targetAgentId));
-        binaryAttachmentDir = directory;
-        const storedPath = await this.writeBinaryAttachmentToDisk(directory, attachment, index + 1);
+        let storedPath = persistedPath;
+        if (!storedPath) {
+          const directory = binaryAttachmentDir ?? (await this.createBinaryAttachmentDir(targetAgentId));
+          binaryAttachmentDir = directory;
+          storedPath = await this.writeBinaryAttachmentToDisk(directory, attachment, index + 1);
+        }
         fileMessages.push(formatBinaryAttachmentForPrompt(attachment, storedPath, index + 1));
       }
     }
 
-    if (fileMessages.length === 0) {
+    if (fileMessages.length === 0 && attachmentPathMessages.length === 0) {
       return {
         images,
         attachmentMessage: ""
       };
     }
 
+    const attachmentMessageSections: string[] = [];
+    if (fileMessages.length > 0) {
+      attachmentMessageSections.push("The user attached the following files:", "", ...fileMessages);
+    }
+    if (attachmentPathMessages.length > 0) {
+      if (attachmentMessageSections.length > 0) {
+        attachmentMessageSections.push("");
+      }
+      attachmentMessageSections.push(...attachmentPathMessages);
+    }
+
     return {
       images,
-      attachmentMessage: ["The user attached the following files:", "", ...fileMessages].join("\n")
+      attachmentMessage: attachmentMessageSections.join("\n")
     };
   }
 
@@ -2359,6 +2379,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       this.config.paths.dataDir,
       this.config.paths.swarmDir,
       this.config.paths.sessionsDir,
+      this.config.paths.uploadsDir,
       this.config.paths.authDir,
       this.config.paths.agentDir,
       this.config.paths.managerAgentDir
@@ -2868,6 +2889,7 @@ function normalizeConversationAttachments(
 
     const mimeType = typeof attachment.mimeType === "string" ? attachment.mimeType.trim() : "";
     const fileName = typeof attachment.fileName === "string" ? attachment.fileName.trim() : "";
+    const filePath = typeof attachment.filePath === "string" ? attachment.filePath.trim() : "";
 
     if (attachment.type === "text") {
       const text = typeof attachment.text === "string" ? attachment.text : "";
@@ -2879,7 +2901,8 @@ function normalizeConversationAttachments(
         type: "text",
         mimeType,
         text,
-        fileName: fileName || undefined
+        fileName: fileName || undefined,
+        filePath: filePath || undefined
       });
       continue;
     }
@@ -2894,7 +2917,8 @@ function normalizeConversationAttachments(
         type: "binary",
         mimeType,
         data,
-        fileName: fileName || undefined
+        fileName: fileName || undefined,
+        filePath: filePath || undefined
       });
       continue;
     }
@@ -2907,7 +2931,8 @@ function normalizeConversationAttachments(
     normalized.push({
       mimeType,
       data,
-      fileName: fileName || undefined
+      fileName: fileName || undefined,
+      filePath: filePath || undefined
     });
   }
 
@@ -2988,6 +3013,15 @@ function sanitizePathSegment(value: string, fallback: string): string {
     .slice(0, 64);
 
   return cleaned || fallback;
+}
+
+function normalizeOptionalAttachmentPath(path: string | undefined): string | undefined {
+  if (typeof path !== "string") {
+    return undefined;
+  }
+
+  const trimmed = path.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function extractRuntimeMessageText(message: string | RuntimeUserMessage): string {
@@ -3189,6 +3223,10 @@ function isConversationImageAttachment(value: unknown): value is ConversationIma
     return false;
   }
 
+  if (maybe.filePath !== undefined && typeof maybe.filePath !== "string") {
+    return false;
+  }
+
   return true;
 }
 
@@ -3214,6 +3252,10 @@ function isConversationTextAttachment(value: unknown): value is ConversationText
     return false;
   }
 
+  if (maybe.filePath !== undefined && typeof maybe.filePath !== "string") {
+    return false;
+  }
+
   return true;
 }
 
@@ -3236,6 +3278,10 @@ function isConversationBinaryAttachment(value: unknown): value is ConversationBi
   }
 
   if (maybe.fileName !== undefined && typeof maybe.fileName !== "string") {
+    return false;
+  }
+
+  if (maybe.filePath !== undefined && typeof maybe.filePath !== "string") {
     return false;
   }
 

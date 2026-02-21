@@ -74,6 +74,7 @@ export interface SwarmPaths {
   dataDir: string;
   swarmDir: string;
   sessionsDir: string;
+  uploadsDir: string;
   authDir: string;
   authFile: string;
   agentDir: string;
@@ -123,6 +124,7 @@ export interface ConversationImageAttachment {
   mimeType: string;
   data: string;
   fileName?: string;
+  filePath?: string;
 }
 
 export interface ConversationTextAttachment {
@@ -130,6 +132,7 @@ export interface ConversationTextAttachment {
   mimeType: string;
   text: string;
   fileName?: string;
+  filePath?: string;
 }
 
 export interface ConversationBinaryAttachment {
@@ -137,6 +140,7 @@ export interface ConversationBinaryAttachment {
   mimeType: string;
   data: string;
   fileName?: string;
+  filePath?: string;
 }
 
 export type ConversationAttachment =

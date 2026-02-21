@@ -110,6 +110,7 @@ async function makeTempConfig(port: number, allowNonManagerSubscriptions = false
   const dataDir = join(root, 'data')
   const swarmDir = join(dataDir, 'swarm')
   const sessionsDir = join(dataDir, 'sessions')
+  const uploadsDir = join(dataDir, 'uploads')
   const authDir = join(dataDir, 'auth')
   const agentDir = join(dataDir, 'agent')
   const managerAgentDir = join(agentDir, 'manager')
@@ -119,6 +120,7 @@ async function makeTempConfig(port: number, allowNonManagerSubscriptions = false
 
   await mkdir(swarmDir, { recursive: true })
   await mkdir(sessionsDir, { recursive: true })
+  await mkdir(uploadsDir, { recursive: true })
   await mkdir(authDir, { recursive: true })
   await mkdir(agentDir, { recursive: true })
   await mkdir(managerAgentDir, { recursive: true })
@@ -143,6 +145,7 @@ async function makeTempConfig(port: number, allowNonManagerSubscriptions = false
       dataDir,
       swarmDir,
       sessionsDir,
+      uploadsDir,
       authDir,
       authFile: join(authDir, 'auth.json'),
       agentDir,
@@ -856,13 +859,20 @@ describe('SwarmWebSocketServer', () => {
     expect(userEvent.type).toBe('conversation_message')
     if (userEvent.type === 'conversation_message') {
       expect(userEvent.text).toBe('')
-      expect(userEvent.attachments).toEqual([
-        {
-          mimeType: 'image/png',
-          data: 'aGVsbG8=',
-          fileName: 'diagram.png',
-        },
-      ])
+      expect(userEvent.attachments).toHaveLength(1)
+      const persistedAttachment = userEvent.attachments?.[0]
+      expect(persistedAttachment).toMatchObject({
+        mimeType: 'image/png',
+        data: 'aGVsbG8=',
+        fileName: 'diagram.png',
+      })
+      expect(typeof persistedAttachment?.filePath).toBe('string')
+
+      if (persistedAttachment?.filePath) {
+        expect(persistedAttachment.filePath.startsWith(config.paths.uploadsDir)).toBe(true)
+        const content = await readFile(persistedAttachment.filePath)
+        expect(content.toString('utf8')).toBe('hello')
+      }
     }
 
     client.close()
@@ -930,20 +940,37 @@ describe('SwarmWebSocketServer', () => {
 
     expect(userEvent.type).toBe('conversation_message')
     if (userEvent.type === 'conversation_message') {
-      expect(userEvent.attachments).toEqual([
-        {
-          type: 'text',
-          mimeType: 'text/markdown',
-          text: '# Notes',
-          fileName: 'notes.md',
-        },
-        {
-          type: 'binary',
-          mimeType: 'application/pdf',
-          data: 'aGVsbG8=',
-          fileName: 'design.pdf',
-        },
-      ])
+      expect(userEvent.attachments).toHaveLength(2)
+
+      const textAttachment = userEvent.attachments?.[0]
+      expect(textAttachment).toMatchObject({
+        type: 'text',
+        mimeType: 'text/markdown',
+        text: '# Notes',
+        fileName: 'notes.md',
+      })
+      expect(typeof textAttachment?.filePath).toBe('string')
+
+      const binaryAttachment = userEvent.attachments?.[1]
+      expect(binaryAttachment).toMatchObject({
+        type: 'binary',
+        mimeType: 'application/pdf',
+        data: 'aGVsbG8=',
+        fileName: 'design.pdf',
+      })
+      expect(typeof binaryAttachment?.filePath).toBe('string')
+
+      if (textAttachment?.filePath) {
+        expect(textAttachment.filePath.startsWith(config.paths.uploadsDir)).toBe(true)
+        const textContent = await readFile(textAttachment.filePath, 'utf8')
+        expect(textContent).toBe('# Notes')
+      }
+
+      if (binaryAttachment?.filePath) {
+        expect(binaryAttachment.filePath.startsWith(config.paths.uploadsDir)).toBe(true)
+        const binaryContent = await readFile(binaryAttachment.filePath)
+        expect(binaryContent.toString('utf8')).toBe('hello')
+      }
     }
 
     client.close()

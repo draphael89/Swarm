@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { extname, join } from "node:path";
@@ -24,6 +24,7 @@ import {
 } from "../swarm/cwd-policy.js";
 import { describeSwarmModelPresets, isSwarmModelPreset } from "../swarm/model-presets.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
+import type { ConversationAttachment } from "../swarm/types.js";
 
 const REBOOT_ENDPOINT_PATH = "/api/reboot";
 const READ_FILE_ENDPOINT_PATH = "/api/read-file";
@@ -1651,7 +1652,8 @@ export class SwarmWebSocketServer {
     }
 
     if (command.type === "user_message") {
-      const managerId = this.swarmManager.getConfig().managerId;
+      const config = this.swarmManager.getConfig();
+      const managerId = config.managerId;
       const targetAgentId = command.agentId ?? subscribedAgentId;
 
       if (!this.allowNonManagerSubscriptions && targetAgentId !== managerId) {
@@ -1679,10 +1681,15 @@ export class SwarmWebSocketServer {
           return;
         }
 
+        const persistedAttachments =
+          command.attachments && command.attachments.length > 0
+            ? await persistConversationAttachments(command.attachments, config.paths.uploadsDir)
+            : undefined;
+
         await this.swarmManager.handleUserMessage(command.text, {
           targetAgentId,
           delivery: command.delivery,
-          attachments: command.attachments,
+          attachments: persistedAttachments,
           sourceContext: { channel: "web" }
         });
       } catch (error) {
@@ -2738,11 +2745,7 @@ function parseConversationAttachments(
 ):
   | {
       ok: true;
-      attachments: Array<
-        | { mimeType: string; data: string; fileName?: string }
-        | { type: "text"; mimeType: string; text: string; fileName?: string }
-        | { type: "binary"; mimeType: string; data: string; fileName?: string }
-      >;
+      attachments: ConversationAttachment[];
     }
   | { ok: false; error: string } {
   if (value === undefined) {
@@ -2753,11 +2756,7 @@ function parseConversationAttachments(
     return { ok: false, error: `${fieldName} must be an array when provided` };
   }
 
-  const attachments: Array<
-    | { mimeType: string; data: string; fileName?: string }
-    | { type: "text"; mimeType: string; text: string; fileName?: string }
-    | { type: "binary"; mimeType: string; data: string; fileName?: string }
-  > = [];
+  const attachments: ConversationAttachment[] = [];
 
   for (let index = 0; index < value.length; index += 1) {
     const item = value[index];
@@ -2841,3 +2840,124 @@ function parseConversationAttachments(
 
   return { ok: true, attachments };
 }
+
+async function persistConversationAttachments(
+  attachments: ConversationAttachment[],
+  uploadsDir: string
+): Promise<ConversationAttachment[]> {
+  if (attachments.length === 0) {
+    return [];
+  }
+
+  await mkdir(uploadsDir, { recursive: true });
+
+  const persisted: ConversationAttachment[] = [];
+  for (const attachment of attachments) {
+    if (attachment.type === "text") {
+      const extension = resolveAttachmentExtension({
+        mimeType: attachment.mimeType,
+        fileName: attachment.fileName,
+        fallbackExtension: "txt"
+      });
+      const filePath = buildUploadFilePath(uploadsDir, extension);
+      await writeFile(filePath, attachment.text, "utf8");
+      persisted.push({
+        ...attachment,
+        filePath
+      });
+      continue;
+    }
+
+    const extension = resolveAttachmentExtension({
+      mimeType: attachment.mimeType,
+      fileName: attachment.fileName,
+      fallbackExtension: attachment.type === "binary" ? "bin" : "png"
+    });
+    const filePath = buildUploadFilePath(uploadsDir, extension);
+    await writeFile(filePath, Buffer.from(attachment.data, "base64"));
+    persisted.push({
+      ...attachment,
+      filePath
+    });
+  }
+
+  return persisted;
+}
+
+function buildUploadFilePath(uploadsDir: string, extension: string): string {
+  const safeExtension = extension.trim().toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
+  return join(uploadsDir, `${Date.now()}-${randomUUID()}.${safeExtension}`);
+}
+
+function resolveAttachmentExtension(options: {
+  mimeType: string;
+  fileName?: string;
+  fallbackExtension: string;
+}): string {
+  const fromMimeType = extensionFromMimeType(options.mimeType);
+  if (fromMimeType) {
+    return fromMimeType;
+  }
+
+  const fromFileName = extensionFromFileName(options.fileName);
+  if (fromFileName) {
+    return fromFileName;
+  }
+
+  return options.fallbackExtension;
+}
+
+function extensionFromMimeType(mimeType: string): string | undefined {
+  const normalized = mimeType.trim().toLowerCase().split(";", 1)[0]?.trim() ?? "";
+  if (!normalized) {
+    return undefined;
+  }
+
+  const mapped = MIME_TYPE_EXTENSIONS[normalized];
+  if (mapped) {
+    return mapped;
+  }
+
+  const slashIndex = normalized.indexOf("/");
+  if (slashIndex < 0 || slashIndex === normalized.length - 1) {
+    return undefined;
+  }
+
+  const subtype = normalized.slice(slashIndex + 1);
+  const plusIndex = subtype.indexOf("+");
+  const candidate = (plusIndex >= 0 ? subtype.slice(0, plusIndex) : subtype).replace(/[^a-z0-9]/g, "");
+  return candidate.length > 0 ? candidate : undefined;
+}
+
+function extensionFromFileName(fileName: string | undefined): string | undefined {
+  if (typeof fileName !== "string" || fileName.trim().length === 0) {
+    return undefined;
+  }
+
+  const extension = extname(fileName).trim().toLowerCase().replace(/^\./, "").replace(/[^a-z0-9]/g, "");
+  return extension.length > 0 ? extension : undefined;
+}
+
+const MIME_TYPE_EXTENSIONS: Record<string, string> = {
+  "image/apng": "apng",
+  "image/avif": "avif",
+  "image/bmp": "bmp",
+  "image/gif": "gif",
+  "image/heic": "heic",
+  "image/heif": "heif",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/svg+xml": "svg",
+  "image/tiff": "tiff",
+  "image/webp": "webp",
+  "application/gzip": "gz",
+  "application/json": "json",
+  "application/pdf": "pdf",
+  "application/zip": "zip",
+  "text/csv": "csv",
+  "text/html": "html",
+  "text/markdown": "md",
+  "text/plain": "txt",
+  "text/xml": "xml"
+};

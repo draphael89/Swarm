@@ -26,6 +26,7 @@ export function createConfig(): SwarmConfig {
   const dataDir = dataDirEnv ? resolveDataDir(rootDir, dataDirEnv) : defaultDataDir;
   const swarmDir = resolve(dataDir, "swarm");
   const sessionsDir = resolve(dataDir, "sessions");
+  const uploadsDir = resolve(dataDir, "uploads");
   const authDir = resolve(dataDir, "auth");
   const defaultAuthFile = resolve(authDir, "auth.json");
   const authFileEnv = process.env.SWARM_AUTH_FILE?.trim();
@@ -74,6 +75,7 @@ export function createConfig(): SwarmConfig {
       dataDir,
       swarmDir,
       sessionsDir,
+      uploadsDir,
       authDir,
       authFile,
       agentDir,
