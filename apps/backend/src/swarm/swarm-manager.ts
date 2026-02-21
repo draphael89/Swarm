@@ -1357,29 +1357,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       }
     }
 
-    const hasOtherRunningAgents = Array.from(this.descriptors.values()).some(
-      (descriptor) => descriptor.status !== "terminated"
-    );
-
-    let primaryManager = this.descriptors.get(this.config.managerId);
-    if (!primaryManager) {
-      if (!hasOtherRunningAgents) {
-        primaryManager = {
-          agentId: this.config.managerId,
-          displayName: this.config.managerDisplayName,
-          role: "manager",
-          managerId: this.config.managerId,
-          archetypeId: MANAGER_ARCHETYPE_ID,
-          status: "idle",
-          createdAt: now,
-          updatedAt: now,
-          cwd: this.config.defaultCwd,
-          model: this.resolveDefaultModelDescriptor(),
-          sessionFile: join(this.config.paths.sessionsDir, `${this.config.managerId}.jsonl`)
-        };
-        this.descriptors.set(primaryManager.agentId, primaryManager);
-      }
-    } else {
+    const primaryManager = this.descriptors.get(this.config.managerId);
+    if (primaryManager) {
       primaryManager.role = "manager";
       primaryManager.managerId = primaryManager.agentId;
       primaryManager.archetypeId = MANAGER_ARCHETYPE_ID;
@@ -1399,14 +1378,17 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         .filter((descriptor) => descriptor.role === "manager" && descriptor.status !== "terminated")
         .map((descriptor) => descriptor.agentId)
     );
+    const fallbackManagerId = liveManagerIds.has(this.config.managerId)
+      ? this.config.managerId
+      : liveManagerIds.values().next().value;
 
     for (const descriptor of this.descriptors.values()) {
       if (descriptor.role !== "worker") {
         continue;
       }
 
-      if (!liveManagerIds.has(descriptor.managerId)) {
-        descriptor.managerId = this.config.managerId;
+      if (fallbackManagerId && !liveManagerIds.has(descriptor.managerId)) {
+        descriptor.managerId = fallbackManagerId;
         descriptor.updatedAt = now;
       }
     }
