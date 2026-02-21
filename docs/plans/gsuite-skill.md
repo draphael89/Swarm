@@ -1,4 +1,4 @@
-# G Suite Skill Plan (gogcli, Simplified)
+# G Suite Skill Plan (gogcli, Read+Write in v1)
 
 ## Objective
 Ship Google Workspace support in Swarm with minimal maintenance:
@@ -6,8 +6,9 @@ Ship Google Workspace support in Swarm with minimal maintenance:
 1. Install and use `gog` directly.
 2. Add a built-in `gsuite` skill that is just `SKILL.md` docs (no wrapper scripts).
 3. Run Google OAuth setup entirely from Swarm Settings UI.
+4. Enable both read and write operations from day one in v1.
 
-This revision incorporates feedback to remove wrapper-tool complexity and treat `gog` as the primary interface.
+This revision keeps the simplified `gog` approach and removes the earlier phased read-only-first model.
 
 ---
 
@@ -25,9 +26,13 @@ This revision incorporates feedback to remove wrapper-tool complexity and treat 
      - Paste redirect URL/auth code
      - Swarm completes OAuth and stores credentials for `gog`
 
-3. **Keep phased rollout**
-   - Read-only by default first.
-   - Write-capable auth/usage only as explicit opt-in in later phase.
+3. **Read + write in v1 (no read-only phase)**
+   - v1 must support both read and write workflows immediately.
+   - Required v1 write capabilities:
+     - Gmail send
+     - Calendar event create/update
+     - Drive file upload
+   - Scope and UX should still make write actions explicit and visible to the user.
 
 ---
 
@@ -101,8 +106,8 @@ Do not add scripts/package for command wrappers.
 - Setup prerequisites (`gog` install + OAuth completed in Settings).
 - Command discovery (`gog --help`, `GOG_HELP=full gog --help`, `gog <group> --help`).
 - Practical examples for Gmail/Calendar/Drive/Docs with `--json`.
+- Explicit write examples in v1: Gmail send, Calendar event create, Drive upload.
 - Guidance to use `--account` or `GOG_ACCOUNT`.
-- Reminder that read/write behavior is controlled by granted scopes.
 
 Swarm manager wiring:
 - Extend `reloadSkillMetadata()` to include `gsuite` SKILL path (same pattern as `memory` and `brave-search`).
@@ -121,6 +126,7 @@ Behavior:
 - Backend executes `gog` directly with argv arrays.
 - All Settings actions map to real `gog` commands.
 - No shell wrapper scripts in skills folder.
+- v1 endpoints support both read and write-ready scopes immediately.
 
 ---
 
@@ -131,25 +137,24 @@ Implement in `SettingsDialog.tsx` (modeled after existing OAuth UX patterns):
 1. User provides:
    - Account email
    - OAuth client JSON (paste or upload)
-   - Optional scope mode (read-only default)
 
 2. User clicks **Connect Google**:
    - Backend first stores OAuth client:
      - `gog --json auth credentials -` (stdin JSON payload)
    - Backend starts auth URL generation:
-     - `gog --json auth add <email> --services gmail,calendar,drive,docs --readonly --drive-scope readonly --remote --step 1`
+     - `gog --json auth add <email> --services gmail,calendar,drive,docs --remote --step 1`
    - UI shows returned `auth_url`.
 
 3. User authorizes in browser and pastes redirect URL into Settings.
 
 4. User clicks **Complete Connection**:
    - Backend runs:
-     - `gog --json auth add <email> --services gmail,calendar,drive,docs --readonly --drive-scope readonly --remote --step 2 --auth-url '<redirect-url>'`
+     - `gog --json auth add <email> --services gmail,calendar,drive,docs --remote --step 2 --auth-url '<redirect-url>'`
    - On success: token stored and status updates to connected.
 
 5. Test button verifies:
    - `gog --json auth status --account <email>`
-   - Optional lightweight API call (e.g. `gog --json gmail labels list --account <email>`)
+   - Optional lightweight API calls, including write checks in safe mode.
 
 ---
 
@@ -189,32 +194,30 @@ Add REST endpoints:
 
 Payload expectations:
 - `oauth/credentials`: `{ oauthClientJson, clientName? }`
-- `oauth/start`: `{ email, services?, readonly?, driveScope?, forceConsent? }`
-- `oauth/complete`: `{ email, authUrl, services?, readonly?, driveScope?, forceConsent? }`
+- `oauth/start`: `{ email, services?, forceConsent? }`
+- `oauth/complete`: `{ email, authUrl, services?, forceConsent? }`
 
 ---
 
-## Phased Implementation
+## Implementation Plan
 
 ### Phase 0 — Foundation
 - Add `gsuite` integration config/status scaffolding.
 - Add `gog` detection and version checks in backend + Settings.
 - Implement per-process env strategy for `SWARM_DATA_DIR` isolation.
 
-### Phase 1 — Settings OAuth MVP
+### Phase 1 — v1 Shipping Scope (Read + Write)
 - Add G Suite section in Settings.
 - Implement `oauth/credentials`, `oauth/start`, `oauth/complete`.
-- Default to read-only scopes.
 - Add connection test and status display.
+- Expose v1 operations with read + write expectations:
+  - Gmail read + send
+  - Calendar read + create/update
+  - Drive read + upload
 
-### Phase 2 — Minimal Skill Enablement
-- Add `apps/backend/src/swarm/skills/builtins/gsuite/SKILL.md` only.
-- Wire skill metadata loading for `gsuite`.
-- Ensure skill docs point agents to direct `gog` usage.
-
-### Phase 3 — Hardening + Optional Write Opt-In
-- Add explicit write-scope toggle in Settings (off by default).
+### Phase 2 — Hardening
 - Improve error mapping for common OAuth/state/scope failures.
+- Add clearer warnings/confirmations for write-impact operations.
 - Document operator troubleshooting (`state expired`, missing scopes, keyring password issues).
 
 ---
@@ -226,4 +229,4 @@ Payload expectations:
 3. Commands map directly to actual `gog auth` behavior (`--remote --step 1/2`).
 4. Storage behavior is documented with accurate path/keyring details.
 5. `SWARM_DATA_DIR` strategy is explicit despite lack of native `gog` config-dir flag.
-6. Phased rollout remains coherent and read-only first.
+6. v1 scope explicitly includes read + write support (Gmail send, Calendar create/update, Drive upload).
