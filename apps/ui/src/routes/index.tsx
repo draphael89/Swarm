@@ -8,7 +8,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react'
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useLocation, useNavigate } from '@tanstack/react-router'
 import { AgentSidebar } from '@/components/chat/AgentSidebar'
 import { ArtifactPanel } from '@/components/chat/ArtifactPanel'
 import { ArtifactsSidebar } from '@/components/chat/ArtifactsSidebar'
@@ -49,6 +49,15 @@ type ActiveView = 'chat' | 'settings'
 type AppRouteState =
   | { view: 'chat'; agentId: string }
   | { view: 'settings' }
+type AppRouteSearch = {
+  view?: string
+  agent?: string
+}
+
+function normalizeAgentId(agentId?: string): string {
+  const trimmedAgentId = agentId?.trim()
+  return trimmedAgentId && trimmedAgentId.length > 0 ? trimmedAgentId : DEFAULT_MANAGER_AGENT_ID
+}
 
 function decodePathSegment(segment: string): string {
   try {
@@ -69,7 +78,7 @@ function parseRouteStateFromPathname(pathname: string): AppRouteState {
   if (agentMatch) {
     return {
       view: 'chat',
-      agentId: decodePathSegment(agentMatch[1]),
+      agentId: normalizeAgentId(decodePathSegment(agentMatch[1])),
     }
   }
 
@@ -79,25 +88,59 @@ function parseRouteStateFromPathname(pathname: string): AppRouteState {
   }
 }
 
-function toRoutePathname(routeState: AppRouteState): string {
-  if (routeState.view === 'settings') {
-    return '/settings'
+function parseRouteStateFromLocation(pathname: string, search: unknown): AppRouteState {
+  const routeSearch = search && typeof search === 'object' ? (search as AppRouteSearch) : {}
+  const view = typeof routeSearch.view === 'string' ? routeSearch.view : undefined
+  const agentId = typeof routeSearch.agent === 'string' ? routeSearch.agent : undefined
+
+  if (view === 'settings') {
+    return { view: 'settings' }
   }
 
-  const agentId = routeState.agentId.trim() || DEFAULT_MANAGER_AGENT_ID
-  if (agentId === DEFAULT_MANAGER_AGENT_ID) {
-    return '/'
+  if (view === 'chat' || agentId !== undefined) {
+    return {
+      view: 'chat',
+      agentId: normalizeAgentId(agentId),
+    }
   }
 
-  return `/agent/${encodeURIComponent(agentId)}`
+  return parseRouteStateFromPathname(pathname)
 }
 
-function getInitialRouteState(): AppRouteState {
-  if (typeof window === 'undefined') {
-    return { view: 'chat', agentId: DEFAULT_MANAGER_AGENT_ID }
+function normalizeRouteState(routeState: AppRouteState): AppRouteState {
+  if (routeState.view === 'settings') {
+    return { view: 'settings' }
   }
 
-  return parseRouteStateFromPathname(window.location.pathname)
+  return {
+    view: 'chat',
+    agentId: normalizeAgentId(routeState.agentId),
+  }
+}
+
+function toRouteSearch(routeState: AppRouteState): AppRouteSearch {
+  if (routeState.view === 'settings') {
+    return { view: 'settings' }
+  }
+
+  const agentId = normalizeAgentId(routeState.agentId)
+  if (agentId === DEFAULT_MANAGER_AGENT_ID) {
+    return {}
+  }
+
+  return { agent: agentId }
+}
+
+function routeStatesEqual(left: AppRouteState, right: AppRouteState): boolean {
+  if (left.view === 'settings' && right.view === 'settings') {
+    return true
+  }
+
+  if (left.view === 'chat' && right.view === 'chat') {
+    return left.agentId === right.agentId
+  }
+
+  return false
 }
 
 function resolveDefaultWsUrl(): string {
@@ -118,6 +161,8 @@ export function IndexPage() {
   const wsUrl = import.meta.env.VITE_SWARM_WS_URL ?? resolveDefaultWsUrl()
   const clientRef = useRef<ManagerWsClient | null>(null)
   const messageInputRef = useRef<MessageInputHandle | null>(null)
+  const navigate = useNavigate()
+  const location = useLocation()
 
   const [state, setState] = useState<ManagerWsState>({
     connected: false,
@@ -146,7 +191,10 @@ export function IndexPage() {
   const [deleteManagerError, setDeleteManagerError] = useState<string | null>(null)
   const [isDeletingManager, setIsDeletingManager] = useState(false)
 
-  const [routeState, setRouteState] = useState<AppRouteState>(() => getInitialRouteState())
+  const routeState = useMemo(
+    () => parseRouteStateFromLocation(location.pathname, location.search),
+    [location.pathname, location.search],
+  )
   const activeView: ActiveView = routeState.view
 
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
@@ -218,35 +266,22 @@ export function IndexPage() {
     [state.messages],
   )
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
+  const navigateToRoute = useCallback(
+    (nextRouteState: AppRouteState, replace = false) => {
+      const normalizedRouteState = normalizeRouteState(nextRouteState)
+      if (routeStatesEqual(routeState, normalizedRouteState)) {
+        return
+      }
 
-    const handlePopState = () => {
-      setRouteState(parseRouteStateFromPathname(window.location.pathname))
-    }
-
-    window.addEventListener('popstate', handlePopState)
-    return () => {
-      window.removeEventListener('popstate', handlePopState)
-    }
-  }, [])
-
-  const navigateToRoute = useCallback((nextRouteState: AppRouteState, replace = false) => {
-    const nextPathname = toRoutePathname(nextRouteState)
-    const normalizedRouteState = parseRouteStateFromPathname(nextPathname)
-
-    setRouteState(normalizedRouteState)
-
-    if (typeof window === 'undefined') return
-    if (window.location.pathname === nextPathname) return
-
-    if (replace) {
-      window.history.replaceState({}, '', nextPathname)
-      return
-    }
-
-    window.history.pushState({}, '', nextPathname)
-  }, [])
+      void navigate({
+        to: '/',
+        search: toRouteSearch(normalizedRouteState),
+        replace,
+        resetScroll: false,
+      })
+    },
+    [navigate, routeState],
+  )
 
   useEffect(() => {
     setActiveArtifact(null)
