@@ -26,6 +26,7 @@ export function createDefaultTelegramConfig(defaultManagerId: string): TelegramI
     mode: "polling",
     botToken: "",
     targetManagerId: defaultManagerId.trim() || "manager",
+    allowedUserIds: [],
     polling: {
       timeoutSeconds: 25,
       limit: 100,
@@ -99,6 +100,7 @@ export function mergeTelegramConfig(
       root.targetManagerId,
       base.targetManagerId || options?.defaultManagerId || "manager"
     ),
+    allowedUserIds: normalizeStringArray(root.allowedUserIds, base.allowedUserIds),
     polling: {
       timeoutSeconds: normalizeInteger(
         polling.timeoutSeconds,
@@ -139,6 +141,7 @@ export function maskTelegramConfig(config: TelegramIntegrationConfig): TelegramI
     botToken: config.botToken ? maskToken(config.botToken) : null,
     hasBotToken: config.botToken.trim().length > 0,
     targetManagerId: config.targetManagerId,
+    allowedUserIds: [...config.allowedUserIds],
     polling: {
       timeoutSeconds: config.polling.timeoutSeconds,
       limit: config.polling.limit,
@@ -173,6 +176,40 @@ function normalizeString(value: unknown, fallback: string): string {
 
   const trimmed = value.trim();
   return trimmed || fallback;
+}
+
+function normalizeStringArray(value: unknown, fallback: string[]): string[] {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const entry of value) {
+    const normalizedEntry = normalizeArrayEntry(entry);
+    if (!normalizedEntry || seen.has(normalizedEntry)) {
+      continue;
+    }
+
+    seen.add(normalizedEntry);
+    normalized.push(normalizedEntry);
+  }
+
+  return normalized;
+}
+
+function normalizeArrayEntry(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(Math.trunc(value));
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || undefined;
 }
 
 function normalizeInteger(value: unknown, fallback: number, min: number, max: number): number {

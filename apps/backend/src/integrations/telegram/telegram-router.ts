@@ -45,6 +45,11 @@ export class TelegramInboundRouter {
       return;
     }
 
+    const config = this.getConfig();
+    if (this.shouldIgnoreByAllowlist(message, config.allowedUserIds)) {
+      return;
+    }
+
     const text = normalizeInboundText(message.text ?? message.caption ?? "");
     const attachments: ConversationAttachment[] = [];
 
@@ -52,7 +57,6 @@ export class TelegramInboundRouter {
       return;
     }
 
-    const config = this.getConfig();
     const targetManagerId =
       normalizeOptionalString(config.targetManagerId) ?? this.swarmManager.getConfig().managerId;
 
@@ -110,6 +114,23 @@ export class TelegramInboundRouter {
     }
 
     return false;
+  }
+
+  private shouldIgnoreByAllowlist(message: TelegramMessage, allowedUserIds: string[]): boolean {
+    if (allowedUserIds.length === 0) {
+      return false;
+    }
+
+    const userId = message.from ? String(message.from.id) : undefined;
+    if (userId && allowedUserIds.includes(userId)) {
+      return false;
+    }
+
+    const reason = userId ? `user ${userId} is not allowlisted` : "message has no sender user id";
+    console.debug(
+      `[telegram] Ignoring inbound message ${message.message_id} from chat ${message.chat.id}: ${reason}`
+    );
+    return true;
   }
 
   private isDuplicate(updateId: number): boolean {
