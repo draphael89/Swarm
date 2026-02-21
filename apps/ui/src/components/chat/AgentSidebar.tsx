@@ -327,7 +327,7 @@ export function AgentSidebar({
           <ul className="space-y-0.5">
             {managerRows.map(({ manager, workers }) => {
               const managerLiveStatus = getAgentLiveStatus(manager, statuses)
-              const managerIsSelected = selectedAgentId === manager.agentId
+              const managerIsSelected = !isSettingsActive && selectedAgentId === manager.agentId
               const managerIsCollapsed = collapsedManagerIds.has(manager.agentId)
 
               return (
@@ -389,7 +389,7 @@ export function AgentSidebar({
                       <ul className="space-y-0.5">
                         {workers.map((worker) => {
                           const workerLiveStatus = getAgentLiveStatus(worker, statuses)
-                          const workerIsSelected = selectedAgentId === worker.agentId
+                          const workerIsSelected = !isSettingsActive && selectedAgentId === worker.agentId
 
                           return (
                             <li key={worker.agentId}>
@@ -421,7 +421,7 @@ export function AgentSidebar({
                 <ul className="space-y-0.5">
                   {orphanWorkers.map((worker) => {
                     const workerLiveStatus = getAgentLiveStatus(worker, statuses)
-                    const workerIsSelected = selectedAgentId === worker.agentId
+                    const workerIsSelected = !isSettingsActive && selectedAgentId === worker.agentId
 
                     return (
                       <li key={worker.agentId}>
