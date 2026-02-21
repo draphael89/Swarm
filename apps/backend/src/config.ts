@@ -80,7 +80,8 @@ export function createConfig(): SwarmConfig {
       memoryFile,
       repoMemorySkillFile,
       agentsStoreFile: resolve(swarmDir, "agents.json"),
-      secretsFile
+      secretsFile,
+      schedulesFile: resolve(dataDir, "schedules.json")
     }
   };
 }
