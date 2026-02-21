@@ -225,8 +225,8 @@ const SETTINGS_AUTH_PROVIDER_META: Record<
     helpUrl: 'https://console.anthropic.com/settings/keys',
   },
   'openai-codex': {
-    label: 'OpenAI / Codex API key',
-    description: 'Stored as openai-codex credentials for pi-codex runtime sessions.',
+    label: 'OpenAI API key',
+    description: 'Used for Codex runtime sessions and voice transcription.',
     placeholder: 'sk-...',
     helpUrl: 'https://platform.openai.com/api-keys',
   },
