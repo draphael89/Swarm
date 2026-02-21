@@ -30,11 +30,15 @@ export interface MessageSourceContext {
   userId?: string
   messageId?: string
   threadTs?: string
+  integrationProfileId?: string
   channelType?: 'dm' | 'channel' | 'group' | 'mpim'
   teamId?: string
 }
 
-export type MessageTargetContext = Pick<MessageSourceContext, 'channel' | 'channelId' | 'userId' | 'threadTs'>
+export type MessageTargetContext = Pick<
+  MessageSourceContext,
+  'channel' | 'channelId' | 'userId' | 'threadTs' | 'integrationProfileId'
+>
 
 export interface ConversationImageAttachment {
   type?: 'image'
@@ -145,6 +149,8 @@ export interface DirectoryPickedEvent {
 
 export interface SlackStatusEvent {
   type: 'slack_status'
+  managerId?: string
+  integrationProfileId?: string
   state: 'disabled' | 'connecting' | 'connected' | 'disconnected' | 'error'
   enabled: boolean
   updatedAt: string
@@ -155,6 +161,8 @@ export interface SlackStatusEvent {
 
 export interface TelegramStatusEvent {
   type: 'telegram_status'
+  managerId?: string
+  integrationProfileId?: string
   state: 'disabled' | 'connecting' | 'connected' | 'disconnected' | 'error'
   enabled: boolean
   updatedAt: string

@@ -5,10 +5,10 @@ export type TelegramConnectionMode = "polling";
 export type TelegramParseMode = "HTML";
 
 export interface TelegramIntegrationConfig {
+  profileId: string;
   enabled: boolean;
   mode: TelegramConnectionMode;
   botToken: string;
-  targetManagerId: string;
   allowedUserIds: string[];
   polling: {
     timeoutSeconds: number;

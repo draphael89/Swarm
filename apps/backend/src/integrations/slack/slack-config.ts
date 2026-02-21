@@ -3,22 +3,38 @@ import { dirname, resolve } from "node:path";
 import type { SlackIntegrationConfig, SlackIntegrationConfigPublic } from "./slack-types.js";
 
 const INTEGRATIONS_DIR_NAME = "integrations";
+const INTEGRATIONS_MANAGERS_DIR_NAME = "managers";
 const SLACK_CONFIG_FILE_NAME = "slack.json";
 const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MIN_FILE_BYTES = 1024;
 const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
-export function getSlackConfigPath(dataDir: string): string {
+export function getLegacySlackConfigPath(dataDir: string): string {
   return resolve(dataDir, INTEGRATIONS_DIR_NAME, SLACK_CONFIG_FILE_NAME);
 }
 
-export function createDefaultSlackConfig(defaultManagerId: string): SlackIntegrationConfig {
+export function getSlackConfigPath(dataDir: string, managerId: string): string {
+  return resolve(
+    dataDir,
+    INTEGRATIONS_DIR_NAME,
+    INTEGRATIONS_MANAGERS_DIR_NAME,
+    managerId,
+    SLACK_CONFIG_FILE_NAME
+  );
+}
+
+export function buildSlackProfileId(managerId: string): string {
+  const normalizedManagerId = normalizeManagerId(managerId);
+  return `slack:${normalizedManagerId}`;
+}
+
+export function createDefaultSlackConfig(managerId: string): SlackIntegrationConfig {
   return {
+    profileId: buildSlackProfileId(managerId),
     enabled: false,
     mode: "socket",
     appToken: "",
     botToken: "",
-    targetManagerId: defaultManagerId.trim() || "manager",
     listen: {
       dm: true,
       channelIds: [],
@@ -40,10 +56,10 @@ export function createDefaultSlackConfig(defaultManagerId: string): SlackIntegra
 
 export async function loadSlackConfig(options: {
   dataDir: string;
-  defaultManagerId: string;
+  managerId: string;
 }): Promise<SlackIntegrationConfig> {
-  const defaults = createDefaultSlackConfig(options.defaultManagerId);
-  const configPath = getSlackConfigPath(options.dataDir);
+  const defaults = createDefaultSlackConfig(options.managerId);
+  const configPath = getSlackConfigPath(options.dataDir, options.managerId);
 
   try {
     const raw = await readFile(configPath, "utf8");
@@ -64,9 +80,10 @@ export async function loadSlackConfig(options: {
 
 export async function saveSlackConfig(options: {
   dataDir: string;
+  managerId: string;
   config: SlackIntegrationConfig;
 }): Promise<void> {
-  const configPath = getSlackConfigPath(options.dataDir);
+  const configPath = getSlackConfigPath(options.dataDir, options.managerId);
   const tmpPath = `${configPath}.tmp`;
 
   await mkdir(dirname(configPath), { recursive: true });
@@ -76,8 +93,7 @@ export async function saveSlackConfig(options: {
 
 export function mergeSlackConfig(
   base: SlackIntegrationConfig,
-  patch: unknown,
-  options?: { defaultManagerId?: string }
+  patch: unknown
 ): SlackIntegrationConfig {
   const root = asRecord(patch);
   const listen = asRecord(root.listen);
@@ -85,14 +101,11 @@ export function mergeSlackConfig(
   const attachments = asRecord(root.attachments);
 
   const normalized: SlackIntegrationConfig = {
+    profileId: normalizeProfileId(root.profileId, base.profileId),
     enabled: normalizeBoolean(root.enabled, base.enabled),
     mode: "socket",
     appToken: normalizeToken(root.appToken, base.appToken),
     botToken: normalizeToken(root.botToken, base.botToken),
-    targetManagerId: normalizeString(
-      root.targetManagerId,
-      base.targetManagerId || options?.defaultManagerId || "manager"
-    ),
     listen: {
       dm: normalizeBoolean(listen.dm, base.listen.dm),
       channelIds: normalizeStringArray(listen.channelIds, base.listen.channelIds),
@@ -119,13 +132,13 @@ export function mergeSlackConfig(
 
 export function maskSlackConfig(config: SlackIntegrationConfig): SlackIntegrationConfigPublic {
   return {
+    profileId: config.profileId,
     enabled: config.enabled,
     mode: config.mode,
     appToken: config.appToken ? maskToken(config.appToken) : null,
     botToken: config.botToken ? maskToken(config.botToken) : null,
     hasAppToken: config.appToken.trim().length > 0,
     hasBotToken: config.botToken.trim().length > 0,
-    targetManagerId: config.targetManagerId,
     listen: {
       dm: config.listen.dm,
       channelIds: [...config.listen.channelIds],
@@ -147,15 +160,6 @@ export function maskSlackConfig(config: SlackIntegrationConfig): SlackIntegratio
 
 function normalizeBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
-}
-
-function normalizeString(value: unknown, fallback: string): string {
-  if (typeof value !== "string") {
-    return fallback;
-  }
-
-  const trimmed = value.trim();
-  return trimmed || fallback;
 }
 
 function normalizeStringArray(value: unknown, fallback: string[]): string[] {
@@ -246,6 +250,15 @@ function normalizeToken(value: unknown, fallback: string): string {
   return trimmed;
 }
 
+function normalizeProfileId(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
 function maskToken(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -257,6 +270,11 @@ function maskToken(value: string): string {
   }
 
   return `${trimmed.slice(0, 5)}…${trimmed.slice(-3)}`;
+}
+
+function normalizeManagerId(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : "manager";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

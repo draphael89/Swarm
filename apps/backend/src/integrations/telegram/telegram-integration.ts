@@ -21,7 +21,7 @@ import type {
 export class TelegramIntegrationService extends EventEmitter {
   private readonly swarmManager: SwarmManager;
   private readonly dataDir: string;
-  private readonly defaultManagerId: string;
+  private readonly managerId: string;
 
   private config: TelegramIntegrationConfig;
   private telegramClient: TelegramBotApiClient | null = null;
@@ -37,15 +37,17 @@ export class TelegramIntegrationService extends EventEmitter {
   private botUsername: string | undefined;
   private nextUpdateOffset: number | undefined;
 
-  constructor(options: { swarmManager: SwarmManager; dataDir: string; defaultManagerId: string }) {
+  constructor(options: { swarmManager: SwarmManager; dataDir: string; managerId: string }) {
     super();
 
     this.swarmManager = options.swarmManager;
     this.dataDir = options.dataDir;
-    this.defaultManagerId = options.defaultManagerId;
-    this.config = createDefaultTelegramConfig(this.defaultManagerId);
+    this.managerId = options.managerId.trim() || this.swarmManager.getConfig().managerId;
+    this.config = createDefaultTelegramConfig(this.managerId);
 
     this.statusTracker = new TelegramStatusTracker({
+      managerId: this.managerId,
+      integrationProfileId: this.config.profileId,
       state: "disabled",
       enabled: false,
       message: "Telegram integration disabled"
@@ -57,10 +59,14 @@ export class TelegramIntegrationService extends EventEmitter {
 
     this.deliveryBridge = new TelegramDeliveryBridge({
       swarmManager: this.swarmManager,
+      managerId: this.managerId,
       getConfig: () => this.config,
+      getProfileId: () => this.config.profileId,
       getTelegramClient: () => this.telegramClient,
       onError: (message, error) => {
         this.statusTracker.update({
+          managerId: this.managerId,
+          integrationProfileId: this.config.profileId,
           state: "error",
           enabled: this.config.enabled,
           message: `${message}: ${toErrorMessage(error)}`,
@@ -83,10 +89,12 @@ export class TelegramIntegrationService extends EventEmitter {
       try {
         this.config = await loadTelegramConfig({
           dataDir: this.dataDir,
-          defaultManagerId: this.defaultManagerId
+          managerId: this.managerId
         });
       } catch (error) {
         this.statusTracker.update({
+          managerId: this.managerId,
+          integrationProfileId: this.config.profileId,
           state: "error",
           enabled: false,
           message: `Failed to load Telegram config: ${toErrorMessage(error)}`,
@@ -111,6 +119,8 @@ export class TelegramIntegrationService extends EventEmitter {
       this.started = false;
 
       this.statusTracker.update({
+        managerId: this.managerId,
+        integrationProfileId: this.config.profileId,
         state: this.config.enabled ? "disconnected" : "disabled",
         enabled: this.config.enabled,
         message: this.config.enabled ? "Telegram integration stopped" : "Telegram integration disabled",
@@ -128,15 +138,29 @@ export class TelegramIntegrationService extends EventEmitter {
     return this.statusTracker.getSnapshot();
   }
 
+  getManagerId(): string {
+    return this.managerId;
+  }
+
+  getProfileId(): string {
+    return this.config.profileId;
+  }
+
+  isEnabled(): boolean {
+    return this.config.enabled;
+  }
+
   async updateConfig(
     patch: unknown
   ): Promise<{ config: TelegramIntegrationConfigPublic; status: TelegramStatusEvent }> {
     return this.runExclusive(async () => {
-      const nextConfig = mergeTelegramConfig(this.config, patch, {
-        defaultManagerId: this.defaultManagerId
-      });
+      const nextConfig = mergeTelegramConfig(this.config, patch);
 
-      await saveTelegramConfig({ dataDir: this.dataDir, config: nextConfig });
+      await saveTelegramConfig({
+        dataDir: this.dataDir,
+        managerId: this.managerId,
+        config: nextConfig
+      });
       this.config = nextConfig;
 
       if (this.started) {
@@ -155,9 +179,7 @@ export class TelegramIntegrationService extends EventEmitter {
   }
 
   async testConnection(patch?: unknown): Promise<TelegramConnectionTestResult> {
-    const effectiveConfig = patch
-      ? mergeTelegramConfig(this.config, patch, { defaultManagerId: this.defaultManagerId })
-      : this.config;
+    const effectiveConfig = patch ? mergeTelegramConfig(this.config, patch) : this.config;
 
     const botToken = effectiveConfig.botToken.trim();
     if (!botToken) {
@@ -186,6 +208,8 @@ export class TelegramIntegrationService extends EventEmitter {
 
     if (!this.config.enabled) {
       this.statusTracker.update({
+        managerId: this.managerId,
+        integrationProfileId: this.config.profileId,
         state: "disabled",
         enabled: false,
         message: "Telegram integration disabled",
@@ -198,6 +222,8 @@ export class TelegramIntegrationService extends EventEmitter {
     const botToken = this.config.botToken.trim();
     if (!botToken) {
       this.statusTracker.update({
+        managerId: this.managerId,
+        integrationProfileId: this.config.profileId,
         state: "error",
         enabled: true,
         message: "Telegram bot token is required",
@@ -217,10 +243,14 @@ export class TelegramIntegrationService extends EventEmitter {
 
       this.inboundRouter = new TelegramInboundRouter({
         swarmManager: this.swarmManager,
+        managerId: this.managerId,
+        integrationProfileId: this.config.profileId,
         getConfig: () => this.config,
         getBotId: () => this.botId,
         onError: (message, error) => {
           this.statusTracker.update({
+            managerId: this.managerId,
+            integrationProfileId: this.config.profileId,
             state: "error",
             enabled: this.config.enabled,
             message: `${message}: ${toErrorMessage(error)}`,
@@ -242,6 +272,8 @@ export class TelegramIntegrationService extends EventEmitter {
         },
         onStateChange: (state, message) => {
           this.statusTracker.update({
+            managerId: this.managerId,
+            integrationProfileId: this.config.profileId,
             state,
             enabled: this.config.enabled,
             message,
@@ -255,6 +287,8 @@ export class TelegramIntegrationService extends EventEmitter {
       await pollingBridge.start();
 
       this.statusTracker.update({
+        managerId: this.managerId,
+        integrationProfileId: this.config.profileId,
         state: "connected",
         enabled: true,
         message: "Telegram connected",
@@ -264,6 +298,8 @@ export class TelegramIntegrationService extends EventEmitter {
     } catch (error) {
       await this.stopPolling();
       this.statusTracker.update({
+        managerId: this.managerId,
+        integrationProfileId: this.config.profileId,
         state: "error",
         enabled: true,
         message: `Telegram startup failed: ${toErrorMessage(error)}`,

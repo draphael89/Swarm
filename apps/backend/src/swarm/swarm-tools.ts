@@ -53,7 +53,10 @@ const speakToUserTargetSchema = Type.Object({
     Type.String({ description: "Required when channel is 'slack' or 'telegram'." })
   ),
   userId: Type.Optional(Type.String()),
-  threadTs: Type.Optional(Type.String())
+  threadTs: Type.Optional(Type.String()),
+  integrationProfileId: Type.Optional(
+    Type.String({ description: "Optional integration profile id for provider-targeted delivery." })
+  )
 });
 
 export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor): ToolDefinition[] {
@@ -207,6 +210,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
             channelId?: string;
             userId?: string;
             threadTs?: string;
+            integrationProfileId?: string;
           };
         };
 

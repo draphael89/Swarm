@@ -4,6 +4,8 @@ export type SlackConnectionState = "disabled" | "connecting" | "connected" | "di
 
 export interface SlackStatusEvent {
   type: "slack_status";
+  managerId?: string;
+  integrationProfileId?: string;
   state: SlackConnectionState;
   enabled: boolean;
   updatedAt: string;
@@ -20,6 +22,8 @@ export class SlackStatusTracker extends EventEmitter {
 
     this.snapshot = {
       type: "slack_status",
+      managerId: initial?.managerId,
+      integrationProfileId: initial?.integrationProfileId,
       state: initial?.state ?? "disabled",
       enabled: initial?.enabled ?? false,
       updatedAt: new Date().toISOString(),
@@ -36,6 +40,8 @@ export class SlackStatusTracker extends EventEmitter {
   update(next: {
     state?: SlackConnectionState;
     enabled?: boolean;
+    managerId?: string;
+    integrationProfileId?: string;
     message?: string;
     teamId?: string;
     botUserId?: string;
@@ -44,6 +50,11 @@ export class SlackStatusTracker extends EventEmitter {
       ...this.snapshot,
       state: next.state ?? this.snapshot.state,
       enabled: next.enabled ?? this.snapshot.enabled,
+      managerId: "managerId" in next ? normalizeOptionalString(next.managerId) : this.snapshot.managerId,
+      integrationProfileId:
+        "integrationProfileId" in next
+          ? normalizeOptionalString(next.integrationProfileId)
+          : this.snapshot.integrationProfileId,
       message:
         next.message === undefined
           ? this.snapshot.message

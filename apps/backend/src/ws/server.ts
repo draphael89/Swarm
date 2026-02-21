@@ -14,9 +14,8 @@ import type {
 import { AuthStorage, type AuthCredential } from "@mariozechner/pi-coding-agent";
 import { WebSocketServer, type RawData, WebSocket } from "ws";
 import type { GsuiteIntegrationService } from "../integrations/gsuite/gsuite-integration.js";
+import type { IntegrationRegistryService } from "../integrations/registry.js";
 import type { ClientCommand, ServerEvent } from "../protocol/ws-types.js";
-import type { SlackIntegrationService } from "../integrations/slack/slack-integration.js";
-import type { TelegramIntegrationService } from "../integrations/telegram/telegram-integration.js";
 import {
   isPathWithinRoots,
   normalizeAllowlistRoots,
@@ -33,11 +32,24 @@ const AGENT_COMPACT_ENDPOINT_PATTERN = /^\/api\/agents\/([^/]+)\/compact$/;
 const SETTINGS_ENV_ENDPOINT_PATH = "/api/settings/env";
 const SETTINGS_AUTH_ENDPOINT_PATH = "/api/settings/auth";
 const SETTINGS_AUTH_LOGIN_ENDPOINT_PATH = "/api/settings/auth/login";
+const SETTINGS_SLACK_INTEGRATION_ENDPOINT_PATH = "/api/settings/slack";
+const SETTINGS_SLACK_INTEGRATION_TEST_ENDPOINT_PATH = "/api/settings/slack/test";
+const SETTINGS_SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH = "/api/settings/slack/channels";
+const SETTINGS_TELEGRAM_INTEGRATION_ENDPOINT_PATH = "/api/settings/telegram";
+const SETTINGS_TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH = "/api/settings/telegram/test";
 const SLACK_INTEGRATION_ENDPOINT_PATH = "/api/integrations/slack";
 const SLACK_INTEGRATION_TEST_ENDPOINT_PATH = "/api/integrations/slack/test";
 const SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH = "/api/integrations/slack/channels";
 const TELEGRAM_INTEGRATION_ENDPOINT_PATH = "/api/integrations/telegram";
 const TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH = "/api/integrations/telegram/test";
+const MANAGER_SLACK_INTEGRATION_ENDPOINT_PATTERN = /^\/api\/managers\/([^/]+)\/integrations\/slack$/;
+const MANAGER_SLACK_INTEGRATION_TEST_ENDPOINT_PATTERN =
+  /^\/api\/managers\/([^/]+)\/integrations\/slack\/test$/;
+const MANAGER_SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATTERN =
+  /^\/api\/managers\/([^/]+)\/integrations\/slack\/channels$/;
+const MANAGER_TELEGRAM_INTEGRATION_ENDPOINT_PATTERN = /^\/api\/managers\/([^/]+)\/integrations\/telegram$/;
+const MANAGER_TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATTERN =
+  /^\/api\/managers\/([^/]+)\/integrations\/telegram\/test$/;
 const GSUITE_INTEGRATION_ENDPOINT_PATH = "/api/integrations/gsuite";
 const GSUITE_INTEGRATION_OAUTH_CREDENTIALS_ENDPOINT_PATH = "/api/integrations/gsuite/oauth/credentials";
 const GSUITE_INTEGRATION_OAUTH_START_ENDPOINT_PATH = "/api/integrations/gsuite/oauth/start";
@@ -116,8 +128,7 @@ export class SwarmWebSocketServer {
   private readonly host: string;
   private readonly port: number;
   private readonly allowNonManagerSubscriptions: boolean;
-  private readonly slackIntegration: SlackIntegrationService | null;
-  private readonly telegramIntegration: TelegramIntegrationService | null;
+  private readonly integrationRegistry: IntegrationRegistryService | null;
   private readonly gsuiteIntegration: GsuiteIntegrationService | null;
 
   private httpServer: HttpServer | null = null;
@@ -165,16 +176,14 @@ export class SwarmWebSocketServer {
     host: string;
     port: number;
     allowNonManagerSubscriptions: boolean;
-    slackIntegration?: SlackIntegrationService;
-    telegramIntegration?: TelegramIntegrationService;
+    integrationRegistry?: IntegrationRegistryService;
     gsuiteIntegration?: GsuiteIntegrationService;
   }) {
     this.swarmManager = options.swarmManager;
     this.host = options.host;
     this.port = options.port;
     this.allowNonManagerSubscriptions = options.allowNonManagerSubscriptions;
-    this.slackIntegration = options.slackIntegration ?? null;
-    this.telegramIntegration = options.telegramIntegration ?? null;
+    this.integrationRegistry = options.integrationRegistry ?? null;
     this.gsuiteIntegration = options.gsuiteIntegration ?? null;
   }
 
@@ -231,8 +240,8 @@ export class SwarmWebSocketServer {
     this.swarmManager.on("conversation_reset", this.onConversationReset);
     this.swarmManager.on("agent_status", this.onAgentStatus);
     this.swarmManager.on("agents_snapshot", this.onAgentsSnapshot);
-    this.slackIntegration?.on("slack_status", this.onSlackStatus);
-    this.telegramIntegration?.on("telegram_status", this.onTelegramStatus);
+    this.integrationRegistry?.on("slack_status", this.onSlackStatus);
+    this.integrationRegistry?.on("telegram_status", this.onTelegramStatus);
   }
 
   async stop(): Promise<void> {
@@ -241,8 +250,8 @@ export class SwarmWebSocketServer {
     this.swarmManager.off("conversation_reset", this.onConversationReset);
     this.swarmManager.off("agent_status", this.onAgentStatus);
     this.swarmManager.off("agents_snapshot", this.onAgentsSnapshot);
-    this.slackIntegration?.off("slack_status", this.onSlackStatus);
-    this.telegramIntegration?.off("telegram_status", this.onTelegramStatus);
+    this.integrationRegistry?.off("slack_status", this.onSlackStatus);
+    this.integrationRegistry?.off("telegram_status", this.onTelegramStatus);
 
     const currentWss = this.wss;
     const currentHttpServer = this.httpServer;
@@ -309,19 +318,12 @@ export class SwarmWebSocketServer {
         return;
       }
 
-      if (
-        requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH ||
-        requestUrl.pathname === SLACK_INTEGRATION_TEST_ENDPOINT_PATH ||
-        requestUrl.pathname === SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH
-      ) {
+      if (isSlackIntegrationPath(requestUrl.pathname)) {
         await this.handleSlackIntegrationHttpRequest(request, response, requestUrl);
         return;
       }
 
-      if (
-        requestUrl.pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH ||
-        requestUrl.pathname === TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH
-      ) {
+      if (isTelegramIntegrationPath(requestUrl.pathname)) {
         await this.handleTelegramIntegrationHttpRequest(request, response, requestUrl);
         return;
       }
@@ -371,16 +373,9 @@ export class SwarmWebSocketServer {
         this.applyCorsHeaders(request, response, "GET, OPTIONS");
       } else if (AGENT_COMPACT_ENDPOINT_PATTERN.test(requestUrl.pathname)) {
         this.applyCorsHeaders(request, response, "POST, OPTIONS");
-      } else if (
-        requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH ||
-        requestUrl.pathname === SLACK_INTEGRATION_TEST_ENDPOINT_PATH ||
-        requestUrl.pathname === SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH
-      ) {
+      } else if (isSlackIntegrationPath(requestUrl.pathname)) {
         this.applyCorsHeaders(request, response, "GET, PUT, DELETE, POST, OPTIONS");
-      } else if (
-        requestUrl.pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH ||
-        requestUrl.pathname === TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH
-      ) {
+      } else if (isTelegramIntegrationPath(requestUrl.pathname)) {
         this.applyCorsHeaders(request, response, "GET, PUT, DELETE, POST, OPTIONS");
       } else if (
         requestUrl.pathname === GSUITE_INTEGRATION_ENDPOINT_PATH ||
@@ -1144,45 +1139,60 @@ export class SwarmWebSocketServer {
 
     this.applyCorsHeaders(request, response, methods);
 
-    if (!this.slackIntegration) {
+    if (!this.integrationRegistry) {
       this.sendJson(response, 501, { error: "Slack integration is unavailable" });
       return;
     }
 
-    if (request.method === "GET" && requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH) {
-      this.sendJson(response, 200, {
-        config: this.slackIntegration.getMaskedConfig(),
-        status: this.slackIntegration.getStatus()
-      });
+    const route = resolveSlackIntegrationRoute(
+      requestUrl.pathname,
+      this.swarmManager.getConfig().managerId
+    );
+    if (!route) {
+      response.setHeader("Allow", methods);
+      this.sendJson(response, 405, { error: "Method Not Allowed" });
       return;
     }
 
-    if (request.method === "PUT" && requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH) {
+    if (!this.isManagerAgent(route.managerId)) {
+      this.sendJson(response, 404, { error: `Unknown manager: ${route.managerId}` });
+      return;
+    }
+
+    if (route.action === "config") {
+      if (request.method === "GET") {
+        const snapshot = await this.integrationRegistry.getSlackSnapshot(route.managerId);
+        this.sendJson(response, 200, snapshot);
+        return;
+      }
+
+      if (request.method === "PUT") {
+        const payload = await this.readJsonBody(request);
+        const updated = await this.integrationRegistry.updateSlackConfig(route.managerId, payload);
+        this.sendJson(response, 200, { ok: true, ...updated });
+        return;
+      }
+
+      if (request.method === "DELETE") {
+        const disabled = await this.integrationRegistry.disableSlack(route.managerId);
+        this.sendJson(response, 200, { ok: true, ...disabled });
+        return;
+      }
+    }
+
+    if (route.action === "test" && request.method === "POST") {
       const payload = await this.readJsonBody(request);
-      const updated = await this.slackIntegration.updateConfig(payload);
-      this.sendJson(response, 200, { ok: true, ...updated });
-      return;
-    }
-
-    if (request.method === "DELETE" && requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH) {
-      const disabled = await this.slackIntegration.disable();
-      this.sendJson(response, 200, { ok: true, ...disabled });
-      return;
-    }
-
-    if (request.method === "POST" && requestUrl.pathname === SLACK_INTEGRATION_TEST_ENDPOINT_PATH) {
-      const payload = await this.readJsonBody(request);
-      const result = await this.slackIntegration.testConnection(payload);
+      const result = await this.integrationRegistry.testSlackConnection(route.managerId, payload);
       this.sendJson(response, 200, { ok: true, result });
       return;
     }
 
-    if (request.method === "GET" && requestUrl.pathname === SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH) {
+    if (route.action === "channels" && request.method === "GET") {
       const includePrivate = parseOptionalBoolean(
         requestUrl.searchParams.get("includePrivateChannels") ?? requestUrl.searchParams.get("includePrivate")
       );
 
-      const channels = await this.slackIntegration.listChannels({
+      const channels = await this.integrationRegistry.listSlackChannels(route.managerId, {
         includePrivateChannels: includePrivate
       });
 
@@ -1210,41 +1220,61 @@ export class SwarmWebSocketServer {
 
     this.applyCorsHeaders(request, response, methods);
 
-    if (!this.telegramIntegration) {
+    if (!this.integrationRegistry) {
       this.sendJson(response, 501, { error: "Telegram integration is unavailable" });
       return;
     }
 
-    if (request.method === "GET" && requestUrl.pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH) {
-      this.sendJson(response, 200, {
-        config: this.telegramIntegration.getMaskedConfig(),
-        status: this.telegramIntegration.getStatus()
-      });
+    const route = resolveTelegramIntegrationRoute(
+      requestUrl.pathname,
+      this.swarmManager.getConfig().managerId
+    );
+    if (!route) {
+      response.setHeader("Allow", methods);
+      this.sendJson(response, 405, { error: "Method Not Allowed" });
       return;
     }
 
-    if (request.method === "PUT" && requestUrl.pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH) {
+    if (!this.isManagerAgent(route.managerId)) {
+      this.sendJson(response, 404, { error: `Unknown manager: ${route.managerId}` });
+      return;
+    }
+
+    if (route.action === "config") {
+      if (request.method === "GET") {
+        const snapshot = await this.integrationRegistry.getTelegramSnapshot(route.managerId);
+        this.sendJson(response, 200, snapshot);
+        return;
+      }
+
+      if (request.method === "PUT") {
+        const payload = await this.readJsonBody(request);
+        const updated = await this.integrationRegistry.updateTelegramConfig(route.managerId, payload);
+        this.sendJson(response, 200, { ok: true, ...updated });
+        return;
+      }
+
+      if (request.method === "DELETE") {
+        const disabled = await this.integrationRegistry.disableTelegram(route.managerId);
+        this.sendJson(response, 200, { ok: true, ...disabled });
+        return;
+      }
+    }
+
+    if (route.action === "test" && request.method === "POST") {
       const payload = await this.readJsonBody(request);
-      const updated = await this.telegramIntegration.updateConfig(payload);
-      this.sendJson(response, 200, { ok: true, ...updated });
-      return;
-    }
-
-    if (request.method === "DELETE" && requestUrl.pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH) {
-      const disabled = await this.telegramIntegration.disable();
-      this.sendJson(response, 200, { ok: true, ...disabled });
-      return;
-    }
-
-    if (request.method === "POST" && requestUrl.pathname === TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH) {
-      const payload = await this.readJsonBody(request);
-      const result = await this.telegramIntegration.testConnection(payload);
+      const result = await this.integrationRegistry.testTelegramConnection(route.managerId, payload);
       this.sendJson(response, 200, { ok: true, result });
       return;
     }
 
     response.setHeader("Allow", methods);
     this.sendJson(response, 405, { error: "Method Not Allowed" });
+  }
+
+  private isManagerAgent(managerId: string): boolean {
+    const descriptor = this.swarmManager.getAgent(managerId);
+    return Boolean(descriptor && descriptor.role === "manager");
   }
 
   private async handleGsuiteIntegrationHttpRequest(
@@ -1751,12 +1781,10 @@ export class SwarmWebSocketServer {
       messages: this.swarmManager.getConversationHistory(targetAgentId)
     });
 
-    if (this.slackIntegration) {
-      this.send(socket, this.slackIntegration.getStatus());
-    }
-
-    if (this.telegramIntegration) {
-      this.send(socket, this.telegramIntegration.getStatus());
+    const managerContextId = this.resolveManagerContextAgentId(targetAgentId);
+    if (this.integrationRegistry && managerContextId) {
+      this.send(socket, this.integrationRegistry.getStatus(managerContextId, "slack"));
+      this.send(socket, this.integrationRegistry.getStatus(managerContextId, "telegram"));
     }
   }
 
@@ -1821,6 +1849,15 @@ export class SwarmWebSocketServer {
       ) {
         if (subscribedAgent !== event.agentId) {
           continue;
+        }
+      }
+
+      if (event.type === "slack_status" || event.type === "telegram_status") {
+        if (event.managerId) {
+          const subscribedManagerId = this.resolveManagerContextAgentId(subscribedAgent);
+          if (subscribedManagerId !== event.managerId) {
+            continue;
+          }
         }
       }
 
@@ -2449,6 +2486,136 @@ function parseGsuiteConnectionTestBody(value: unknown): { email?: string } {
   return {
     email: typeof payload.email === "string" ? payload.email.trim() : undefined
   };
+}
+
+type SlackIntegrationRoute = {
+  managerId: string;
+  action: "config" | "test" | "channels";
+};
+
+type TelegramIntegrationRoute = {
+  managerId: string;
+  action: "config" | "test";
+};
+
+function isSlackIntegrationPath(pathname: string): boolean {
+  return resolveSlackIntegrationRoute(pathname, "manager") !== null;
+}
+
+function isTelegramIntegrationPath(pathname: string): boolean {
+  return resolveTelegramIntegrationRoute(pathname, "manager") !== null;
+}
+
+function resolveSlackIntegrationRoute(
+  pathname: string,
+  defaultManagerId: string
+): SlackIntegrationRoute | null {
+  if (
+    pathname === SLACK_INTEGRATION_ENDPOINT_PATH ||
+    pathname === SETTINGS_SLACK_INTEGRATION_ENDPOINT_PATH
+  ) {
+    return { managerId: defaultManagerId, action: "config" };
+  }
+
+  if (
+    pathname === SLACK_INTEGRATION_TEST_ENDPOINT_PATH ||
+    pathname === SETTINGS_SLACK_INTEGRATION_TEST_ENDPOINT_PATH
+  ) {
+    return { managerId: defaultManagerId, action: "test" };
+  }
+
+  if (
+    pathname === SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH ||
+    pathname === SETTINGS_SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH
+  ) {
+    return { managerId: defaultManagerId, action: "channels" };
+  }
+
+  const configMatch = pathname.match(MANAGER_SLACK_INTEGRATION_ENDPOINT_PATTERN);
+  if (configMatch) {
+    const managerId = decodePathSegment(configMatch[1]);
+    if (!managerId) {
+      return null;
+    }
+
+    return { managerId, action: "config" };
+  }
+
+  const testMatch = pathname.match(MANAGER_SLACK_INTEGRATION_TEST_ENDPOINT_PATTERN);
+  if (testMatch) {
+    const managerId = decodePathSegment(testMatch[1]);
+    if (!managerId) {
+      return null;
+    }
+
+    return { managerId, action: "test" };
+  }
+
+  const channelsMatch = pathname.match(MANAGER_SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATTERN);
+  if (channelsMatch) {
+    const managerId = decodePathSegment(channelsMatch[1]);
+    if (!managerId) {
+      return null;
+    }
+
+    return { managerId, action: "channels" };
+  }
+
+  return null;
+}
+
+function resolveTelegramIntegrationRoute(
+  pathname: string,
+  defaultManagerId: string
+): TelegramIntegrationRoute | null {
+  if (
+    pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH ||
+    pathname === SETTINGS_TELEGRAM_INTEGRATION_ENDPOINT_PATH
+  ) {
+    return { managerId: defaultManagerId, action: "config" };
+  }
+
+  if (
+    pathname === TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH ||
+    pathname === SETTINGS_TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH
+  ) {
+    return { managerId: defaultManagerId, action: "test" };
+  }
+
+  const configMatch = pathname.match(MANAGER_TELEGRAM_INTEGRATION_ENDPOINT_PATTERN);
+  if (configMatch) {
+    const managerId = decodePathSegment(configMatch[1]);
+    if (!managerId) {
+      return null;
+    }
+
+    return { managerId, action: "config" };
+  }
+
+  const testMatch = pathname.match(MANAGER_TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATTERN);
+  if (testMatch) {
+    const managerId = decodePathSegment(testMatch[1]);
+    if (!managerId) {
+      return null;
+    }
+
+    return { managerId, action: "test" };
+  }
+
+  return null;
+}
+
+function decodePathSegment(rawSegment: string | undefined): string | undefined {
+  if (!rawSegment) {
+    return undefined;
+  }
+
+  try {
+    const decoded = decodeURIComponent(rawSegment).trim();
+    return decoded.length > 0 ? decoded : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveSettingsAuthLoginProviderId(rawProvider: string): OAuthLoginProviderId | undefined {

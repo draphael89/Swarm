@@ -87,13 +87,13 @@ interface SettingsAuthOAuthFlowState {
 }
 
 interface SlackSettingsConfig {
+  profileId: string
   enabled: boolean
   mode: 'socket'
   appToken: string | null
   botToken: string | null
   hasAppToken: boolean
   hasBotToken: boolean
-  targetManagerId: string
   listen: {
     dm: boolean
     channelIds: string[]
@@ -123,7 +123,6 @@ interface SlackDraft {
   enabled: boolean
   appToken: string
   botToken: string
-  targetManagerId: string
   listenDm: boolean
   channelIds: string[]
   includePrivateChannels: boolean
@@ -136,11 +135,11 @@ interface SlackDraft {
 }
 
 interface TelegramSettingsConfig {
+  profileId: string
   enabled: boolean
   mode: 'polling'
   botToken: string | null
   hasBotToken: boolean
-  targetManagerId: string
   allowedUserIds: string[]
   polling: {
     timeoutSeconds: number
@@ -163,7 +162,6 @@ interface TelegramSettingsConfig {
 interface TelegramDraft {
   enabled: boolean
   botToken: string
-  targetManagerId: string
   allowedUserIds: string[]
   timeoutSeconds: string
   limit: string
@@ -312,11 +310,11 @@ function isSlackSettingsConfig(value: unknown): value is SlackSettingsConfig {
   const config = value as Partial<SlackSettingsConfig>
 
   return (
+    typeof config.profileId === 'string' &&
     typeof config.enabled === 'boolean' &&
     config.mode === 'socket' &&
     typeof config.hasAppToken === 'boolean' &&
     typeof config.hasBotToken === 'boolean' &&
-    typeof config.targetManagerId === 'string' &&
     Boolean(config.listen) &&
     Boolean(config.response) &&
     Boolean(config.attachments)
@@ -345,10 +343,10 @@ function isTelegramSettingsConfig(value: unknown): value is TelegramSettingsConf
       config.allowedUserIds.every((entry) => typeof entry === 'string'))
 
   return (
+    typeof config.profileId === 'string' &&
     typeof config.enabled === 'boolean' &&
     config.mode === 'polling' &&
     typeof config.hasBotToken === 'boolean' &&
-    typeof config.targetManagerId === 'string' &&
     hasValidAllowedUserIds &&
     Boolean(config.polling) &&
     Boolean(config.delivery) &&
@@ -689,8 +687,24 @@ async function submitSettingsAuthOAuthPrompt(
   }
 }
 
-async function fetchSlackSettings(wsUrl: string): Promise<{ config: SlackSettingsConfig; status: SlackStatusEvent | null }> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/slack')
+function resolveManagerIntegrationEndpoint(
+  wsUrl: string,
+  managerId: string,
+  provider: 'slack' | 'telegram',
+  suffix = '',
+): string {
+  const normalizedManagerId = managerId.trim() || 'manager'
+  return resolveApiEndpoint(
+    wsUrl,
+    `/api/managers/${encodeURIComponent(normalizedManagerId)}/integrations/${provider}${suffix}`,
+  )
+}
+
+async function fetchSlackSettings(
+  wsUrl: string,
+  managerId: string,
+): Promise<{ config: SlackSettingsConfig; status: SlackStatusEvent | null }> {
+  const endpoint = resolveManagerIntegrationEndpoint(wsUrl, managerId, 'slack')
   const response = await fetch(endpoint)
   if (!response.ok) {
     throw new Error(await readApiError(response))
@@ -711,8 +725,12 @@ async function fetchSlackSettings(wsUrl: string): Promise<{ config: SlackSetting
   }
 }
 
-async function updateSlackSettings(wsUrl: string, patch: Record<string, unknown>): Promise<{ config: SlackSettingsConfig; status: SlackStatusEvent | null }> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/slack')
+async function updateSlackSettings(
+  wsUrl: string,
+  managerId: string,
+  patch: Record<string, unknown>,
+): Promise<{ config: SlackSettingsConfig; status: SlackStatusEvent | null }> {
+  const endpoint = resolveManagerIntegrationEndpoint(wsUrl, managerId, 'slack')
   const response = await fetch(endpoint, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
@@ -738,8 +756,11 @@ async function updateSlackSettings(wsUrl: string, patch: Record<string, unknown>
   }
 }
 
-async function disableSlackSettings(wsUrl: string): Promise<{ config: SlackSettingsConfig; status: SlackStatusEvent | null }> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/slack')
+async function disableSlackSettings(
+  wsUrl: string,
+  managerId: string,
+): Promise<{ config: SlackSettingsConfig; status: SlackStatusEvent | null }> {
+  const endpoint = resolveManagerIntegrationEndpoint(wsUrl, managerId, 'slack')
   const response = await fetch(endpoint, { method: 'DELETE' })
   if (!response.ok) {
     throw new Error(await readApiError(response))
@@ -760,8 +781,12 @@ async function disableSlackSettings(wsUrl: string): Promise<{ config: SlackSetti
   }
 }
 
-async function testSlackConnection(wsUrl: string, patch?: Record<string, unknown>): Promise<{ teamName?: string; teamId?: string; botUserId?: string }> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/slack/test')
+async function testSlackConnection(
+  wsUrl: string,
+  managerId: string,
+  patch?: Record<string, unknown>,
+): Promise<{ teamName?: string; teamId?: string; botUserId?: string }> {
+  const endpoint = resolveManagerIntegrationEndpoint(wsUrl, managerId, 'slack', '/test')
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -783,8 +808,12 @@ async function testSlackConnection(wsUrl: string, patch?: Record<string, unknown
   return payload.result ?? {}
 }
 
-async function fetchSlackChannels(wsUrl: string, includePrivateChannels: boolean): Promise<SlackChannelDescriptor[]> {
-  const endpoint = new URL(resolveApiEndpoint(wsUrl, '/api/integrations/slack/channels'))
+async function fetchSlackChannels(
+  wsUrl: string,
+  managerId: string,
+  includePrivateChannels: boolean,
+): Promise<SlackChannelDescriptor[]> {
+  const endpoint = new URL(resolveManagerIntegrationEndpoint(wsUrl, managerId, 'slack', '/channels'))
   endpoint.searchParams.set('includePrivateChannels', includePrivateChannels ? 'true' : 'false')
 
   const response = await fetch(endpoint.toString())
@@ -802,8 +831,9 @@ async function fetchSlackChannels(wsUrl: string, includePrivateChannels: boolean
 
 async function fetchTelegramSettings(
   wsUrl: string,
+  managerId: string,
 ): Promise<{ config: TelegramSettingsConfig; status: TelegramStatusEvent | null }> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/telegram')
+  const endpoint = resolveManagerIntegrationEndpoint(wsUrl, managerId, 'telegram')
   const response = await fetch(endpoint)
   if (!response.ok) {
     throw new Error(await readApiError(response))
@@ -826,9 +856,10 @@ async function fetchTelegramSettings(
 
 async function updateTelegramSettings(
   wsUrl: string,
+  managerId: string,
   patch: Record<string, unknown>,
 ): Promise<{ config: TelegramSettingsConfig; status: TelegramStatusEvent | null }> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/telegram')
+  const endpoint = resolveManagerIntegrationEndpoint(wsUrl, managerId, 'telegram')
   const response = await fetch(endpoint, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
@@ -856,8 +887,9 @@ async function updateTelegramSettings(
 
 async function disableTelegramSettings(
   wsUrl: string,
+  managerId: string,
 ): Promise<{ config: TelegramSettingsConfig; status: TelegramStatusEvent | null }> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/telegram')
+  const endpoint = resolveManagerIntegrationEndpoint(wsUrl, managerId, 'telegram')
   const response = await fetch(endpoint, { method: 'DELETE' })
   if (!response.ok) {
     throw new Error(await readApiError(response))
@@ -880,9 +912,10 @@ async function disableTelegramSettings(
 
 async function testTelegramConnection(
   wsUrl: string,
+  managerId: string,
   patch?: Record<string, unknown>,
 ): Promise<{ botId?: string; botUsername?: string; botDisplayName?: string }> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/telegram/test')
+  const endpoint = resolveManagerIntegrationEndpoint(wsUrl, managerId, 'telegram', '/test')
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -1673,12 +1706,40 @@ export function SettingsPanel({
   const [isTestingGsuite, setIsTestingGsuite] = useState(false)
   const [isDisablingGsuite, setIsDisablingGsuite] = useState(false)
 
-  const effectiveSlackStatus = slackStatus ?? slackStatusFromApi
-  const effectiveTelegramStatus = telegramStatus ?? telegramStatusFromApi
-  const managerOptions = useMemo(() => managers.filter((agent) => agent.role === 'manager'), [managers])
+  const managerOptions = useMemo(
+    () =>
+      managers.filter(
+        (agent) =>
+          agent.role === 'manager' &&
+          agent.status !== 'terminated' &&
+          agent.status !== 'stopped_on_restart',
+      ),
+    [managers],
+  )
+  const [selectedIntegrationManagerId, setSelectedIntegrationManagerId] = useState<string>('manager')
+  const effectiveSlackStatus =
+    slackStatus && (!slackStatus.managerId || slackStatus.managerId === selectedIntegrationManagerId)
+      ? slackStatus
+      : slackStatusFromApi
+  const effectiveTelegramStatus =
+    telegramStatus &&
+    (!telegramStatus.managerId || telegramStatus.managerId === selectedIntegrationManagerId)
+      ? telegramStatus
+      : telegramStatusFromApi
   const authProviderById = useMemo(() => {
     return new Map(authProviders.map((entry) => [entry.provider, entry]))
   }, [authProviders])
+
+  useEffect(() => {
+    setSelectedIntegrationManagerId((previous) => {
+      const availableIds = managerOptions.map((manager) => manager.agentId)
+      if (availableIds.includes(previous)) {
+        return previous
+      }
+
+      return availableIds[0] ?? 'manager'
+    })
+  }, [managerOptions])
 
   const loadVariables = useCallback(async () => {
     setIsLoading(true)
@@ -1699,23 +1760,24 @@ export function SettingsPanel({
     setSlackError(null)
 
     try {
-      const result = await fetchSlackSettings(wsUrl)
+      const result = await fetchSlackSettings(wsUrl, selectedIntegrationManagerId)
       setSlackConfig(result.config)
       setSlackDraft(toSlackDraft(result.config))
       setSlackStatusFromApi(result.status)
+      setSlackChannels([])
     } catch (err) {
       setSlackError(toErrorMessage(err))
     } finally {
       setIsLoadingSlack(false)
     }
-  }, [wsUrl])
+  }, [wsUrl, selectedIntegrationManagerId])
 
   const loadTelegram = useCallback(async () => {
     setIsLoadingTelegram(true)
     setTelegramError(null)
 
     try {
-      const result = await fetchTelegramSettings(wsUrl)
+      const result = await fetchTelegramSettings(wsUrl, selectedIntegrationManagerId)
       setTelegramConfig(result.config)
       setTelegramDraft(toTelegramDraft(result.config))
       setTelegramStatusFromApi(result.status)
@@ -1724,7 +1786,7 @@ export function SettingsPanel({
     } finally {
       setIsLoadingTelegram(false)
     }
-  }, [wsUrl])
+  }, [wsUrl, selectedIntegrationManagerId])
 
   const loadGsuite = useCallback(async () => {
     setIsLoadingGsuite(true)
@@ -1758,8 +1820,15 @@ export function SettingsPanel({
 
   useEffect(() => {
     setThemePreference(readStoredThemePreference())
-    void Promise.all([loadVariables(), loadSlack(), loadTelegram(), loadGsuite(), loadAuth()])
-  }, [loadVariables, loadSlack, loadTelegram, loadGsuite, loadAuth])
+  }, [])
+
+  useEffect(() => {
+    void Promise.all([loadVariables(), loadGsuite(), loadAuth()])
+  }, [loadVariables, loadGsuite, loadAuth])
+
+  useEffect(() => {
+    void Promise.all([loadSlack(), loadTelegram()])
+  }, [loadSlack, loadTelegram])
 
   const abortAllOAuthLoginFlows = useCallback(() => {
     for (const provider of SETTINGS_AUTH_PROVIDER_ORDER) {
@@ -2056,7 +2125,11 @@ export function SettingsPanel({
     setIsSavingSlack(true)
 
     try {
-      const updated = await updateSlackSettings(wsUrl, buildSlackPatch(slackDraft))
+      const updated = await updateSlackSettings(
+        wsUrl,
+        selectedIntegrationManagerId,
+        buildSlackPatch(slackDraft),
+      )
       setSlackConfig(updated.config)
       setSlackDraft(toSlackDraft(updated.config))
       setSlackStatusFromApi(updated.status)
@@ -2086,7 +2159,11 @@ export function SettingsPanel({
     }
 
     try {
-      const result = await testSlackConnection(wsUrl, Object.keys(patch).length > 0 ? patch : undefined)
+      const result = await testSlackConnection(
+        wsUrl,
+        selectedIntegrationManagerId,
+        Object.keys(patch).length > 0 ? patch : undefined,
+      )
       const workspace = result.teamName ?? result.teamId ?? 'Slack workspace'
       const identity = result.botUserId ? ` as ${result.botUserId}` : ''
       setSlackSuccess(`Connected to ${workspace}${identity}.`)
@@ -2104,7 +2181,7 @@ export function SettingsPanel({
     setIsDisablingSlack(true)
 
     try {
-      const disabled = await disableSlackSettings(wsUrl)
+      const disabled = await disableSlackSettings(wsUrl, selectedIntegrationManagerId)
       setSlackConfig(disabled.config)
       setSlackDraft(toSlackDraft(disabled.config))
       setSlackStatusFromApi(disabled.status)
@@ -2125,7 +2202,11 @@ export function SettingsPanel({
     setIsLoadingChannels(true)
 
     try {
-      const channels = await fetchSlackChannels(wsUrl, slackDraft.includePrivateChannels)
+      const channels = await fetchSlackChannels(
+        wsUrl,
+        selectedIntegrationManagerId,
+        slackDraft.includePrivateChannels,
+      )
       setSlackChannels(channels)
       setSlackSuccess(`Loaded ${channels.length} channel${channels.length === 1 ? '' : 's'}.`)
     } catch (error) {
@@ -2150,7 +2231,11 @@ export function SettingsPanel({
     setIsSavingTelegram(true)
 
     try {
-      const updated = await updateTelegramSettings(wsUrl, buildTelegramPatch(telegramDraft))
+      const updated = await updateTelegramSettings(
+        wsUrl,
+        selectedIntegrationManagerId,
+        buildTelegramPatch(telegramDraft),
+      )
       setTelegramConfig(updated.config)
       setTelegramDraft(toTelegramDraft(updated.config))
       setTelegramStatusFromApi(updated.status)
@@ -2177,7 +2262,11 @@ export function SettingsPanel({
     }
 
     try {
-      const result = await testTelegramConnection(wsUrl, Object.keys(patch).length > 0 ? patch : undefined)
+      const result = await testTelegramConnection(
+        wsUrl,
+        selectedIntegrationManagerId,
+        Object.keys(patch).length > 0 ? patch : undefined,
+      )
       const identity = result.botUsername ?? result.botDisplayName ?? result.botId ?? 'Telegram bot'
       setTelegramSuccess(`Connected to ${identity}.`)
       await loadTelegram()
@@ -2194,7 +2283,7 @@ export function SettingsPanel({
     setIsDisablingTelegram(true)
 
     try {
-      const disabled = await disableTelegramSettings(wsUrl)
+      const disabled = await disableTelegramSettings(wsUrl, selectedIntegrationManagerId)
       setTelegramConfig(disabled.config)
       setTelegramDraft(toTelegramDraft(disabled.config))
       setTelegramStatusFromApi(disabled.status)
@@ -2429,6 +2518,44 @@ export function SettingsPanel({
                 </Select>
                 <p className="text-[11px] text-muted-foreground">Auto follows your operating system preference.</p>
               </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-2 rounded-lg border border-border bg-card/50 p-4">
+              <div>
+                <h3 className="text-sm font-semibold leading-tight">Integrations manager</h3>
+                <p className="text-[11px] text-muted-foreground">
+                  Slack and Telegram settings below apply to the selected manager.
+                </p>
+              </div>
+              <Select
+                value={selectedIntegrationManagerId}
+                onValueChange={(value) => {
+                  setSelectedIntegrationManagerId(value)
+                  setSlackError(null)
+                  setSlackSuccess(null)
+                  setTelegramError(null)
+                  setTelegramSuccess(null)
+                }}
+              >
+                <SelectTrigger id="integration-manager-picker" className="w-full sm:w-72">
+                  <SelectValue placeholder="Select manager" />
+                </SelectTrigger>
+                <SelectContent>
+                  {managerOptions.length === 0 ? (
+                    <SelectItem value={selectedIntegrationManagerId}>
+                      {selectedIntegrationManagerId}
+                    </SelectItem>
+                  ) : (
+                    managerOptions.map((manager) => (
+                      <SelectItem key={manager.agentId} value={manager.agentId}>
+                        {manager.agentId}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
             </section>
 
             <Separator />
@@ -2738,42 +2865,6 @@ export function SettingsPanel({
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="telegram-target-manager" className="text-xs font-medium text-muted-foreground">
-                      Target manager
-                    </Label>
-                    <Select
-                      value={telegramDraft.targetManagerId || 'manager'}
-                      onValueChange={(value) =>
-                        setTelegramDraft((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                targetManagerId: value,
-                              }
-                            : prev,
-                        )
-                      }
-                    >
-                      <SelectTrigger id="telegram-target-manager" className="w-full">
-                        <SelectValue placeholder="Select manager" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {managerOptions.length === 0 ? (
-                          <SelectItem value={telegramDraft.targetManagerId || 'manager'}>
-                            {telegramDraft.targetManagerId || 'manager'}
-                          </SelectItem>
-                        ) : (
-                          managerOptions.map((manager) => (
-                            <SelectItem key={manager.agentId} value={manager.agentId}>
-                              {manager.agentId}
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
                   <div className="space-y-1.5">
                     <Label htmlFor="telegram-bot-token" className="text-xs font-medium text-muted-foreground">
                       Bot token
@@ -3061,42 +3152,6 @@ export function SettingsPanel({
                         setSlackDraft((prev) => (prev ? { ...prev, allowBinary: next } : prev))
                       }
                     />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="slack-target-manager" className="text-xs font-medium text-muted-foreground">
-                      Target manager
-                    </Label>
-                    <Select
-                      value={slackDraft.targetManagerId || 'manager'}
-                      onValueChange={(value) =>
-                        setSlackDraft((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                targetManagerId: value,
-                              }
-                            : prev,
-                        )
-                      }
-                    >
-                      <SelectTrigger id="slack-target-manager" className="w-full">
-                        <SelectValue placeholder="Select manager" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {managerOptions.length === 0 ? (
-                          <SelectItem value={slackDraft.targetManagerId || 'manager'}>
-                            {slackDraft.targetManagerId || 'manager'}
-                          </SelectItem>
-                        ) : (
-                          managerOptions.map((manager) => (
-                            <SelectItem key={manager.agentId} value={manager.agentId}>
-                              {manager.agentId}
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -3466,7 +3521,6 @@ function toSlackDraft(config: SlackSettingsConfig): SlackDraft {
     enabled: config.enabled,
     appToken: '',
     botToken: '',
-    targetManagerId: config.targetManagerId,
     listenDm: config.listen.dm,
     channelIds: [...config.listen.channelIds],
     includePrivateChannels: config.listen.includePrivateChannels,
@@ -3494,7 +3548,6 @@ function buildSlackPatch(draft: SlackDraft): Record<string, unknown> {
 
   const patch: Record<string, unknown> = {
     enabled: draft.enabled,
-    targetManagerId: draft.targetManagerId.trim() || 'manager',
     listen: {
       dm: draft.listenDm,
       channelIds: [...new Set(draft.channelIds.map((id) => id.trim()).filter(Boolean))],
@@ -3527,7 +3580,6 @@ function toTelegramDraft(config: TelegramSettingsConfig): TelegramDraft {
   return {
     enabled: config.enabled,
     botToken: '',
-    targetManagerId: config.targetManagerId,
     allowedUserIds: Array.isArray(config.allowedUserIds) ? [...config.allowedUserIds] : [],
     timeoutSeconds: String(config.polling.timeoutSeconds),
     limit: String(config.polling.limit),
@@ -3548,7 +3600,6 @@ function buildTelegramPatch(draft: TelegramDraft): Record<string, unknown> {
 
   const patch: Record<string, unknown> = {
     enabled: draft.enabled,
-    targetManagerId: draft.targetManagerId.trim() || 'manager',
     allowedUserIds: draft.allowedUserIds,
     polling: {
       timeoutSeconds: Number.isFinite(timeoutSeconds) ? timeoutSeconds : 25,

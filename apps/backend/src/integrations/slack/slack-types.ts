@@ -3,11 +3,11 @@ import type { ConversationAttachment, MessageSourceContext } from "../../swarm/t
 export type SlackConnectionMode = "socket";
 
 export interface SlackIntegrationConfig {
+  profileId: string;
   enabled: boolean;
   mode: SlackConnectionMode;
   appToken: string;
   botToken: string;
-  targetManagerId: string;
   listen: {
     dm: boolean;
     channelIds: string[];
