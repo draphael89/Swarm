@@ -11,6 +11,7 @@ import {
 import { createFileRoute } from '@tanstack/react-router'
 import { AgentSidebar } from '@/components/chat/AgentSidebar'
 import { ArtifactPanel } from '@/components/chat/ArtifactPanel'
+import { ArtifactsSidebar } from '@/components/chat/ArtifactsSidebar'
 import { ChatHeader, type ChannelView } from '@/components/chat/ChatHeader'
 import { MessageInput, type MessageInputHandle } from '@/components/chat/MessageInput'
 import { MessageList } from '@/components/chat/MessageList'
@@ -28,6 +29,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { chooseFallbackAgentId } from '@/lib/agent-hierarchy'
 import type { ArtifactReference } from '@/lib/artifacts'
+import { collectArtifactsFromMessages } from '@/lib/collect-artifacts'
 import { ManagerWsClient, type ManagerWsState } from '@/lib/ws-client'
 import {
   MANAGER_MODEL_PRESETS,
@@ -149,6 +151,7 @@ export function IndexPage() {
 
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactReference | null>(null)
+  const [isArtifactsPanelOpen, setIsArtifactsPanelOpen] = useState(false)
   const [channelView, setChannelView] = useState<ChannelView>('web')
   const [isCompactingManager, setIsCompactingManager] = useState(false)
   const dragDepthRef = useRef(0)
@@ -210,6 +213,11 @@ export function IndexPage() {
     })
   }, [channelView, state.messages])
 
+  const collectedArtifacts = useMemo(
+    () => collectArtifactsFromMessages(state.messages),
+    [state.messages],
+  )
+
   useEffect(() => {
     if (typeof window === 'undefined') return
 
@@ -242,6 +250,7 @@ export function IndexPage() {
 
   useEffect(() => {
     setActiveArtifact(null)
+    setIsArtifactsPanelOpen(false)
   }, [activeAgentId])
 
   useEffect(() => {
@@ -490,6 +499,10 @@ export function IndexPage() {
     messageInputRef.current?.setInput(prompt)
   }
 
+  const handleToggleArtifactsPanel = useCallback(() => {
+    setIsArtifactsPanelOpen((prev) => !prev)
+  }, [])
+
   const handleOpenArtifact = useCallback((artifact: ArtifactReference) => {
     setActiveArtifact(artifact)
   }, [])
@@ -556,7 +569,7 @@ export function IndexPage() {
         />
 
         <div
-          className="relative flex min-w-0 flex-1 flex-col"
+          className="relative flex min-w-0 flex-1"
           onDragEnter={handleDragEnter}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -566,57 +579,71 @@ export function IndexPage() {
             <div className="pointer-events-none absolute inset-2 z-50 rounded-lg border-2 border-dashed border-primary bg-primary/10" />
           ) : null}
 
-          {activeView === 'settings' ? (
-            <SettingsPanel
-              wsUrl={wsUrl}
-              managers={state.agents.filter((agent) => agent.role === 'manager')}
-              slackStatus={state.slackStatus}
-              telegramStatus={state.telegramStatus}
-              onBack={() =>
-                navigateToRoute({
-                  view: 'chat',
-                  agentId: activeAgentId ?? DEFAULT_MANAGER_AGENT_ID,
-                })
-              }
+          <div className="flex min-w-0 flex-1 flex-col">
+            {activeView === 'settings' ? (
+              <SettingsPanel
+                wsUrl={wsUrl}
+                managers={state.agents.filter((agent) => agent.role === 'manager')}
+                slackStatus={state.slackStatus}
+                telegramStatus={state.telegramStatus}
+                onBack={() =>
+                  navigateToRoute({
+                    view: 'chat',
+                    agentId: activeAgentId ?? DEFAULT_MANAGER_AGENT_ID,
+                  })
+                }
+              />
+            ) : (
+              <>
+                <ChatHeader
+                  connected={state.connected}
+                  activeAgentId={activeAgentId}
+                  activeAgentLabel={activeAgentLabel}
+                  activeAgentStatus={activeAgentStatus}
+                  channelView={channelView}
+                  onChannelViewChange={setChannelView}
+                  showCompact={isActiveManager}
+                  compactInProgress={isCompactingManager}
+                  onCompact={() => void handleCompactManager()}
+                  showNewChat={isActiveManager}
+                  onNewChat={handleNewChat}
+                  artifactCount={collectedArtifacts.length}
+                  isArtifactsPanelOpen={isArtifactsPanelOpen}
+                  onToggleArtifactsPanel={handleToggleArtifactsPanel}
+                />
+
+                {state.lastError ? (
+                  <div className="border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    {state.lastError}
+                  </div>
+                ) : null}
+
+                <MessageList
+                  messages={visibleMessages}
+                  isLoading={isLoading}
+                  onSuggestionClick={handleSuggestionClick}
+                  onArtifactClick={handleOpenArtifact}
+                />
+
+                <MessageInput
+                  ref={messageInputRef}
+                  onSend={handleSend}
+                  isLoading={isLoading}
+                  disabled={!state.connected || !activeAgentId}
+                  allowWhileLoading
+                  agentLabel={activeAgentLabel}
+                />
+              </>
+            )}
+          </div>
+
+          {activeView === 'chat' && (
+            <ArtifactsSidebar
+              artifacts={collectedArtifacts}
+              isOpen={isArtifactsPanelOpen}
+              onClose={() => setIsArtifactsPanelOpen(false)}
+              onArtifactClick={handleOpenArtifact}
             />
-          ) : (
-            <>
-              <ChatHeader
-                connected={state.connected}
-                activeAgentId={activeAgentId}
-                activeAgentLabel={activeAgentLabel}
-                activeAgentStatus={activeAgentStatus}
-                channelView={channelView}
-                onChannelViewChange={setChannelView}
-                showCompact={isActiveManager}
-                compactInProgress={isCompactingManager}
-                onCompact={() => void handleCompactManager()}
-                showNewChat={isActiveManager}
-                onNewChat={handleNewChat}
-              />
-
-              {state.lastError ? (
-                <div className="border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                  {state.lastError}
-                </div>
-              ) : null}
-
-              <MessageList
-                messages={visibleMessages}
-                isLoading={isLoading}
-                onSuggestionClick={handleSuggestionClick}
-                onArtifactClick={handleOpenArtifact}
-              />
-
-              <MessageInput
-                ref={messageInputRef}
-                onSend={handleSend}
-                isLoading={isLoading}
-                disabled={!state.connected || !activeAgentId}
-                allowWhileLoading
-                agentLabel={activeAgentLabel}
-              />
-            </>
           )}
         </div>
       </div>
