@@ -14,7 +14,7 @@ import { ArtifactPanel } from '@/components/chat/ArtifactPanel'
 import { ChatHeader, type ChannelView } from '@/components/chat/ChatHeader'
 import { MessageInput, type MessageInputHandle } from '@/components/chat/MessageInput'
 import { MessageList } from '@/components/chat/MessageList'
-import { SettingsDialog } from '@/components/chat/SettingsDialog'
+import { SettingsPanel } from '@/components/chat/SettingsDialog'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -42,6 +42,7 @@ export const Route = createFileRoute('/')({
 
 const DEFAULT_MANAGER_MODEL: ManagerModelPreset = 'pi-codex'
 const DEFAULT_DEV_WS_URL = 'ws://127.0.0.1:47187'
+type ActiveView = 'chat' | 'settings'
 
 function resolveDefaultWsUrl(): string {
   if (typeof window === 'undefined') {
@@ -89,7 +90,7 @@ export function IndexPage() {
   const [deleteManagerError, setDeleteManagerError] = useState<string | null>(null)
   const [isDeletingManager, setIsDeletingManager] = useState(false)
 
-  const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false)
+  const [activeView, setActiveView] = useState<ActiveView>('chat')
 
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactReference | null>(null)
@@ -158,6 +159,12 @@ export function IndexPage() {
     setActiveArtifact(null)
   }, [activeAgentId])
 
+  useEffect(() => {
+    if (activeView === 'chat') return
+    dragDepthRef.current = 0
+    setIsDraggingFiles(false)
+  }, [activeView])
+
   const handleCompactManager = useCallback(
     async (customInstructions?: string) => {
       if (!isActiveManager || !activeAgentId) return
@@ -207,6 +214,7 @@ export function IndexPage() {
   }
 
   const handleSelectAgent = (agentId: string) => {
+    setActiveView('chat')
     clientRef.current?.subscribeToAgent(agentId)
   }
 
@@ -234,8 +242,8 @@ export function IndexPage() {
     })
   }, [wsUrl])
 
-  const handleOpenSettingsDialog = () => {
-    setIsSettingsDialogOpen(true)
+  const handleOpenSettingsPanel = () => {
+    setActiveView('settings')
   }
 
   const handleRequestDeleteManager = (managerId: string) => {
@@ -377,28 +385,32 @@ export function IndexPage() {
   }, [])
 
   const handleDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (activeView !== 'chat') return
     if (!event.dataTransfer?.types.includes('Files')) return
     event.preventDefault()
     dragDepthRef.current += 1
     setIsDraggingFiles(true)
-  }, [])
+  }, [activeView])
 
   const handleDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (activeView !== 'chat') return
     if (!event.dataTransfer?.types.includes('Files')) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'copy'
-  }, [])
+  }, [activeView])
 
   const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (activeView !== 'chat') return
     if (!event.dataTransfer?.types.includes('Files')) return
     event.preventDefault()
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1)
     if (dragDepthRef.current === 0) {
       setIsDraggingFiles(false)
     }
-  }, [])
+  }, [activeView])
 
   const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
+    if (activeView !== 'chat') return
     if (!event.dataTransfer?.types.includes('Files')) return
     event.preventDefault()
     dragDepthRef.current = 0
@@ -410,7 +422,7 @@ export function IndexPage() {
     }
 
     void messageInputRef.current?.addFiles(files)
-  }, [])
+  }, [activeView])
 
   return (
     <main className="h-screen bg-background text-foreground">
@@ -420,11 +432,12 @@ export function IndexPage() {
           agents={state.agents}
           statuses={state.statuses}
           selectedAgentId={activeAgentId}
+          isSettingsActive={activeView === 'settings'}
           onAddManager={handleOpenCreateManagerDialog}
           onSelectAgent={handleSelectAgent}
           onDeleteAgent={handleDeleteAgent}
           onDeleteManager={handleRequestDeleteManager}
-          onOpenSettings={handleOpenSettingsDialog}
+          onOpenSettings={handleOpenSettingsPanel}
           onReboot={handleReboot}
         />
 
@@ -435,45 +448,57 @@ export function IndexPage() {
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
         >
-          {isDraggingFiles ? (
+          {activeView === 'chat' && isDraggingFiles ? (
             <div className="pointer-events-none absolute inset-2 z-50 rounded-lg border-2 border-dashed border-primary bg-primary/10" />
           ) : null}
 
-          <ChatHeader
-            connected={state.connected}
-            activeAgentId={activeAgentId}
-            activeAgentLabel={activeAgentLabel}
-            activeAgentStatus={activeAgentStatus}
-            channelView={channelView}
-            onChannelViewChange={setChannelView}
-            showCompact={isActiveManager}
-            compactInProgress={isCompactingManager}
-            onCompact={() => void handleCompactManager()}
-            showNewChat={isActiveManager}
-            onNewChat={handleNewChat}
-          />
+          {activeView === 'settings' ? (
+            <SettingsPanel
+              wsUrl={wsUrl}
+              managers={state.agents.filter((agent) => agent.role === 'manager')}
+              slackStatus={state.slackStatus}
+              telegramStatus={state.telegramStatus}
+              onBack={() => setActiveView('chat')}
+            />
+          ) : (
+            <>
+              <ChatHeader
+                connected={state.connected}
+                activeAgentId={activeAgentId}
+                activeAgentLabel={activeAgentLabel}
+                activeAgentStatus={activeAgentStatus}
+                channelView={channelView}
+                onChannelViewChange={setChannelView}
+                showCompact={isActiveManager}
+                compactInProgress={isCompactingManager}
+                onCompact={() => void handleCompactManager()}
+                showNewChat={isActiveManager}
+                onNewChat={handleNewChat}
+              />
 
-          {state.lastError ? (
-            <div className="border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {state.lastError}
-            </div>
-          ) : null}
+              {state.lastError ? (
+                <div className="border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  {state.lastError}
+                </div>
+              ) : null}
 
-          <MessageList
-            messages={visibleMessages}
-            isLoading={isLoading}
-            onSuggestionClick={handleSuggestionClick}
-            onArtifactClick={handleOpenArtifact}
-          />
+              <MessageList
+                messages={visibleMessages}
+                isLoading={isLoading}
+                onSuggestionClick={handleSuggestionClick}
+                onArtifactClick={handleOpenArtifact}
+              />
 
-          <MessageInput
-            ref={messageInputRef}
-            onSend={handleSend}
-            isLoading={isLoading}
-            disabled={!state.connected || !activeAgentId}
-            allowWhileLoading
-            agentLabel={activeAgentLabel}
-          />
+              <MessageInput
+                ref={messageInputRef}
+                onSend={handleSend}
+                isLoading={isLoading}
+                disabled={!state.connected || !activeAgentId}
+                allowWhileLoading
+                agentLabel={activeAgentLabel}
+              />
+            </>
+          )}
         </div>
       </div>
 
@@ -593,15 +618,6 @@ export function IndexPage() {
           </form>
         </DialogContent>
       </Dialog>
-
-      <SettingsDialog
-        open={isSettingsDialogOpen}
-        onOpenChange={setIsSettingsDialogOpen}
-        wsUrl={wsUrl}
-        managers={state.agents.filter((agent) => agent.role === 'manager')}
-        slackStatus={state.slackStatus}
-        telegramStatus={state.telegramStatus}
-      />
 
       <OverlayDialog
         open={Boolean(managerToDelete)}
