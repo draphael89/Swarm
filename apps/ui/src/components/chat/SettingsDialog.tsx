@@ -8,8 +8,11 @@ import {
   KeyRound,
   Loader2,
   MessageSquare,
+  Monitor,
+  Moon,
   Plug,
   Save,
+  Sun,
   TestTube2,
   Trash2,
 } from 'lucide-react'
@@ -35,6 +38,11 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
+import {
+  applyThemePreference,
+  readStoredThemePreference,
+  type ThemePreference,
+} from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import type { AgentDescriptor, SlackStatusEvent } from '@/lib/ws-types'
 
@@ -1122,6 +1130,7 @@ function EnvVariableRow({
 /* ------------------------------------------------------------------ */
 
 export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatus }: SettingsDialogProps) {
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => readStoredThemePreference())
   const [envVariables, setEnvVariables] = useState<SettingsEnvVariable[]>([])
   const [draftByName, setDraftByName] = useState<Record<string, string>>({})
   const [revealByName, setRevealByName] = useState<Record<string, boolean>>({})
@@ -1211,6 +1220,7 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
 
   useEffect(() => {
     if (!open) return
+    setThemePreference(readStoredThemePreference())
     void Promise.all([loadVariables(), loadSlack(), loadAuth()])
   }, [open, loadVariables, loadSlack, loadAuth])
 
@@ -1615,6 +1625,11 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
     }
   }
 
+  const handleThemePreferenceChange = useCallback((nextPreference: ThemePreference) => {
+    setThemePreference(nextPreference)
+    applyThemePreference(nextPreference)
+  }, [])
+
   const setCount = envVariables.filter((v) => v.isSet).length
   const totalCount = envVariables.length
 
@@ -1630,6 +1645,54 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="space-y-6 px-6 py-4">
+            <section className="space-y-3 rounded-lg border border-border bg-card/50 p-4">
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center rounded-md bg-primary/10">
+                  <Monitor className="size-3.5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold leading-tight">Appearance</h3>
+                  <p className="text-[11px] text-muted-foreground">Choose how the app theme is applied.</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="theme-preference" className="text-xs font-medium text-muted-foreground">
+                  Theme
+                </Label>
+                <Select
+                  value={themePreference}
+                  onValueChange={(value) => {
+                    if (value === 'light' || value === 'dark' || value === 'auto') {
+                      handleThemePreferenceChange(value)
+                    }
+                  }}
+                >
+                  <SelectTrigger id="theme-preference" className="w-full sm:w-64">
+                    <SelectValue placeholder="Select theme" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="light">
+                      <span className="inline-flex items-center gap-2">
+                        <Sun className="size-3.5" />
+                        Light
+                      </span>
+                    </SelectItem>
+                    <SelectItem value="dark">
+                      <span className="inline-flex items-center gap-2">
+                        <Moon className="size-3.5" />
+                        Dark
+                      </span>
+                    </SelectItem>
+                    <SelectItem value="auto">Auto (System)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">Auto follows your operating system preference.</p>
+              </div>
+            </section>
+
+            <Separator />
+
             <section className="space-y-3 rounded-lg border border-border bg-card/50 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
