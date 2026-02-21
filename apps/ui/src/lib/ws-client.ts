@@ -16,7 +16,7 @@ import {
 
 const INITIAL_CONNECT_DELAY_MS = 50
 const RECONNECT_MS = 1200
-const REQUEST_TIMEOUT_MS = 10_000
+const REQUEST_TIMEOUT_MS = 300_000
 
 export interface ManagerWsState {
   connected: boolean
