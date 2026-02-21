@@ -1,0 +1,84 @@
+import { ArrowLeft, Settings, KeyRound, Blocks, Wrench } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+
+export type SettingsTab = 'general' | 'auth' | 'integrations' | 'skills'
+
+interface NavItem {
+  id: SettingsTab
+  label: string
+  icon: React.ReactNode
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { id: 'general', label: 'General', icon: <Settings className="size-4" /> },
+  { id: 'auth', label: 'Authentication', icon: <KeyRound className="size-4" /> },
+  { id: 'integrations', label: 'Integrations', icon: <Blocks className="size-4" /> },
+  { id: 'skills', label: 'Skills', icon: <Wrench className="size-4" /> },
+]
+
+interface SettingsLayoutProps {
+  activeTab: SettingsTab
+  onTabChange: (tab: SettingsTab) => void
+  onBack?: () => void
+  children: React.ReactNode
+}
+
+export function SettingsLayout({ activeTab, onTabChange, onBack, children }: SettingsLayoutProps) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <header className="flex h-[52px] shrink-0 items-center border-b border-border/80 bg-card/80 px-4 backdrop-blur">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {onBack ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+              onClick={onBack}
+              aria-label="Back to chat"
+            >
+              <ArrowLeft className="size-4" />
+            </Button>
+          ) : null}
+          <h1 className="truncate text-sm font-semibold text-foreground">Settings</h1>
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* Left nav */}
+        <nav className="w-48 shrink-0 border-r border-border/60 bg-card/30">
+          <div className="flex flex-col gap-0.5 p-2 pt-3">
+            {NAV_ITEMS.map((item) => {
+              const isActive = activeTab === item.id
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onTabChange(item.id)}
+                  className={cn(
+                    'flex items-center gap-2 px-3 h-8 text-sm rounded-md transition-colors w-full text-left',
+                    'hover:bg-muted/50',
+                    isActive
+                      ? 'bg-muted text-foreground font-medium'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <span className="flex shrink-0">{item.icon}</span>
+                  <span className="truncate">{item.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </nav>
+
+        {/* Content area */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-3xl px-6 py-5">
+            {children}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
