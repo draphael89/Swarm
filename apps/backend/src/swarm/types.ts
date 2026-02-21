@@ -36,12 +36,13 @@ export type RequestedDeliveryMode = "auto" | "followUp" | "steer";
 
 export type AcceptedDeliveryMode = "prompt" | "followUp" | "steer";
 
-export type MessageChannel = "web" | "slack";
+export type MessageChannel = "web" | "slack" | "telegram";
 
 export interface MessageSourceContext {
   channel: MessageChannel;
   channelId?: string;
   userId?: string;
+  messageId?: string;
   threadTs?: string;
   channelType?: "dm" | "channel" | "group" | "mpim";
   teamId?: string;

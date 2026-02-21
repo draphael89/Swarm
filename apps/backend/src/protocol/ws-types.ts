@@ -7,6 +7,7 @@ import type {
   SwarmModelPreset
 } from "../swarm/types.js";
 import type { SlackStatusEvent } from "../integrations/slack/slack-status.js";
+import type { TelegramStatusEvent } from "../integrations/telegram/telegram-status.js";
 
 export type {
   MessageChannel,
@@ -77,4 +78,5 @@ export type ServerEvent =
     }
   | { type: "directory_picked"; path: string | null; requestId?: string }
   | SlackStatusEvent
+  | TelegramStatusEvent
   | { type: "error"; code: string; message: string; requestId?: string };

@@ -733,7 +733,9 @@ describe('SwarmManager', () => {
       manager.publishToUser('manager', 'ack from manager', 'speak_to_user', {
         channel: 'slack',
       }),
-    ).rejects.toThrow('speak_to_user target.channelId is required when target.channel is "slack"')
+    ).rejects.toThrow(
+      'speak_to_user target.channelId is required when target.channel is "slack" or "telegram"',
+    )
   })
 
   it('falls back to web routing when no explicit target context exists', async () => {

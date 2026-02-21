@@ -158,13 +158,20 @@ function formatSourceBadge(sourceContext?: MessageSourceContext): string | null 
     return 'Web'
   }
 
-  const isDm = sourceContext.channelType === 'dm' || sourceContext.channelId?.startsWith('D')
-  let label = 'Slack'
+  const isSlack = sourceContext.channel === 'slack'
+  const isTelegram = sourceContext.channel === 'telegram'
+  const isDm =
+    sourceContext.channelType === 'dm' || (isSlack && sourceContext.channelId?.startsWith('D'))
+  let label = isTelegram ? 'Telegram' : 'Slack'
 
   if (isDm) {
-    label = sourceContext.userId ? `Slack DM ${sourceContext.userId}` : 'Slack DM'
+    if (isTelegram) {
+      label = sourceContext.userId ? `Telegram DM ${sourceContext.userId}` : 'Telegram DM'
+    } else {
+      label = sourceContext.userId ? `Slack DM ${sourceContext.userId}` : 'Slack DM'
+    }
   } else if (sourceContext.channelId) {
-    label = `Slack #${sourceContext.channelId}`
+    label = isTelegram ? `Telegram ${sourceContext.channelId}` : `Slack #${sourceContext.channelId}`
   }
 
   if (sourceContext.threadTs) {
@@ -194,7 +201,9 @@ function SourceBadge({
           ? 'border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground/90'
           : sourceContext.channel === 'slack'
             ? 'border-violet-500/35 bg-violet-500/10 text-violet-700 dark:text-violet-300'
-            : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+            : sourceContext.channel === 'telegram'
+              ? 'border-sky-500/35 bg-sky-500/10 text-sky-700 dark:text-sky-300'
+              : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
       )}
     >
       [{label}]

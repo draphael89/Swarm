@@ -15,6 +15,7 @@ import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { WebSocketServer, type RawData, WebSocket } from "ws";
 import type { ClientCommand, ServerEvent } from "../protocol/ws-types.js";
 import type { SlackIntegrationService } from "../integrations/slack/slack-integration.js";
+import type { TelegramIntegrationService } from "../integrations/telegram/telegram-integration.js";
 import {
   isPathWithinRoots,
   normalizeAllowlistRoots,
@@ -32,6 +33,8 @@ const SETTINGS_AUTH_LOGIN_ENDPOINT_PATH = "/api/settings/auth/login";
 const SLACK_INTEGRATION_ENDPOINT_PATH = "/api/integrations/slack";
 const SLACK_INTEGRATION_TEST_ENDPOINT_PATH = "/api/integrations/slack/test";
 const SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH = "/api/integrations/slack/channels";
+const TELEGRAM_INTEGRATION_ENDPOINT_PATH = "/api/integrations/telegram";
+const TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH = "/api/integrations/telegram/test";
 const RESTART_SIGNAL: NodeJS.Signals = "SIGUSR1";
 const MAX_HTTP_BODY_SIZE_BYTES = 64 * 1024;
 const MAX_READ_FILE_BODY_BYTES = 64 * 1024;
@@ -80,6 +83,7 @@ export class SwarmWebSocketServer {
   private readonly port: number;
   private readonly allowNonManagerSubscriptions: boolean;
   private readonly slackIntegration: SlackIntegrationService | null;
+  private readonly telegramIntegration: TelegramIntegrationService | null;
 
   private httpServer: HttpServer | null = null;
   private wss: WebSocketServer | null = null;
@@ -116,18 +120,25 @@ export class SwarmWebSocketServer {
     this.broadcastToSubscribed(event);
   };
 
+  private readonly onTelegramStatus = (event: ServerEvent): void => {
+    if (event.type !== "telegram_status") return;
+    this.broadcastToSubscribed(event);
+  };
+
   constructor(options: {
     swarmManager: SwarmManager;
     host: string;
     port: number;
     allowNonManagerSubscriptions: boolean;
     slackIntegration?: SlackIntegrationService;
+    telegramIntegration?: TelegramIntegrationService;
   }) {
     this.swarmManager = options.swarmManager;
     this.host = options.host;
     this.port = options.port;
     this.allowNonManagerSubscriptions = options.allowNonManagerSubscriptions;
     this.slackIntegration = options.slackIntegration ?? null;
+    this.telegramIntegration = options.telegramIntegration ?? null;
   }
 
   async start(): Promise<void> {
@@ -184,6 +195,7 @@ export class SwarmWebSocketServer {
     this.swarmManager.on("agent_status", this.onAgentStatus);
     this.swarmManager.on("agents_snapshot", this.onAgentsSnapshot);
     this.slackIntegration?.on("slack_status", this.onSlackStatus);
+    this.telegramIntegration?.on("telegram_status", this.onTelegramStatus);
   }
 
   async stop(): Promise<void> {
@@ -193,6 +205,7 @@ export class SwarmWebSocketServer {
     this.swarmManager.off("agent_status", this.onAgentStatus);
     this.swarmManager.off("agents_snapshot", this.onAgentsSnapshot);
     this.slackIntegration?.off("slack_status", this.onSlackStatus);
+    this.telegramIntegration?.off("telegram_status", this.onTelegramStatus);
 
     const currentWss = this.wss;
     const currentHttpServer = this.httpServer;
@@ -258,6 +271,14 @@ export class SwarmWebSocketServer {
         return;
       }
 
+      if (
+        requestUrl.pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH ||
+        requestUrl.pathname === TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH
+      ) {
+        await this.handleTelegramIntegrationHttpRequest(request, response, requestUrl);
+        return;
+      }
+
       response.statusCode = 404;
       response.end("Not Found");
     } catch (error) {
@@ -292,6 +313,11 @@ export class SwarmWebSocketServer {
         requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH ||
         requestUrl.pathname === SLACK_INTEGRATION_TEST_ENDPOINT_PATH ||
         requestUrl.pathname === SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH
+      ) {
+        this.applyCorsHeaders(request, response, "GET, PUT, DELETE, POST, OPTIONS");
+      } else if (
+        requestUrl.pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH ||
+        requestUrl.pathname === TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH
       ) {
         this.applyCorsHeaders(request, response, "GET, PUT, DELETE, POST, OPTIONS");
       }
@@ -887,6 +913,59 @@ export class SwarmWebSocketServer {
     this.sendJson(response, 405, { error: "Method Not Allowed" });
   }
 
+  private async handleTelegramIntegrationHttpRequest(
+    request: IncomingMessage,
+    response: ServerResponse,
+    requestUrl: URL
+  ): Promise<void> {
+    const methods = "GET, PUT, DELETE, POST, OPTIONS";
+
+    if (request.method === "OPTIONS") {
+      this.applyCorsHeaders(request, response, methods);
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    this.applyCorsHeaders(request, response, methods);
+
+    if (!this.telegramIntegration) {
+      this.sendJson(response, 501, { error: "Telegram integration is unavailable" });
+      return;
+    }
+
+    if (request.method === "GET" && requestUrl.pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH) {
+      this.sendJson(response, 200, {
+        config: this.telegramIntegration.getMaskedConfig(),
+        status: this.telegramIntegration.getStatus()
+      });
+      return;
+    }
+
+    if (request.method === "PUT" && requestUrl.pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH) {
+      const payload = await this.readJsonBody(request);
+      const updated = await this.telegramIntegration.updateConfig(payload);
+      this.sendJson(response, 200, { ok: true, ...updated });
+      return;
+    }
+
+    if (request.method === "DELETE" && requestUrl.pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH) {
+      const disabled = await this.telegramIntegration.disable();
+      this.sendJson(response, 200, { ok: true, ...disabled });
+      return;
+    }
+
+    if (request.method === "POST" && requestUrl.pathname === TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH) {
+      const payload = await this.readJsonBody(request);
+      const result = await this.telegramIntegration.testConnection(payload);
+      this.sendJson(response, 200, { ok: true, result });
+      return;
+    }
+
+    response.setHeader("Allow", methods);
+    this.sendJson(response, 405, { error: "Method Not Allowed" });
+  }
+
   private async readJsonBody(request: IncomingMessage): Promise<unknown> {
     const chunks: Buffer[] = [];
     let totalBytes = 0;
@@ -1314,6 +1393,10 @@ export class SwarmWebSocketServer {
 
     if (this.slackIntegration) {
       this.send(socket, this.slackIntegration.getStatus());
+    }
+
+    if (this.telegramIntegration) {
+      this.send(socket, this.telegramIntegration.getStatus());
     }
   }
 

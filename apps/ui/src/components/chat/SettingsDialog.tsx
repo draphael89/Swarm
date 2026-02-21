@@ -12,6 +12,7 @@ import {
   Moon,
   Plug,
   Save,
+  Send,
   Sun,
   TestTube2,
   Trash2,
@@ -44,7 +45,7 @@ import {
   type ThemePreference,
 } from '@/lib/theme'
 import { cn } from '@/lib/utils'
-import type { AgentDescriptor, SlackStatusEvent } from '@/lib/ws-types'
+import type { AgentDescriptor, SlackStatusEvent, TelegramStatusEvent } from '@/lib/ws-types'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                             */
@@ -138,12 +139,52 @@ interface SlackDraft {
   allowBinary: boolean
 }
 
+interface TelegramSettingsConfig {
+  enabled: boolean
+  mode: 'polling'
+  botToken: string | null
+  hasBotToken: boolean
+  targetManagerId: string
+  polling: {
+    timeoutSeconds: number
+    limit: number
+    dropPendingUpdatesOnStart: boolean
+  }
+  delivery: {
+    parseMode: 'HTML'
+    disableLinkPreview: boolean
+    replyToInboundMessageByDefault: boolean
+  }
+  attachments: {
+    maxFileBytes: number
+    allowImages: boolean
+    allowText: boolean
+    allowBinary: boolean
+  }
+}
+
+interface TelegramDraft {
+  enabled: boolean
+  botToken: string
+  targetManagerId: string
+  timeoutSeconds: string
+  limit: string
+  dropPendingUpdatesOnStart: boolean
+  disableLinkPreview: boolean
+  replyToInboundMessageByDefault: boolean
+  maxFileBytes: string
+  allowImages: boolean
+  allowText: boolean
+  allowBinary: boolean
+}
+
 interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   wsUrl: string
   managers: AgentDescriptor[]
   slackStatus?: SlackStatusEvent | null
+  telegramStatus?: TelegramStatusEvent | null
 }
 
 const SETTINGS_AUTH_PROVIDER_META: Record<
@@ -265,6 +306,21 @@ function isSlackChannelDescriptor(value: unknown): value is SlackChannelDescript
     channel.name.trim().length > 0 &&
     typeof channel.isPrivate === 'boolean' &&
     typeof channel.isMember === 'boolean'
+  )
+}
+
+function isTelegramSettingsConfig(value: unknown): value is TelegramSettingsConfig {
+  if (!value || typeof value !== 'object') return false
+  const config = value as Partial<TelegramSettingsConfig>
+
+  return (
+    typeof config.enabled === 'boolean' &&
+    config.mode === 'polling' &&
+    typeof config.hasBotToken === 'boolean' &&
+    typeof config.targetManagerId === 'string' &&
+    Boolean(config.polling) &&
+    Boolean(config.delivery) &&
+    Boolean(config.attachments)
   )
 }
 
@@ -680,6 +736,110 @@ async function fetchSlackChannels(wsUrl: string, includePrivateChannels: boolean
   return payload.channels.filter(isSlackChannelDescriptor)
 }
 
+async function fetchTelegramSettings(
+  wsUrl: string,
+): Promise<{ config: TelegramSettingsConfig; status: TelegramStatusEvent | null }> {
+  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/telegram')
+  const response = await fetch(endpoint)
+  if (!response.ok) {
+    throw new Error(await readApiError(response))
+  }
+
+  const payload = (await response.json()) as {
+    config?: unknown
+    status?: TelegramStatusEvent
+  }
+
+  if (!isTelegramSettingsConfig(payload.config)) {
+    throw new Error('Invalid Telegram settings response from backend.')
+  }
+
+  return {
+    config: payload.config,
+    status: payload.status ?? null,
+  }
+}
+
+async function updateTelegramSettings(
+  wsUrl: string,
+  patch: Record<string, unknown>,
+): Promise<{ config: TelegramSettingsConfig; status: TelegramStatusEvent | null }> {
+  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/telegram')
+  const response = await fetch(endpoint, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  })
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response))
+  }
+
+  const payload = (await response.json()) as {
+    config?: unknown
+    status?: TelegramStatusEvent
+  }
+
+  if (!isTelegramSettingsConfig(payload.config)) {
+    throw new Error('Invalid Telegram settings response from backend.')
+  }
+
+  return {
+    config: payload.config,
+    status: payload.status ?? null,
+  }
+}
+
+async function disableTelegramSettings(
+  wsUrl: string,
+): Promise<{ config: TelegramSettingsConfig; status: TelegramStatusEvent | null }> {
+  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/telegram')
+  const response = await fetch(endpoint, { method: 'DELETE' })
+  if (!response.ok) {
+    throw new Error(await readApiError(response))
+  }
+
+  const payload = (await response.json()) as {
+    config?: unknown
+    status?: TelegramStatusEvent
+  }
+
+  if (!isTelegramSettingsConfig(payload.config)) {
+    throw new Error('Invalid Telegram settings response from backend.')
+  }
+
+  return {
+    config: payload.config,
+    status: payload.status ?? null,
+  }
+}
+
+async function testTelegramConnection(
+  wsUrl: string,
+  patch?: Record<string, unknown>,
+): Promise<{ botId?: string; botUsername?: string; botDisplayName?: string }> {
+  const endpoint = resolveApiEndpoint(wsUrl, '/api/integrations/telegram/test')
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch ?? {}),
+  })
+
+  if (!response.ok) {
+    throw new Error(await readApiError(response))
+  }
+
+  const payload = (await response.json()) as {
+    result?: {
+      botId?: string
+      botUsername?: string
+      botDisplayName?: string
+    }
+  }
+
+  return payload.result ?? {}
+}
+
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
   return 'An unexpected error occurred.'
@@ -738,6 +898,25 @@ function AuthStatusBadge({ configured }: { configured: boolean }) {
 }
 
 function SlackConnectionBadge({ status }: { status: SlackStatusEvent | null }) {
+  const state = status?.state ?? 'disabled'
+
+  const className =
+    state === 'connected'
+      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+      : state === 'connecting'
+        ? 'border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400'
+        : state === 'error'
+          ? 'border-destructive/30 bg-destructive/10 text-destructive'
+          : 'border-border/50 bg-muted/50 text-muted-foreground'
+
+  return (
+    <Badge variant="outline" className={cn('capitalize', className)}>
+      {state}
+    </Badge>
+  )
+}
+
+function TelegramConnectionBadge({ status }: { status: TelegramStatusEvent | null }) {
   const state = status?.state ?? 'disabled'
 
   const className =
@@ -1129,7 +1308,14 @@ function EnvVariableRow({
 /*  Main dialog                                                       */
 /* ------------------------------------------------------------------ */
 
-export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatus }: SettingsDialogProps) {
+export function SettingsDialog({
+  open,
+  onOpenChange,
+  wsUrl,
+  managers,
+  slackStatus,
+  telegramStatus,
+}: SettingsDialogProps) {
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => readStoredThemePreference())
   const [envVariables, setEnvVariables] = useState<SettingsEnvVariable[]>([])
   const [draftByName, setDraftByName] = useState<Record<string, string>>({})
@@ -1148,6 +1334,9 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
   const [slackDraft, setSlackDraft] = useState<SlackDraft | null>(null)
   const [slackChannels, setSlackChannels] = useState<SlackChannelDescriptor[]>([])
   const [slackStatusFromApi, setSlackStatusFromApi] = useState<SlackStatusEvent | null>(null)
+  const [telegramConfig, setTelegramConfig] = useState<TelegramSettingsConfig | null>(null)
+  const [telegramDraft, setTelegramDraft] = useState<TelegramDraft | null>(null)
+  const [telegramStatusFromApi, setTelegramStatusFromApi] = useState<TelegramStatusEvent | null>(null)
 
   const [authError, setAuthError] = useState<string | null>(null)
   const [authSuccess, setAuthSuccess] = useState<string | null>(null)
@@ -1155,6 +1344,8 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
   const [success, setSuccess] = useState<string | null>(null)
   const [slackError, setSlackError] = useState<string | null>(null)
   const [slackSuccess, setSlackSuccess] = useState<string | null>(null)
+  const [telegramError, setTelegramError] = useState<string | null>(null)
+  const [telegramSuccess, setTelegramSuccess] = useState<string | null>(null)
 
   const [isLoadingAuth, setIsLoadingAuth] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -1167,8 +1358,13 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
   const [isTestingSlack, setIsTestingSlack] = useState(false)
   const [isDisablingSlack, setIsDisablingSlack] = useState(false)
   const [isLoadingChannels, setIsLoadingChannels] = useState(false)
+  const [isLoadingTelegram, setIsLoadingTelegram] = useState(false)
+  const [isSavingTelegram, setIsSavingTelegram] = useState(false)
+  const [isTestingTelegram, setIsTestingTelegram] = useState(false)
+  const [isDisablingTelegram, setIsDisablingTelegram] = useState(false)
 
   const effectiveSlackStatus = slackStatus ?? slackStatusFromApi
+  const effectiveTelegramStatus = telegramStatus ?? telegramStatusFromApi
   const managerOptions = useMemo(() => managers.filter((agent) => agent.role === 'manager'), [managers])
   const authProviderById = useMemo(() => {
     return new Map(authProviders.map((entry) => [entry.provider, entry]))
@@ -1204,6 +1400,22 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
     }
   }, [wsUrl])
 
+  const loadTelegram = useCallback(async () => {
+    setIsLoadingTelegram(true)
+    setTelegramError(null)
+
+    try {
+      const result = await fetchTelegramSettings(wsUrl)
+      setTelegramConfig(result.config)
+      setTelegramDraft(toTelegramDraft(result.config))
+      setTelegramStatusFromApi(result.status)
+    } catch (err) {
+      setTelegramError(toErrorMessage(err))
+    } finally {
+      setIsLoadingTelegram(false)
+    }
+  }, [wsUrl])
+
   const loadAuth = useCallback(async () => {
     setIsLoadingAuth(true)
     setAuthError(null)
@@ -1221,8 +1433,8 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
   useEffect(() => {
     if (!open) return
     setThemePreference(readStoredThemePreference())
-    void Promise.all([loadVariables(), loadSlack(), loadAuth()])
-  }, [open, loadVariables, loadSlack, loadAuth])
+    void Promise.all([loadVariables(), loadSlack(), loadTelegram(), loadAuth()])
+  }, [open, loadVariables, loadSlack, loadTelegram, loadAuth])
 
   const abortAllOAuthLoginFlows = useCallback(() => {
     for (const provider of SETTINGS_AUTH_PROVIDER_ORDER) {
@@ -1249,7 +1461,10 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
         deletingVar ||
         isSavingSlack ||
         isTestingSlack ||
-        isDisablingSlack)
+        isDisablingSlack ||
+        isSavingTelegram ||
+        isTestingTelegram ||
+        isDisablingTelegram)
     ) {
       return
     }
@@ -1263,6 +1478,8 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
       setSuccess(null)
       setSlackError(null)
       setSlackSuccess(null)
+      setTelegramError(null)
+      setTelegramSuccess(null)
     }
     onOpenChange(next)
   }
@@ -1630,6 +1847,72 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
     applyThemePreference(nextPreference)
   }, [])
 
+  const handleSaveTelegram = async () => {
+    if (!telegramDraft) {
+      return
+    }
+
+    setTelegramError(null)
+    setTelegramSuccess(null)
+    setIsSavingTelegram(true)
+
+    try {
+      const updated = await updateTelegramSettings(wsUrl, buildTelegramPatch(telegramDraft))
+      setTelegramConfig(updated.config)
+      setTelegramDraft(toTelegramDraft(updated.config))
+      setTelegramStatusFromApi(updated.status)
+      setTelegramSuccess('Telegram settings saved.')
+    } catch (error) {
+      setTelegramError(toErrorMessage(error))
+    } finally {
+      setIsSavingTelegram(false)
+    }
+  }
+
+  const handleTestTelegram = async () => {
+    if (!telegramDraft) {
+      return
+    }
+
+    setTelegramError(null)
+    setTelegramSuccess(null)
+    setIsTestingTelegram(true)
+
+    const patch: Record<string, unknown> = {}
+    if (telegramDraft.botToken.trim()) {
+      patch.botToken = telegramDraft.botToken.trim()
+    }
+
+    try {
+      const result = await testTelegramConnection(wsUrl, Object.keys(patch).length > 0 ? patch : undefined)
+      const identity = result.botUsername ?? result.botDisplayName ?? result.botId ?? 'Telegram bot'
+      setTelegramSuccess(`Connected to ${identity}.`)
+      await loadTelegram()
+    } catch (error) {
+      setTelegramError(toErrorMessage(error))
+    } finally {
+      setIsTestingTelegram(false)
+    }
+  }
+
+  const handleDisableTelegram = async () => {
+    setTelegramError(null)
+    setTelegramSuccess(null)
+    setIsDisablingTelegram(true)
+
+    try {
+      const disabled = await disableTelegramSettings(wsUrl)
+      setTelegramConfig(disabled.config)
+      setTelegramDraft(toTelegramDraft(disabled.config))
+      setTelegramStatusFromApi(disabled.status)
+      setTelegramSuccess('Telegram integration disabled.')
+    } catch (error) {
+      setTelegramError(toErrorMessage(error))
+    } finally {
+      setIsDisablingTelegram(false)
+    }
+  }
+
   const setCount = envVariables.filter((v) => v.isSet).length
   const totalCount = envVariables.length
 
@@ -1689,6 +1972,301 @@ export function SettingsDialog({ open, onOpenChange, wsUrl, managers, slackStatu
                 </Select>
                 <p className="text-[11px] text-muted-foreground">Auto follows your operating system preference.</p>
               </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3 rounded-lg border border-border bg-card/50 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex size-7 items-center justify-center rounded-md bg-sky-500/10">
+                    <Send className="size-3.5 text-sky-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold leading-tight">Telegram integration</h3>
+                    <p className="text-[11px] text-muted-foreground">Bot API + long polling delivery</p>
+                  </div>
+                </div>
+                <TelegramConnectionBadge status={effectiveTelegramStatus} />
+              </div>
+
+              {effectiveTelegramStatus?.message ? (
+                <p className="text-[11px] text-muted-foreground">{effectiveTelegramStatus.message}</p>
+              ) : null}
+
+              {telegramError ? (
+                <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
+                  <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
+                  <p className="text-xs text-destructive">{telegramError}</p>
+                </div>
+              ) : null}
+
+              {telegramSuccess ? (
+                <div className="flex items-center gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/10 px-3 py-2">
+                  <Check className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400">{telegramSuccess}</p>
+                </div>
+              ) : null}
+
+              {isLoadingTelegram || !telegramDraft ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <ToggleRow
+                      label="Enable Telegram integration"
+                      description="Telegram stays opt-in until explicitly enabled."
+                      checked={telegramDraft.enabled}
+                      onChange={(next) =>
+                        setTelegramDraft((prev) => (prev ? { ...prev, enabled: next } : prev))
+                      }
+                    />
+
+                    <ToggleRow
+                      label="Drop pending updates on start"
+                      description="Skip backlog and only process new updates after startup."
+                      checked={telegramDraft.dropPendingUpdatesOnStart}
+                      onChange={(next) =>
+                        setTelegramDraft((prev) =>
+                          prev ? { ...prev, dropPendingUpdatesOnStart: next } : prev,
+                        )
+                      }
+                    />
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <ToggleRow
+                      label="Disable link previews"
+                      description="Send outbound messages without link preview cards."
+                      checked={telegramDraft.disableLinkPreview}
+                      onChange={(next) =>
+                        setTelegramDraft((prev) => (prev ? { ...prev, disableLinkPreview: next } : prev))
+                      }
+                    />
+
+                    <ToggleRow
+                      label="Reply to inbound message"
+                      description="Reply to the triggering Telegram message by default."
+                      checked={telegramDraft.replyToInboundMessageByDefault}
+                      onChange={(next) =>
+                        setTelegramDraft((prev) =>
+                          prev ? { ...prev, replyToInboundMessageByDefault: next } : prev,
+                        )
+                      }
+                    />
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <ToggleRow
+                      label="Allow image attachments"
+                      description="Ingest Telegram image uploads as Swarm attachments."
+                      checked={telegramDraft.allowImages}
+                      onChange={(next) =>
+                        setTelegramDraft((prev) => (prev ? { ...prev, allowImages: next } : prev))
+                      }
+                    />
+
+                    <ToggleRow
+                      label="Allow text attachments"
+                      description="Include text-like documents as prompt attachments."
+                      checked={telegramDraft.allowText}
+                      onChange={(next) =>
+                        setTelegramDraft((prev) => (prev ? { ...prev, allowText: next } : prev))
+                      }
+                    />
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <ToggleRow
+                      label="Allow binary attachments"
+                      description="Enable binary document ingestion (base64)."
+                      checked={telegramDraft.allowBinary}
+                      onChange={(next) =>
+                        setTelegramDraft((prev) => (prev ? { ...prev, allowBinary: next } : prev))
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="telegram-target-manager" className="text-xs font-medium text-muted-foreground">
+                      Target manager
+                    </Label>
+                    <Select
+                      value={telegramDraft.targetManagerId || 'manager'}
+                      onValueChange={(value) =>
+                        setTelegramDraft((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                targetManagerId: value,
+                              }
+                            : prev,
+                        )
+                      }
+                    >
+                      <SelectTrigger id="telegram-target-manager" className="w-full">
+                        <SelectValue placeholder="Select manager" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {managerOptions.length === 0 ? (
+                          <SelectItem value={telegramDraft.targetManagerId || 'manager'}>
+                            {telegramDraft.targetManagerId || 'manager'}
+                          </SelectItem>
+                        ) : (
+                          managerOptions.map((manager) => (
+                            <SelectItem key={manager.agentId} value={manager.agentId}>
+                              {manager.agentId}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="telegram-bot-token" className="text-xs font-medium text-muted-foreground">
+                      Bot token
+                    </Label>
+                    <Input
+                      id="telegram-bot-token"
+                      type="password"
+                      value={telegramDraft.botToken}
+                      onChange={(event) =>
+                        setTelegramDraft((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                botToken: event.target.value,
+                              }
+                            : prev,
+                        )
+                      }
+                      placeholder={telegramConfig?.botToken ?? '123456:ABC-...'}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      {telegramConfig?.hasBotToken ? 'Token saved. Enter a new value to rotate.' : 'Token not set yet.'}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="telegram-timeout-seconds" className="text-xs font-medium text-muted-foreground">
+                        Poll timeout (seconds)
+                      </Label>
+                      <Input
+                        id="telegram-timeout-seconds"
+                        value={telegramDraft.timeoutSeconds}
+                        onChange={(event) =>
+                          setTelegramDraft((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  timeoutSeconds: event.target.value,
+                                }
+                              : prev,
+                          )
+                        }
+                        placeholder="25"
+                        inputMode="numeric"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="telegram-limit" className="text-xs font-medium text-muted-foreground">
+                        Poll limit
+                      </Label>
+                      <Input
+                        id="telegram-limit"
+                        value={telegramDraft.limit}
+                        onChange={(event) =>
+                          setTelegramDraft((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  limit: event.target.value,
+                                }
+                              : prev,
+                          )
+                        }
+                        placeholder="100"
+                        inputMode="numeric"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="telegram-max-file-bytes" className="text-xs font-medium text-muted-foreground">
+                      Max attachment size (bytes)
+                    </Label>
+                    <Input
+                      id="telegram-max-file-bytes"
+                      value={telegramDraft.maxFileBytes}
+                      onChange={(event) =>
+                        setTelegramDraft((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                maxFileBytes: event.target.value,
+                              }
+                            : prev,
+                        )
+                      }
+                      placeholder="10485760"
+                      inputMode="numeric"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void handleTestTelegram()}
+                      disabled={isTestingTelegram}
+                      className="gap-1.5"
+                    >
+                      {isTestingTelegram ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <TestTube2 className="size-3.5" />
+                      )}
+                      {isTestingTelegram ? 'Testing...' : 'Test connection'}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void handleDisableTelegram()}
+                      disabled={isDisablingTelegram}
+                      className="gap-1.5"
+                    >
+                      {isDisablingTelegram ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Plug className="size-3.5" />
+                      )}
+                      {isDisablingTelegram ? 'Disabling...' : 'Disable'}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      onClick={() => void handleSaveTelegram()}
+                      disabled={isSavingTelegram}
+                      className="gap-1.5"
+                    >
+                      {isSavingTelegram ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Save className="size-3.5" />
+                      )}
+                      {isSavingTelegram ? 'Saving...' : 'Save Telegram settings'}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </section>
 
             <Separator />
@@ -2253,6 +2831,56 @@ function buildSlackPatch(draft: SlackDraft): Record<string, unknown> {
 
   if (draft.appToken.trim()) {
     patch.appToken = draft.appToken.trim()
+  }
+
+  if (draft.botToken.trim()) {
+    patch.botToken = draft.botToken.trim()
+  }
+
+  return patch
+}
+
+function toTelegramDraft(config: TelegramSettingsConfig): TelegramDraft {
+  return {
+    enabled: config.enabled,
+    botToken: '',
+    targetManagerId: config.targetManagerId,
+    timeoutSeconds: String(config.polling.timeoutSeconds),
+    limit: String(config.polling.limit),
+    dropPendingUpdatesOnStart: config.polling.dropPendingUpdatesOnStart,
+    disableLinkPreview: config.delivery.disableLinkPreview,
+    replyToInboundMessageByDefault: config.delivery.replyToInboundMessageByDefault,
+    maxFileBytes: String(config.attachments.maxFileBytes),
+    allowImages: config.attachments.allowImages,
+    allowText: config.attachments.allowText,
+    allowBinary: config.attachments.allowBinary,
+  }
+}
+
+function buildTelegramPatch(draft: TelegramDraft): Record<string, unknown> {
+  const timeoutSeconds = Number.parseInt(draft.timeoutSeconds, 10)
+  const limit = Number.parseInt(draft.limit, 10)
+  const maxFileBytes = Number.parseInt(draft.maxFileBytes, 10)
+
+  const patch: Record<string, unknown> = {
+    enabled: draft.enabled,
+    targetManagerId: draft.targetManagerId.trim() || 'manager',
+    polling: {
+      timeoutSeconds: Number.isFinite(timeoutSeconds) ? timeoutSeconds : 25,
+      limit: Number.isFinite(limit) ? limit : 100,
+      dropPendingUpdatesOnStart: draft.dropPendingUpdatesOnStart,
+    },
+    delivery: {
+      parseMode: 'HTML',
+      disableLinkPreview: draft.disableLinkPreview,
+      replyToInboundMessageByDefault: draft.replyToInboundMessageByDefault,
+    },
+    attachments: {
+      maxFileBytes: Number.isFinite(maxFileBytes) && maxFileBytes > 0 ? maxFileBytes : 10 * 1024 * 1024,
+      allowImages: draft.allowImages,
+      allowText: draft.allowText,
+      allowBinary: draft.allowBinary,
+    },
   }
 
   if (draft.botToken.trim()) {

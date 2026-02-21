@@ -120,7 +120,7 @@ describe('buildSwarmTools', () => {
   })
 
   it('forwards speak_to_user target metadata and returns resolved target context', async () => {
-    let receivedTarget: { channel: 'web' | 'slack'; channelId?: string; userId?: string; threadTs?: string } | undefined
+    let receivedTarget: { channel: 'web' | 'slack' | 'telegram'; channelId?: string; userId?: string; threadTs?: string } | undefined
 
     const host: SwarmToolHost = {
       listAgents: () => [makeManagerDescriptor()],

@@ -71,6 +71,7 @@ export function IndexPage() {
     statuses: {},
     lastError: null,
     slackStatus: null,
+    telegramStatus: null,
   })
 
   const [isCreateManagerDialogOpen, setIsCreateManagerDialogOpen] = useState(false)
@@ -149,7 +150,7 @@ export function IndexPage() {
         return true
       }
 
-      return entry.sourceContext?.channel !== 'slack'
+      return (entry.sourceContext?.channel ?? 'web') === 'web'
     })
   }, [channelView, state.messages])
 
@@ -599,6 +600,7 @@ export function IndexPage() {
         wsUrl={wsUrl}
         managers={state.agents.filter((agent) => agent.role === 'manager')}
         slackStatus={state.slackStatus}
+        telegramStatus={state.telegramStatus}
       />
 
       <OverlayDialog
