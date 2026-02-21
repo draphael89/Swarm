@@ -175,17 +175,6 @@ function formatDateTime(value: string, timeZone?: string): string {
   }
 }
 
-function formatMessagePreview(message: string, maxLength = 80): string {
-  const normalized = message.replace(/\s+/g, ' ').trim()
-  if (!normalized) {
-    return '(No message)'
-  }
-
-  return normalized.length <= maxLength
-    ? normalized
-    : `${normalized.slice(0, maxLength - 1)}…`
-}
-
 function format24HourTime(hour: string, minute: string): string | null {
   const numericHour = Number.parseInt(hour, 10)
   const numericMinute = Number.parseInt(minute, 10)
@@ -364,13 +353,13 @@ export function ArtifactsSidebar({
           <TabsList className="h-7 w-full bg-muted/60 p-0.5">
             <TabsTrigger
               value="artifacts"
-              className="h-6 rounded-sm px-2.5 text-[11px] font-medium"
+              className="h-6 rounded-sm px-2.5 text-[11px] font-medium data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
             >
               Artifacts
             </TabsTrigger>
             <TabsTrigger
               value="schedules"
-              className="h-6 rounded-sm px-2.5 text-[11px] font-medium"
+              className="h-6 rounded-sm px-2.5 text-[11px] font-medium data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
             >
               Schedules
             </TabsTrigger>
@@ -465,93 +454,85 @@ export function ArtifactsSidebar({
                     'hover:[&>[data-slot=scroll-area-scrollbar]>[data-slot=scroll-area-thumb]]:bg-border',
                   )}
                 >
-                  <div className="space-y-1 p-2">
+                  <div className="space-y-0.5 p-2">
                     {sortedSchedules.map((schedule) => (
-                      <Button
+                      <button
                         key={schedule.id}
                         type="button"
-                        variant="ghost"
                         className={cn(
-                          'h-auto w-full justify-start rounded-md px-2 py-2 text-left',
+                          'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
                           selectedSchedule?.id === schedule.id
-                            ? 'bg-accent/80 text-foreground hover:bg-accent/80'
-                            : 'text-foreground hover:bg-accent/70',
+                            ? 'bg-accent/60 text-foreground'
+                            : 'text-foreground hover:bg-muted/80',
                         )}
                         onClick={() => setSelectedScheduleId(schedule.id)}
                         title={schedule.name}
                       >
-                        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <span className="truncate text-xs font-semibold">
+                        <Clock3 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs font-medium">
                             {schedule.name}
                           </span>
-                          <span className="truncate text-[10px] text-muted-foreground">
+                          <span className="block truncate text-[10px] text-muted-foreground">
                             {describeCronExpression(schedule.cron)}
                           </span>
-                          <span className="truncate font-mono text-[10px] text-muted-foreground/80">
-                            {schedule.cron}
-                          </span>
-                          <span className="truncate text-[10px] text-muted-foreground">
-                            Next: {formatDateTime(schedule.nextFireAt, schedule.timezone)}
-                          </span>
-                          <span className="truncate text-[10px] text-muted-foreground/80">
-                            {formatMessagePreview(schedule.message)}
-                          </span>
                         </span>
-                      </Button>
+                      </button>
                     ))}
                   </div>
                 </ScrollArea>
 
                 {selectedSchedule ? (
-                  <div className="shrink-0 border-t border-border/80 px-3 py-2">
-                    <div className="space-y-2">
-                      <h3 className="truncate text-xs font-semibold text-foreground">
-                        {selectedSchedule.name}
-                      </h3>
+                  <div className="shrink-0 border-t border-border/80 p-3">
+                    <h3 className="truncate text-xs font-semibold text-foreground">
+                      {selectedSchedule.name}
+                    </h3>
 
-                      <div className="space-y-1 text-[11px]">
-                        <p className="text-muted-foreground">
-                          <span className="font-medium text-foreground">Cron:</span>{' '}
-                          <span className="font-mono">{selectedSchedule.cron}</span>
-                        </p>
-                        <p className="text-muted-foreground">
-                          <span className="font-medium text-foreground">Pattern:</span>{' '}
-                          {describeCronExpression(selectedSchedule.cron)}
-                        </p>
-                        <p className="text-muted-foreground">
-                          <span className="font-medium text-foreground">Next fire:</span>{' '}
-                          {formatDateTime(selectedSchedule.nextFireAt, selectedSchedule.timezone)}
-                        </p>
-                        <p className="text-muted-foreground">
-                          <span className="font-medium text-foreground">Timezone:</span>{' '}
-                          {selectedSchedule.timezone}
-                        </p>
-                        <p className="text-muted-foreground">
-                          <span className="font-medium text-foreground">Created:</span>{' '}
-                          {formatDateTime(selectedSchedule.createdAt)}
-                        </p>
-                        {selectedSchedule.lastFiredAt ? (
-                          <p className="text-muted-foreground">
-                            <span className="font-medium text-foreground">Last fired:</span>{' '}
+                    <dl className="mt-2.5 grid grid-cols-[4.5rem_1fr] gap-x-2 gap-y-1 text-[11px]">
+                      <dt className="text-muted-foreground">Schedule</dt>
+                      <dd className="truncate font-medium text-foreground">
+                        {describeCronExpression(selectedSchedule.cron)}
+                      </dd>
+
+                      <dt className="text-muted-foreground">Expression</dt>
+                      <dd className="truncate font-mono text-foreground">
+                        {selectedSchedule.cron}
+                      </dd>
+
+                      <dt className="text-muted-foreground">Next fire</dt>
+                      <dd className="truncate text-foreground">
+                        {formatDateTime(selectedSchedule.nextFireAt, selectedSchedule.timezone)}
+                      </dd>
+
+                      {selectedSchedule.lastFiredAt ? (
+                        <>
+                          <dt className="text-muted-foreground">Last fired</dt>
+                          <dd className="truncate text-foreground">
                             {formatDateTime(selectedSchedule.lastFiredAt)}
-                          </p>
-                        ) : null}
-                        <p className="text-muted-foreground">
-                          <span className="font-medium text-foreground">Type:</span>{' '}
-                          {selectedSchedule.oneShot ? 'One-time' : 'Recurring'}
-                        </p>
-                      </div>
+                          </dd>
+                        </>
+                      ) : null}
 
-                      <div>
-                        <p className="mb-1 text-[11px] font-medium text-foreground">
-                          Message
+                      <dt className="text-muted-foreground">Timezone</dt>
+                      <dd className="truncate text-foreground">
+                        {selectedSchedule.timezone}
+                      </dd>
+
+                      <dt className="text-muted-foreground">Type</dt>
+                      <dd className="text-foreground">
+                        {selectedSchedule.oneShot ? 'One-time' : 'Recurring'}
+                      </dd>
+                    </dl>
+
+                    <div className="mt-3">
+                      <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                        Message
+                      </p>
+                      <ScrollArea className="max-h-24 rounded-md border border-border/60 bg-muted/30 p-2">
+                        <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">
+                          {selectedSchedule.message}
                         </p>
-                        <ScrollArea className="max-h-28 rounded-md border border-border/70 bg-background/60 p-2">
-                          <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">
-                            {selectedSchedule.message}
-                          </p>
-                        </ScrollArea>
-                      </div>
+                      </ScrollArea>
                     </div>
                   </div>
                 ) : null}
