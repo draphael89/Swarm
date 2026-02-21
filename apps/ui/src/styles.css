@@ -1,6 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap");
 @import url("https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&display=swap");
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --background: #f8f5f0;
@@ -40,41 +41,39 @@
   --radius: 0.5rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #1a1a1a;
-    --foreground: #f0ebe5;
-    --card: #242424;
-    --card-foreground: #f0ebe5;
-    --popover: #242424;
-    --popover-foreground: #f0ebe5;
-    --primary: #4caf50;
-    --primary-foreground: #0a1f0c;
-    --secondary: #333333;
-    --secondary-foreground: #d7e0d6;
-    --muted: #2a2a2a;
-    --muted-foreground: #d7cfc4;
-    --accent: #2e7d32;
-    --accent-foreground: #ffffff;
-    --destructive: #dc2626;
-    --destructive-foreground: #ffffff;
-    --border: #4a4a4a;
-    --input: #4a4a4a;
-    --ring: #4caf50;
-    --chart-1: #81c784;
-    --chart-2: #66bb6a;
-    --chart-3: #4caf50;
-    --chart-4: #43a047;
-    --chart-5: #388e3c;
-    --sidebar: #161616;
-    --sidebar-foreground: #f0ebe5;
-    --sidebar-primary: #4caf50;
-    --sidebar-primary-foreground: #0a1f0c;
-    --sidebar-accent: #202020;
-    --sidebar-accent-foreground: #ffffff;
-    --sidebar-border: #4a4a4a;
-    --sidebar-ring: #4caf50;
-  }
+.dark {
+  --background: #1a1a1a;
+  --foreground: #f0ebe5;
+  --card: #242424;
+  --card-foreground: #f0ebe5;
+  --popover: #242424;
+  --popover-foreground: #f0ebe5;
+  --primary: #4caf50;
+  --primary-foreground: #0a1f0c;
+  --secondary: #333333;
+  --secondary-foreground: #d7e0d6;
+  --muted: #2a2a2a;
+  --muted-foreground: #d7cfc4;
+  --accent: #2e7d32;
+  --accent-foreground: #ffffff;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: #4a4a4a;
+  --input: #4a4a4a;
+  --ring: #4caf50;
+  --chart-1: #81c784;
+  --chart-2: #66bb6a;
+  --chart-3: #4caf50;
+  --chart-4: #43a047;
+  --chart-5: #388e3c;
+  --sidebar: #161616;
+  --sidebar-foreground: #f0ebe5;
+  --sidebar-primary: #4caf50;
+  --sidebar-primary-foreground: #0a1f0c;
+  --sidebar-accent: #202020;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #4a4a4a;
+  --sidebar-ring: #4caf50;
 }
 
 @theme inline {
