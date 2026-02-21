@@ -9,6 +9,7 @@ export interface TelegramIntegrationConfig {
   mode: TelegramConnectionMode;
   botToken: string;
   targetManagerId: string;
+  allowedUserIds: string[];
   polling: {
     timeoutSeconds: number;
     limit: number;

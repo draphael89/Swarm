@@ -139,6 +139,7 @@ interface TelegramSettingsConfig {
   botToken: string | null
   hasBotToken: boolean
   targetManagerId: string
+  allowedUserIds: string[]
   polling: {
     timeoutSeconds: number
     limit: number
@@ -161,6 +162,7 @@ interface TelegramDraft {
   enabled: boolean
   botToken: string
   targetManagerId: string
+  allowedUserIds: string[]
   timeoutSeconds: string
   limit: string
   dropPendingUpdatesOnStart: boolean
@@ -305,12 +307,17 @@ function isSlackChannelDescriptor(value: unknown): value is SlackChannelDescript
 function isTelegramSettingsConfig(value: unknown): value is TelegramSettingsConfig {
   if (!value || typeof value !== 'object') return false
   const config = value as Partial<TelegramSettingsConfig>
+  const hasValidAllowedUserIds =
+    config.allowedUserIds === undefined ||
+    (Array.isArray(config.allowedUserIds) &&
+      config.allowedUserIds.every((entry) => typeof entry === 'string'))
 
   return (
     typeof config.enabled === 'boolean' &&
     config.mode === 'polling' &&
     typeof config.hasBotToken === 'boolean' &&
     typeof config.targetManagerId === 'string' &&
+    hasValidAllowedUserIds &&
     Boolean(config.polling) &&
     Boolean(config.delivery) &&
     Boolean(config.attachments)
@@ -2126,6 +2133,31 @@ export function SettingsPanel({
                     </p>
                   </div>
 
+                  <div className="space-y-1.5">
+                    <Label htmlFor="telegram-allowed-user-ids" className="text-xs font-medium text-muted-foreground">
+                      Allowed users
+                    </Label>
+                    <Input
+                      id="telegram-allowed-user-ids"
+                      value={telegramDraft.allowedUserIds.join(', ')}
+                      onChange={(event) =>
+                        setTelegramDraft((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                allowedUserIds: parseCommaSeparated(event.target.value),
+                              }
+                            : prev,
+                        )
+                      }
+                      placeholder="123456789, 987654321"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Leave empty to allow all users. Find your Telegram user ID by messaging @userinfobot, or send
+                      /start to your bot and check logs.
+                    </p>
+                  </div>
+
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-1.5">
                       <Label htmlFor="telegram-timeout-seconds" className="text-xs font-medium text-muted-foreground">
@@ -2818,6 +2850,7 @@ function toTelegramDraft(config: TelegramSettingsConfig): TelegramDraft {
     enabled: config.enabled,
     botToken: '',
     targetManagerId: config.targetManagerId,
+    allowedUserIds: Array.isArray(config.allowedUserIds) ? [...config.allowedUserIds] : [],
     timeoutSeconds: String(config.polling.timeoutSeconds),
     limit: String(config.polling.limit),
     dropPendingUpdatesOnStart: config.polling.dropPendingUpdatesOnStart,
@@ -2838,6 +2871,7 @@ function buildTelegramPatch(draft: TelegramDraft): Record<string, unknown> {
   const patch: Record<string, unknown> = {
     enabled: draft.enabled,
     targetManagerId: draft.targetManagerId.trim() || 'manager',
+    allowedUserIds: draft.allowedUserIds,
     polling: {
       timeoutSeconds: Number.isFinite(timeoutSeconds) ? timeoutSeconds : 25,
       limit: Number.isFinite(limit) ? limit : 100,
