@@ -11,7 +11,7 @@ import type {
   OAuthLoginCallbacks,
   OAuthProviderInterface
 } from "@mariozechner/pi-ai/dist/utils/oauth/types.js";
-import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import { AuthStorage, type AuthCredential } from "@mariozechner/pi-coding-agent";
 import { WebSocketServer, type RawData, WebSocket } from "ws";
 import type { GsuiteIntegrationService } from "../integrations/gsuite/gsuite-integration.js";
 import type { ClientCommand, ServerEvent } from "../protocol/ws-types.js";
@@ -27,6 +27,7 @@ import type { SwarmManager } from "../swarm/swarm-manager.js";
 
 const REBOOT_ENDPOINT_PATH = "/api/reboot";
 const READ_FILE_ENDPOINT_PATH = "/api/read-file";
+const TRANSCRIBE_ENDPOINT_PATH = "/api/transcribe";
 const SCHEDULES_ENDPOINT_PATH = "/api/schedules";
 const AGENT_COMPACT_ENDPOINT_PATTERN = /^\/api\/agents\/([^/]+)\/compact$/;
 const SETTINGS_ENV_ENDPOINT_PATH = "/api/settings/env";
@@ -46,7 +47,20 @@ const RESTART_SIGNAL: NodeJS.Signals = "SIGUSR1";
 const MAX_HTTP_BODY_SIZE_BYTES = 64 * 1024;
 const MAX_READ_FILE_BODY_BYTES = 64 * 1024;
 const MAX_READ_FILE_CONTENT_BYTES = 2 * 1024 * 1024;
+const MAX_TRANSCRIBE_FILE_BYTES = 4_000_000;
+const MAX_TRANSCRIBE_BODY_BYTES = MAX_TRANSCRIBE_FILE_BYTES + 512 * 1024;
+const OPENAI_TRANSCRIPTION_URL = "https://api.openai.com/v1/audio/transcriptions";
+const OPENAI_TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe";
+const OPENAI_TRANSCRIPTION_TIMEOUT_MS = 30_000;
+const ALLOWED_TRANSCRIBE_MIME_TYPES = new Set([
+  "audio/webm",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/wav",
+  "audio/ogg"
+]);
 const READ_FILE_METHODS = "GET, POST, OPTIONS";
+const TRANSCRIBE_METHODS = "POST, OPTIONS";
 const SETTINGS_AUTH_LOGIN_METHODS = "POST, OPTIONS";
 const SETTINGS_AUTH_METHODS = "GET, PUT, DELETE, POST, OPTIONS";
 
@@ -264,6 +278,11 @@ export class SwarmWebSocketServer {
         return;
       }
 
+      if (requestUrl.pathname === TRANSCRIBE_ENDPOINT_PATH) {
+        await this.handleTranscribeHttpRequest(request, response);
+        return;
+      }
+
       if (requestUrl.pathname === SCHEDULES_ENDPOINT_PATH) {
         await this.handleSchedulesHttpRequest(request, response);
         return;
@@ -346,6 +365,8 @@ export class SwarmWebSocketServer {
         this.applyCorsHeaders(request, response, SETTINGS_AUTH_METHODS);
       } else if (requestUrl.pathname === READ_FILE_ENDPOINT_PATH) {
         this.applyCorsHeaders(request, response, READ_FILE_METHODS);
+      } else if (requestUrl.pathname === TRANSCRIBE_ENDPOINT_PATH) {
+        this.applyCorsHeaders(request, response, TRANSCRIBE_METHODS);
       } else if (requestUrl.pathname === SCHEDULES_ENDPOINT_PATH) {
         this.applyCorsHeaders(request, response, "GET, OPTIONS");
       } else if (AGENT_COMPACT_ENDPOINT_PATTERN.test(requestUrl.pathname)) {
@@ -514,6 +535,137 @@ export class SwarmWebSocketServer {
 
       this.sendJson(response, 500, { error: message });
     }
+  }
+
+  private async handleTranscribeHttpRequest(
+    request: IncomingMessage,
+    response: ServerResponse
+  ): Promise<void> {
+    if (request.method === "OPTIONS") {
+      this.applyCorsHeaders(request, response, TRANSCRIBE_METHODS);
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    if (request.method !== "POST") {
+      this.applyCorsHeaders(request, response, TRANSCRIBE_METHODS);
+      response.setHeader("Allow", TRANSCRIBE_METHODS);
+      this.sendJson(response, 405, { error: "Method Not Allowed" });
+      return;
+    }
+
+    this.applyCorsHeaders(request, response, TRANSCRIBE_METHODS);
+
+    const contentType = request.headers["content-type"];
+    if (typeof contentType !== "string" || !contentType.toLowerCase().includes("multipart/form-data")) {
+      this.sendJson(response, 400, { error: "Content-Type must be multipart/form-data" });
+      return;
+    }
+
+    let rawBody: Buffer;
+    try {
+      rawBody = await this.readRequestBody(request, MAX_TRANSCRIBE_BODY_BYTES);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.toLowerCase().includes("too large")) {
+        this.sendJson(response, 413, { error: "Audio file too large. Max size is 4MB." });
+        return;
+      }
+      throw error;
+    }
+
+    const formData = await parseMultipartFormData(rawBody, contentType);
+
+    const fileValue = formData.get("file");
+    if (!(fileValue instanceof File)) {
+      this.sendJson(response, 400, { error: "Missing audio file upload (field name: file)." });
+      return;
+    }
+
+    if (fileValue.size === 0) {
+      this.sendJson(response, 400, { error: "Audio file is empty." });
+      return;
+    }
+
+    if (fileValue.size > MAX_TRANSCRIBE_FILE_BYTES) {
+      this.sendJson(response, 413, { error: "Audio file too large. Max size is 4MB." });
+      return;
+    }
+
+    const normalizedMimeType = normalizeMimeType(fileValue.type);
+    if (normalizedMimeType && !ALLOWED_TRANSCRIBE_MIME_TYPES.has(normalizedMimeType)) {
+      this.sendJson(response, 415, { error: "Unsupported audio format." });
+      return;
+    }
+
+    const apiKey = this.resolveOpenAiApiKey();
+    if (!apiKey) {
+      this.sendJson(response, 400, { error: "OpenAI API key required — add it in Settings." });
+      return;
+    }
+
+    const payload = new FormData();
+    payload.set("model", OPENAI_TRANSCRIPTION_MODEL);
+    payload.set("response_format", "json");
+    payload.set("file", fileValue, resolveUploadFileName(fileValue));
+
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(() => timeoutController.abort(), OPENAI_TRANSCRIPTION_TIMEOUT_MS);
+
+    try {
+      const upstreamResponse = await fetch(OPENAI_TRANSCRIPTION_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: payload,
+        signal: timeoutController.signal
+      });
+
+      if (!upstreamResponse.ok) {
+        const statusCode = upstreamResponse.status === 401 || upstreamResponse.status === 403 ? 401 : 502;
+
+        this.sendJson(response, statusCode, {
+          error:
+            statusCode === 401
+              ? "OpenAI API key rejected — update it in Settings."
+              : "Transcription failed. Please try again."
+        });
+        return;
+      }
+
+      const result = (await upstreamResponse.json()) as { text?: unknown };
+      if (typeof result.text !== "string") {
+        this.sendJson(response, 502, { error: "Invalid transcription response." });
+        return;
+      }
+
+      this.sendJson(response, 200, { text: result.text });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        this.sendJson(response, 504, { error: "Transcription timed out." });
+        return;
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private resolveOpenAiApiKey(): string | undefined {
+    const authStorage = AuthStorage.create(this.swarmManager.getConfig().paths.authFile);
+
+    for (const providerId of ["openai", "openai-codex"]) {
+      const credential = authStorage.get(providerId);
+      const token = extractAuthCredentialToken(credential as AuthCredential | undefined);
+      if (token) {
+        return token;
+      }
+    }
+
+    return undefined;
   }
 
   private async handleSchedulesHttpRequest(
@@ -1169,25 +1321,13 @@ export class SwarmWebSocketServer {
   }
 
   private async readJsonBody(request: IncomingMessage): Promise<unknown> {
-    const chunks: Buffer[] = [];
-    let totalBytes = 0;
+    const body = await this.readRequestBody(request, MAX_HTTP_BODY_SIZE_BYTES);
 
-    for await (const chunk of request) {
-      const chunkBuffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
-      totalBytes += chunkBuffer.length;
-
-      if (totalBytes > MAX_HTTP_BODY_SIZE_BYTES) {
-        throw new Error("Request body too large");
-      }
-
-      chunks.push(chunkBuffer);
-    }
-
-    if (chunks.length === 0) {
+    if (body.length === 0) {
       return {};
     }
 
-    const raw = Buffer.concat(chunks).toString("utf8").trim();
+    const raw = body.toString("utf8").trim();
     if (!raw) {
       return {};
     }
@@ -1197,6 +1337,24 @@ export class SwarmWebSocketServer {
     } catch {
       throw new Error("Request body must be valid JSON");
     }
+  }
+
+  private async readRequestBody(request: IncomingMessage, maxBytes: number): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+
+    for await (const chunk of request) {
+      const chunkBuffer = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      totalBytes += chunkBuffer.length;
+
+      if (totalBytes > maxBytes) {
+        throw new Error(`Request body too large. Max ${maxBytes} bytes.`);
+      }
+
+      chunks.push(chunkBuffer);
+    }
+
+    return Buffer.concat(chunks);
   }
 
   private applyCorsHeaders(request: IncomingMessage, response: ServerResponse, methods: string): void {
@@ -1943,6 +2101,60 @@ function resolveProdDaemonPid(repoRoot: string): number | null {
 function getProdDaemonPidFile(repoRoot: string): string {
   const repoHash = createHash("sha1").update(repoRoot).digest("hex").slice(0, 10);
   return join(tmpdir(), `swarm-prod-daemon-${repoHash}.pid`);
+}
+
+async function parseMultipartFormData(rawBody: Buffer, contentType: string): Promise<FormData> {
+  const request = new Request("http://127.0.0.1/api/transcribe", {
+    method: "POST",
+    headers: {
+      "content-type": contentType
+    },
+    body: rawBody
+  });
+
+  try {
+    return await request.formData();
+  } catch {
+    throw new Error("Request body must be valid multipart form data");
+  }
+}
+
+function resolveUploadFileName(file: File): string {
+  const trimmed = file.name.trim();
+  return trimmed.length > 0 ? trimmed : "voice-input.webm";
+}
+
+function normalizeMimeType(value: string): string {
+  return value.split(";")[0]?.trim().toLowerCase() ?? "";
+}
+
+function extractAuthCredentialToken(credential: AuthCredential | undefined): string | undefined {
+  if (!credential || typeof credential !== "object") {
+    return undefined;
+  }
+
+  if (credential.type === "api_key") {
+    const apiKey = normalizeAuthToken((credential as { key?: unknown }).key);
+    if (apiKey) {
+      return apiKey;
+    }
+  }
+
+  const accessToken = normalizeAuthToken((credential as { access?: unknown }).access);
+  if (accessToken) {
+    return accessToken;
+  }
+
+  return undefined;
+}
+
+function normalizeAuthToken(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function parseOptionalBoolean(value: string | null): boolean | undefined {

@@ -666,6 +666,7 @@ export function IndexPage() {
                   disabled={!state.connected || !activeAgentId}
                   allowWhileLoading
                   agentLabel={activeAgentLabel}
+                  wsUrl={wsUrl}
                 />
               </>
             )}
