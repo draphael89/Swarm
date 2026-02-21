@@ -126,60 +126,51 @@ function getModelLabel(agent: AgentDescriptor, preset: ManagerModelPreset | unde
   return agent.model.modelId
 }
 
-function StreamingWorkersBadge({
-  count,
-  isSelected,
-}: {
-  count: number
-  isSelected: boolean
-}) {
-  if (count === 0) return null
-
-  return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span
-            className="relative ml-auto inline-flex size-5 shrink-0 items-center justify-center"
-            aria-label={`${count} active worker${count !== 1 ? 's' : ''}`}
-          >
-            {/* Spinning ring */}
-            <span
-              className={cn(
-                'absolute inset-0 animate-spin rounded-full border-[1.5px] border-transparent',
-                isSelected
-                  ? 'border-t-sidebar-accent-foreground/70'
-                  : 'border-t-primary/70',
-              )}
-              style={{ animationDuration: '1s' }}
-              aria-hidden="true"
-            />
-            {/* Static count */}
-            <span
-              className={cn(
-                'relative text-[9px] font-semibold leading-none',
-                isSelected ? 'text-sidebar-accent-foreground' : 'text-primary',
-              )}
-            >
-              {count}
-            </span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="top" sideOffset={6} className="px-2 py-1 text-[10px]">
-          {count} worker{count !== 1 ? 's' : ''} active
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  )
-}
 
 function AgentActivitySlot({
   isActive,
   isSelected,
+  streamingWorkerCount,
 }: {
   isActive: boolean
   isSelected: boolean
+  streamingWorkerCount?: number
 }) {
+  // When collapsed with active workers, show CircleDashed spinner with count inside
+  if (streamingWorkerCount && streamingWorkerCount > 0) {
+    return (
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className="relative inline-flex size-4 shrink-0 items-center justify-center"
+              aria-label={`${streamingWorkerCount} active worker${streamingWorkerCount !== 1 ? 's' : ''}`}
+            >
+              <CircleDashed
+                className={cn(
+                  'absolute inset-0 size-4 animate-spin',
+                  isSelected ? 'text-sidebar-accent-foreground/80' : 'text-muted-foreground',
+                )}
+                aria-hidden="true"
+              />
+              <span
+                className={cn(
+                  'relative text-[8px] font-bold leading-none',
+                  isSelected ? 'text-sidebar-accent-foreground' : 'text-muted-foreground',
+                )}
+              >
+                {streamingWorkerCount}
+              </span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" sideOffset={6} className="px-2 py-1 text-[10px]">
+            {streamingWorkerCount} worker{streamingWorkerCount !== 1 ? 's' : ''} active
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    )
+  }
+
   if (!isActive) {
     return <span className="inline-block size-3 shrink-0" aria-hidden="true" />
   }
@@ -203,6 +194,7 @@ function AgentRow({
   onDelete,
   className,
   nameClassName,
+  streamingWorkerCount,
 }: {
   agent: AgentDescriptor
   liveStatus: AgentLiveStatus
@@ -211,6 +203,7 @@ function AgentRow({
   onDelete: () => void
   className: string
   nameClassName?: string
+  streamingWorkerCount?: number
 }) {
   const title = agent.displayName || agent.agentId
   const isActive = liveStatus.status === 'streaming'
@@ -236,7 +229,7 @@ function AgentRow({
             className="flex min-w-0 flex-1 items-center gap-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
             title={title}
           >
-            <AgentActivitySlot isActive={isActive} isSelected={isSelected} />
+            <AgentActivitySlot isActive={isActive} isSelected={isSelected} streamingWorkerCount={streamingWorkerCount} />
             <span className={cn('min-w-0 flex-1 truncate text-sm leading-5', nameClassName)}>{title}</span>
 
             <TooltipProvider delayDuration={200}>
@@ -380,8 +373,8 @@ export function AgentSidebar({
                       onDelete={() => onDeleteManager(manager.agentId)}
                       nameClassName="font-semibold"
                       className="min-w-0 flex-1 py-1.5 pl-7 pr-1.5"
+                      streamingWorkerCount={managerIsCollapsed ? streamingWorkerCount : undefined}
                     />
-                    <StreamingWorkersBadge count={streamingWorkerCount} isSelected={managerIsSelected} />
 
                     <button
                       type="button"
