@@ -76,6 +76,7 @@ function renderSidebar({
   onDeleteManager = vi.fn(),
   onOpenSettings = vi.fn(),
   onReboot = vi.fn(),
+  isSettingsActive = false,
   statuses = {},
 }: {
   agents: AgentDescriptor[]
@@ -85,6 +86,7 @@ function renderSidebar({
   onDeleteManager?: (managerId: string) => void
   onOpenSettings?: () => void
   onReboot?: () => void
+  isSettingsActive?: boolean
   statuses?: Record<string, { status: AgentStatus; pendingCount: number }>
 }) {
   root = createRoot(container)
@@ -102,6 +104,7 @@ function renderSidebar({
         onDeleteManager,
         onOpenSettings,
         onReboot,
+        isSettingsActive,
       }),
     )
   })

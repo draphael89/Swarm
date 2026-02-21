@@ -10,6 +10,7 @@ interface AgentSidebarProps {
   agents: AgentDescriptor[]
   statuses: Record<string, { status: AgentStatus; pendingCount: number }>
   selectedAgentId: string | null
+  isSettingsActive: boolean
   onAddManager: () => void
   onSelectAgent: (agentId: string) => void
   onDeleteAgent: (agentId: string) => void
@@ -237,6 +238,7 @@ export function AgentSidebar({
   agents,
   statuses,
   selectedAgentId,
+  isSettingsActive,
   onAddManager,
   onSelectAgent,
   onDeleteAgent,
@@ -448,7 +450,13 @@ export function AgentSidebar({
           <button
             type="button"
             onClick={onOpenSettings}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+            className={cn(
+              'flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+              isSettingsActive
+                ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
+            )}
+            aria-pressed={isSettingsActive}
           >
             <Settings aria-hidden="true" className="size-4" />
             <span>Settings</span>

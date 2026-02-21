@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
+  ArrowLeft,
   Check,
   ExternalLink,
   Eye,
@@ -20,13 +21,6 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -178,13 +172,12 @@ interface TelegramDraft {
   allowBinary: boolean
 }
 
-interface SettingsDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+interface SettingsPanelProps {
   wsUrl: string
   managers: AgentDescriptor[]
   slackStatus?: SlackStatusEvent | null
   telegramStatus?: TelegramStatusEvent | null
+  onBack?: () => void
 }
 
 const SETTINGS_AUTH_PROVIDER_META: Record<
@@ -1305,17 +1298,16 @@ function EnvVariableRow({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Main dialog                                                       */
+/*  Main panel                                                        */
 /* ------------------------------------------------------------------ */
 
-export function SettingsDialog({
-  open,
-  onOpenChange,
+export function SettingsPanel({
   wsUrl,
   managers,
   slackStatus,
   telegramStatus,
-}: SettingsDialogProps) {
+  onBack,
+}: SettingsPanelProps) {
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => readStoredThemePreference())
   const [envVariables, setEnvVariables] = useState<SettingsEnvVariable[]>([])
   const [draftByName, setDraftByName] = useState<Record<string, string>>({})
@@ -1431,10 +1423,9 @@ export function SettingsDialog({
   }, [wsUrl])
 
   useEffect(() => {
-    if (!open) return
     setThemePreference(readStoredThemePreference())
     void Promise.all([loadVariables(), loadSlack(), loadTelegram(), loadAuth()])
-  }, [open, loadVariables, loadSlack, loadTelegram, loadAuth])
+  }, [loadVariables, loadSlack, loadTelegram, loadAuth])
 
   const abortAllOAuthLoginFlows = useCallback(() => {
     for (const provider of SETTINGS_AUTH_PROVIDER_ORDER) {
@@ -1451,38 +1442,6 @@ export function SettingsDialog({
       abortAllOAuthLoginFlows()
     }
   }, [abortAllOAuthLoginFlows])
-
-  const handleOpenChange = (next: boolean) => {
-    if (
-      !next &&
-      (savingAuthProvider ||
-        deletingAuthProvider ||
-        savingVar ||
-        deletingVar ||
-        isSavingSlack ||
-        isTestingSlack ||
-        isDisablingSlack ||
-        isSavingTelegram ||
-        isTestingTelegram ||
-        isDisablingTelegram)
-    ) {
-      return
-    }
-
-    if (!next) {
-      abortAllOAuthLoginFlows()
-      setOauthFlowByProvider({})
-      setAuthError(null)
-      setAuthSuccess(null)
-      setError(null)
-      setSuccess(null)
-      setSlackError(null)
-      setSlackSuccess(null)
-      setTelegramError(null)
-      setTelegramSuccess(null)
-    }
-    onOpenChange(next)
-  }
 
   const handleSave = async (variableName: string) => {
     const value = draftByName[variableName]?.trim() ?? ''
@@ -1917,17 +1876,32 @@ export function SettingsDialog({
   const totalCount = envVariables.length
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="flex max-h-[90vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[700px]">
-        <DialogHeader className="space-y-1 border-b border-border px-6 py-4">
-          <DialogTitle className="text-base">Settings</DialogTitle>
-          <DialogDescription>
-            Configure authentication, runtime integrations, and environment variables used by your agents.
-          </DialogDescription>
-        </DialogHeader>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
+      <header className="flex h-[62px] shrink-0 items-center border-b border-border/80 bg-card/80 px-4 backdrop-blur">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {onBack ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+              onClick={onBack}
+              aria-label="Back to chat"
+            >
+              <ArrowLeft className="size-4" />
+            </Button>
+          ) : null}
+          <div className="min-w-0">
+            <h1 className="truncate text-sm font-semibold text-foreground">Settings</h1>
+            <p className="truncate text-[11px] text-muted-foreground">
+              Configure authentication, integrations, and environment variables.
+            </p>
+          </div>
+        </div>
+      </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="space-y-6 px-6 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="space-y-6 px-6 py-4">
             <section className="space-y-3 rounded-lg border border-border bg-card/50 p-4">
               <div className="flex items-center gap-2">
                 <div className="flex size-7 items-center justify-center rounded-md bg-primary/10">
@@ -2775,16 +2749,15 @@ export function SettingsDialog({
                 </div>
               )}
             </section>
-          </div>
         </div>
+      </div>
 
-        <div className="border-t border-border px-6 py-3">
-          <p className="text-[11px] text-muted-foreground">
-            Values are stored locally in your swarm data directory and loaded by the daemon at runtime.
-          </p>
-        </div>
-      </DialogContent>
-    </Dialog>
+      <div className="border-t border-border px-6 py-3">
+        <p className="text-[11px] text-muted-foreground">
+          Values are stored locally in your swarm data directory and loaded by the daemon at runtime.
+        </p>
+      </div>
+    </div>
   )
 }
 
