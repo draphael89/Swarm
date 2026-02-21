@@ -143,19 +143,19 @@ function AgentActivitySlot({
         <Tooltip>
           <TooltipTrigger asChild>
             <span
-              className="relative inline-flex size-4 shrink-0 items-center justify-center"
+              className="relative inline-flex size-3.5 shrink-0 items-center justify-center"
               aria-label={`${streamingWorkerCount} active worker${streamingWorkerCount !== 1 ? 's' : ''}`}
             >
               <CircleDashed
                 className={cn(
-                  'absolute inset-0 size-4 animate-spin',
+                  'absolute inset-0 size-3.5 animate-spin',
                   isSelected ? 'text-sidebar-accent-foreground/80' : 'text-muted-foreground',
                 )}
                 aria-hidden="true"
               />
               <span
                 className={cn(
-                  'relative text-[8px] font-bold leading-none',
+                  'relative text-[7px] font-bold leading-none',
                   isSelected ? 'text-sidebar-accent-foreground' : 'text-muted-foreground',
                 )}
               >
@@ -172,13 +172,13 @@ function AgentActivitySlot({
   }
 
   if (!isActive) {
-    return <span className="inline-block size-3 shrink-0" aria-hidden="true" />
+    return <span className="inline-block size-3.5 shrink-0" aria-hidden="true" />
   }
 
   return (
     <CircleDashed
       className={cn(
-        'size-3 shrink-0 animate-spin',
+        'size-3.5 shrink-0 animate-spin',
         isSelected ? 'text-sidebar-accent-foreground/80' : 'text-muted-foreground',
       )}
       aria-label="Active"
