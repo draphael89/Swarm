@@ -17,7 +17,7 @@ If the request is ambiguous, ask a follow-up question before adding a schedule.
 ## Storage
 
 Schedules are stored at:
-- `${SWARM_DATA_DIR}/schedules.json`
+- `${SWARM_DATA_DIR}/schedules/<managerId>.json`
 
 ## Commands
 
@@ -25,6 +25,7 @@ Run the scheduler CLI from the repository root:
 
 ```bash
 node apps/backend/src/swarm/skills/builtins/cron-scheduling/schedule.js add \
+  --manager "manager" \
   --name "Daily standup reminder" \
   --cron "0 9 * * 1-5" \
   --message "Remind me about the daily standup" \
@@ -35,6 +36,7 @@ One-shot schedule (fires once at the next matching cron time):
 
 ```bash
 node apps/backend/src/swarm/skills/builtins/cron-scheduling/schedule.js add \
+  --manager "manager" \
   --name "One-time deployment check" \
   --cron "30 14 * * *" \
   --message "Check deployment status" \
@@ -45,13 +47,18 @@ node apps/backend/src/swarm/skills/builtins/cron-scheduling/schedule.js add \
 Remove a schedule:
 
 ```bash
-node apps/backend/src/swarm/skills/builtins/cron-scheduling/schedule.js remove --id "<schedule-id>"
+node apps/backend/src/swarm/skills/builtins/cron-scheduling/schedule.js remove \
+  --manager "manager" \
+  --id "<schedule-id>"
 ```
 
 List schedules:
 
 ```bash
-node apps/backend/src/swarm/skills/builtins/cron-scheduling/schedule.js list
+node apps/backend/src/swarm/skills/builtins/cron-scheduling/schedule.js list --manager "manager"
+
+`--manager` is optional. If omitted, the CLI will auto-select a manager when there is only one manager
+or when a known default manager is detected.
 ```
 
 ## Output
@@ -59,4 +66,3 @@ node apps/backend/src/swarm/skills/builtins/cron-scheduling/schedule.js list
 All commands return JSON:
 - Success: `{ "ok": true, ... }`
 - Failure: `{ "ok": false, "error": "..." }`
-

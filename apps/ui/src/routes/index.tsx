@@ -235,6 +235,17 @@ export function IndexPage() {
 
   const activeAgentLabel = activeAgent?.displayName ?? activeAgentId ?? 'No active agent'
   const isActiveManager = activeAgent?.role === 'manager'
+  const activeManagerId = useMemo(() => {
+    if (activeAgent?.role === 'manager') {
+      return activeAgent.agentId
+    }
+
+    if (activeAgent?.managerId) {
+      return activeAgent.managerId
+    }
+
+    return state.agents.find((agent) => agent.role === 'manager')?.agentId ?? DEFAULT_MANAGER_AGENT_ID
+  }, [activeAgent, state.agents])
 
   const activeAgentStatus = useMemo(() => {
     if (!activeAgentId) return null
@@ -675,6 +686,7 @@ export function IndexPage() {
           {activeView === 'chat' && (
             <ArtifactsSidebar
               wsUrl={wsUrl}
+              managerId={activeManagerId}
               artifacts={collectedArtifacts}
               isOpen={isArtifactsPanelOpen}
               onClose={() => setIsArtifactsPanelOpen(false)}

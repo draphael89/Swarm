@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 
 interface ArtifactsSidebarProps {
   wsUrl: string
+  managerId: string
   artifacts: ArtifactReference[]
   isOpen: boolean
   onClose: () => void
@@ -125,8 +126,13 @@ function resolveApiEndpoint(wsUrl: string, path: string): string {
   }
 }
 
-async function fetchSchedules(wsUrl: string, signal: AbortSignal): Promise<ScheduleRecord[]> {
-  const response = await fetch(resolveApiEndpoint(wsUrl, '/api/schedules'), { signal })
+function resolveManagerSchedulesEndpoint(wsUrl: string, managerId: string): string {
+  const normalizedManagerId = managerId.trim() || 'manager'
+  return resolveApiEndpoint(wsUrl, `/api/managers/${encodeURIComponent(normalizedManagerId)}/schedules`)
+}
+
+async function fetchSchedules(wsUrl: string, managerId: string, signal: AbortSignal): Promise<ScheduleRecord[]> {
+  const response = await fetch(resolveManagerSchedulesEndpoint(wsUrl, managerId), { signal })
   if (!response.ok) {
     throw new Error(`Unable to load schedules (${response.status})`)
   }
@@ -271,6 +277,7 @@ function isSidebarTab(value: string): value is SidebarTab {
 
 export function ArtifactsSidebar({
   wsUrl,
+  managerId,
   artifacts,
   isOpen,
   onClose,
@@ -302,7 +309,7 @@ export function ArtifactsSidebar({
     setIsLoadingSchedules(true)
     setSchedulesError(null)
 
-    void fetchSchedules(wsUrl, abortController.signal)
+    void fetchSchedules(wsUrl, managerId, abortController.signal)
       .then((nextSchedules) => {
         if (abortController.signal.aborted) return
         setSchedules(nextSchedules)
@@ -328,7 +335,7 @@ export function ArtifactsSidebar({
     return () => {
       abortController.abort()
     }
-  }, [activeTab, isOpen, wsUrl])
+  }, [activeTab, isOpen, managerId, wsUrl])
 
   return (
     <div

@@ -6,7 +6,13 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 
-const SCHEDULES_FILE_NAME = "schedules.json";
+const SCHEDULES_DIR_NAME = "schedules";
+const AGENTS_STORE_RELATIVE_PATH = "swarm/agents.json";
+const DEFAULT_MANAGER_CANDIDATES = [
+  process.env.SWARM_MANAGER_ID?.trim(),
+  "manager",
+  "opus-manager"
+].filter(Boolean);
 
 function resolvePathLike(rawPath) {
   if (rawPath === "~") {
@@ -38,8 +44,86 @@ function resolveDataDir() {
   return resolve(homedir(), ".swarm-dev");
 }
 
-function resolveSchedulesFilePath() {
-  return resolve(resolveDataDir(), SCHEDULES_FILE_NAME);
+function resolveSchedulesFilePath(dataDir, managerId) {
+  return resolve(dataDir, SCHEDULES_DIR_NAME, `${managerId}.json`);
+}
+
+function normalizeManagerId(rawValue) {
+  if (typeof rawValue !== "string") {
+    return null;
+  }
+
+  const trimmed = rawValue.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+async function loadManagerIdsFromAgentsStore(dataDir) {
+  const agentsStoreFile = resolve(dataDir, AGENTS_STORE_RELATIVE_PATH);
+
+  let raw;
+  try {
+    raw = await readFile(agentsStoreFile, "utf8");
+  } catch (error) {
+    if (isEnoentError(error)) {
+      return [];
+    }
+
+    throw error;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = {};
+  }
+
+  const managerIds = new Set();
+  const agents = Array.isArray(parsed?.agents) ? parsed.agents : [];
+  for (const agent of agents) {
+    if (!isObject(agent)) {
+      continue;
+    }
+
+    if (agent.role !== "manager") {
+      continue;
+    }
+
+    const managerId = normalizeManagerId(agent.agentId);
+    if (!managerId) {
+      continue;
+    }
+
+    managerIds.add(managerId);
+  }
+
+  return [...managerIds];
+}
+
+async function resolveManagerId(flags, dataDir) {
+  const explicitManagerId = normalizeManagerId(flags.get("manager"));
+  if (explicitManagerId) {
+    return explicitManagerId;
+  }
+
+  const managerIds = await loadManagerIdsFromAgentsStore(dataDir);
+  if (managerIds.length === 1) {
+    return managerIds[0];
+  }
+
+  for (const candidate of DEFAULT_MANAGER_CANDIDATES) {
+    if (candidate && managerIds.includes(candidate)) {
+      return candidate;
+    }
+  }
+
+  if (managerIds.length === 0) {
+    return DEFAULT_MANAGER_CANDIDATES[0] ?? "manager";
+  }
+
+  throw new Error(
+    `Unable to determine manager automatically. Pass --manager <id>. Available managers: ${managerIds.join(", ")}`
+  );
 }
 
 function toDate(value) {
@@ -189,14 +273,14 @@ function printUsage() {
     ok: false,
     error: "Usage: schedule.js <add|remove|list> [options]",
     commands: {
-      add: 'schedule.js add --name "..." --cron "..." --message "..." [--timezone "America/Los_Angeles"] [--one-shot]',
-      remove: 'schedule.js remove --id "..."',
-      list: "schedule.js list"
+      add: 'schedule.js add --name "..." --cron "..." --message "..." [--timezone "America/Los_Angeles"] [--one-shot] [--manager "<id>"]',
+      remove: 'schedule.js remove --id "..." [--manager "<id>"]',
+      list: 'schedule.js list [--manager "<id>"]'
     }
   });
 }
 
-async function handleAdd(flags, filePath) {
+async function handleAdd(flags, filePath, managerId) {
   const name = getRequiredFlag(flags, "name");
   const cron = getRequiredFlag(flags, "cron");
   const message = getRequiredFlag(flags, "message");
@@ -230,11 +314,12 @@ async function handleAdd(flags, filePath) {
     ok: true,
     action: "add",
     schedule,
+    managerId,
     filePath
   });
 }
 
-async function handleRemove(flags, filePath) {
+async function handleRemove(flags, filePath, managerId) {
   const id = getRequiredFlag(flags, "id");
   const store = await readSchedulesFile(filePath);
 
@@ -252,11 +337,12 @@ async function handleRemove(flags, filePath) {
     action: "remove",
     id,
     removed: true,
+    managerId,
     filePath
   });
 }
 
-async function handleList(filePath) {
+async function handleList(filePath, managerId) {
   const store = await readSchedulesFile(filePath);
 
   const schedules = [...store.schedules].sort((left, right) => {
@@ -270,6 +356,7 @@ async function handleList(filePath) {
     action: "list",
     count: schedules.length,
     schedules,
+    managerId,
     filePath
   });
 }
@@ -285,7 +372,6 @@ function isEnoentError(error) {
 
 async function main() {
   const { command, flags } = parseArgs(process.argv.slice(2));
-  const schedulesFilePath = resolveSchedulesFilePath();
 
   if (!command || command === "--help" || command === "-h") {
     printUsage();
@@ -293,15 +379,19 @@ async function main() {
     return;
   }
 
+  const dataDir = resolveDataDir();
+  const managerId = await resolveManagerId(flags, dataDir);
+  const schedulesFilePath = resolveSchedulesFilePath(dataDir, managerId);
+
   switch (command) {
     case "add":
-      await handleAdd(flags, schedulesFilePath);
+      await handleAdd(flags, schedulesFilePath, managerId);
       return;
     case "remove":
-      await handleRemove(flags, schedulesFilePath);
+      await handleRemove(flags, schedulesFilePath, managerId);
       return;
     case "list":
-      await handleList(schedulesFilePath);
+      await handleList(schedulesFilePath, managerId);
       return;
     default:
       throw new Error(`Unknown command: ${command}`);

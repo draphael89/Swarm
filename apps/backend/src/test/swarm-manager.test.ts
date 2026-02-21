@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { SessionManager } from '@mariozechner/pi-coding-agent'
+import { getScheduleFilePath } from '../scheduler/schedule-storage.js'
 import { SwarmManager } from '../swarm/swarm-manager.js'
 import type { AgentDescriptor, RequestedDeliveryMode, SendMessageReceipt, SwarmConfig } from '../swarm/types.js'
 import type { RuntimeUserMessage, SwarmAgentRuntime } from '../swarm/runtime-types.js'
@@ -144,7 +145,7 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
       repoMemorySkillFile,
       agentsStoreFile: join(swarmDir, 'agents.json'),
       secretsFile: join(dataDir, 'secrets.json'),
-      schedulesFile: join(dataDir, 'schedules.json'),
+      schedulesFile: getScheduleFilePath(dataDir, 'manager'),
     },
   }
 }
