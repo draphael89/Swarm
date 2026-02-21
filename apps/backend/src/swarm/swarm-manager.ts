@@ -93,11 +93,13 @@ const LEGACY_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
 const SWARM_CONTEXT_FILE_NAME = "SWARM.md";
 const REPO_BRAVE_SEARCH_SKILL_RELATIVE_PATH = ".swarm/skills/brave-search/SKILL.md";
 const REPO_CRON_SCHEDULING_SKILL_RELATIVE_PATH = ".swarm/skills/cron-scheduling/SKILL.md";
+const REPO_GSUITE_SKILL_RELATIVE_PATH = ".swarm/skills/gsuite/SKILL.md";
 const BUILT_IN_MEMORY_SKILL_RELATIVE_PATH = "apps/backend/src/swarm/skills/builtins/memory/SKILL.md";
 const BUILT_IN_BRAVE_SEARCH_SKILL_RELATIVE_PATH =
   "apps/backend/src/swarm/skills/builtins/brave-search/SKILL.md";
 const BUILT_IN_CRON_SCHEDULING_SKILL_RELATIVE_PATH =
   "apps/backend/src/swarm/skills/builtins/cron-scheduling/SKILL.md";
+const BUILT_IN_GSUITE_SKILL_RELATIVE_PATH = "apps/backend/src/swarm/skills/builtins/gsuite/SKILL.md";
 const SWARM_MANAGER_DIR = fileURLToPath(new URL(".", import.meta.url));
 const BACKEND_PACKAGE_DIR = resolve(SWARM_MANAGER_DIR, "..", "..");
 const BUILT_IN_MEMORY_SKILL_FALLBACK_PATH = resolve(
@@ -125,6 +127,15 @@ const BUILT_IN_CRON_SCHEDULING_SKILL_FALLBACK_PATH = resolve(
   "skills",
   "builtins",
   "cron-scheduling",
+  "SKILL.md"
+);
+const BUILT_IN_GSUITE_SKILL_FALLBACK_PATH = resolve(
+  BACKEND_PACKAGE_DIR,
+  "src",
+  "swarm",
+  "skills",
+  "builtins",
+  "gsuite",
   "SKILL.md"
 );
 const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
@@ -1632,6 +1643,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
   }
 
+  private resolveGsuiteSkillPath(): string {
+    return this.resolveBuiltInSkillPath({
+      skillName: "gsuite",
+      repoOverridePath: resolve(this.config.paths.rootDir, REPO_GSUITE_SKILL_RELATIVE_PATH),
+      repositoryRelativePath: BUILT_IN_GSUITE_SKILL_RELATIVE_PATH,
+      fallbackPath: BUILT_IN_GSUITE_SKILL_FALLBACK_PATH
+    });
+  }
+
   private async reloadSkillMetadata(): Promise<void> {
     const skillPaths = [
       {
@@ -1645,6 +1665,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       {
         fallbackSkillName: "cron-scheduling",
         path: this.resolveCronSchedulingSkillPath()
+      },
+      {
+        fallbackSkillName: "gsuite",
+        path: this.resolveGsuiteSkillPath()
       }
     ];
 

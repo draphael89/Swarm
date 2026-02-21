@@ -2,6 +2,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
 import { createConfig } from "./config.js";
+import { GsuiteIntegrationService } from "./integrations/gsuite/gsuite-integration.js";
 import { SlackIntegrationService } from "./integrations/slack/slack-integration.js";
 import { TelegramIntegrationService } from "./integrations/telegram/telegram-integration.js";
 import { CronSchedulerService } from "./scheduler/cron-scheduler-service.js";
@@ -39,13 +40,19 @@ async function main(): Promise<void> {
   });
   await telegramIntegration.start();
 
+  const gsuiteIntegration = new GsuiteIntegrationService({
+    dataDir: config.paths.dataDir
+  });
+  await gsuiteIntegration.start();
+
   const wsServer = new SwarmWebSocketServer({
     swarmManager,
     host: config.host,
     port: config.port,
     allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
     slackIntegration,
-    telegramIntegration
+    telegramIntegration,
+    gsuiteIntegration
   });
   await wsServer.start();
 
@@ -57,6 +64,7 @@ async function main(): Promise<void> {
       scheduler.stop(),
       slackIntegration.stop(),
       telegramIntegration.stop(),
+      gsuiteIntegration.stop(),
       wsServer.stop()
     ]);
     process.exit(0);
