@@ -152,7 +152,26 @@ export const MarkdownMessage = memo(function MarkdownMessage({
               )
             },
             li({ children }) {
-              return <li className="break-words [&>p]:mb-1.5 [&>p]:last:mb-0">{children}</li>
+              return <li className="break-words [&>p]:mb-1.5 [&>p]:last:mb-0 [&>input[type=checkbox]]:pointer-events-none [&>input[type=checkbox]]:mr-1.5 [&>input[type=checkbox]]:accent-primary [&>input[type=checkbox]]:opacity-80">{children}</li>
+            },
+            input(props) {
+              if (props.type === 'checkbox') {
+                return (
+                  <span
+                    className={cn(
+                      'mr-1.5 inline-flex size-3.5 shrink-0 items-center justify-center rounded-sm border text-[10px] leading-none align-middle',
+                      props.checked
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-muted-foreground/40 bg-background',
+                    )}
+                    aria-checked={!!props.checked}
+                    role="checkbox"
+                  >
+                    {props.checked ? '✓' : ''}
+                  </span>
+                )
+              }
+              return <input {...props} />
             },
             blockquote({ children }) {
               return (
