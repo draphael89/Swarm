@@ -3,6 +3,7 @@ import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
 import { THEME_INIT_SCRIPT, initializeThemePreference } from '@/lib/theme'
+import { IndexPage } from './index'
 
 import appCss from '../styles.css?url'
 
@@ -32,6 +33,7 @@ export const Route = createRootRoute({
       },
     ],
   }),
+  notFoundComponent: IndexPage,
   shellComponent: RootDocument,
 })
 

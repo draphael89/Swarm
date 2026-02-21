@@ -42,7 +42,61 @@ export const Route = createFileRoute('/')({
 
 const DEFAULT_MANAGER_MODEL: ManagerModelPreset = 'pi-codex'
 const DEFAULT_DEV_WS_URL = 'ws://127.0.0.1:47187'
+const DEFAULT_MANAGER_AGENT_ID = 'opus-manager'
 type ActiveView = 'chat' | 'settings'
+type AppRouteState =
+  | { view: 'chat'; agentId: string }
+  | { view: 'settings' }
+
+function decodePathSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment)
+  } catch {
+    return segment
+  }
+}
+
+function parseRouteStateFromPathname(pathname: string): AppRouteState {
+  const normalizedPath = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+
+  if (normalizedPath === '/settings') {
+    return { view: 'settings' }
+  }
+
+  const agentMatch = normalizedPath.match(/^\/agent\/([^/]+)$/)
+  if (agentMatch) {
+    return {
+      view: 'chat',
+      agentId: decodePathSegment(agentMatch[1]),
+    }
+  }
+
+  return {
+    view: 'chat',
+    agentId: DEFAULT_MANAGER_AGENT_ID,
+  }
+}
+
+function toRoutePathname(routeState: AppRouteState): string {
+  if (routeState.view === 'settings') {
+    return '/settings'
+  }
+
+  const agentId = routeState.agentId.trim() || DEFAULT_MANAGER_AGENT_ID
+  if (agentId === DEFAULT_MANAGER_AGENT_ID) {
+    return '/'
+  }
+
+  return `/agent/${encodeURIComponent(agentId)}`
+}
+
+function getInitialRouteState(): AppRouteState {
+  if (typeof window === 'undefined') {
+    return { view: 'chat', agentId: DEFAULT_MANAGER_AGENT_ID }
+  }
+
+  return parseRouteStateFromPathname(window.location.pathname)
+}
 
 function resolveDefaultWsUrl(): string {
   if (typeof window === 'undefined') {
@@ -90,7 +144,8 @@ export function IndexPage() {
   const [deleteManagerError, setDeleteManagerError] = useState<string | null>(null)
   const [isDeletingManager, setIsDeletingManager] = useState(false)
 
-  const [activeView, setActiveView] = useState<ActiveView>('chat')
+  const [routeState, setRouteState] = useState<AppRouteState>(() => getInitialRouteState())
+  const activeView: ActiveView = routeState.view
 
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactReference | null>(null)
@@ -156,6 +211,36 @@ export function IndexPage() {
   }, [channelView, state.messages])
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handlePopState = () => {
+      setRouteState(parseRouteStateFromPathname(window.location.pathname))
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => {
+      window.removeEventListener('popstate', handlePopState)
+    }
+  }, [])
+
+  const navigateToRoute = useCallback((nextRouteState: AppRouteState, replace = false) => {
+    const nextPathname = toRoutePathname(nextRouteState)
+    const normalizedRouteState = parseRouteStateFromPathname(nextPathname)
+
+    setRouteState(normalizedRouteState)
+
+    if (typeof window === 'undefined') return
+    if (window.location.pathname === nextPathname) return
+
+    if (replace) {
+      window.history.replaceState({}, '', nextPathname)
+      return
+    }
+
+    window.history.pushState({}, '', nextPathname)
+  }, [])
+
+  useEffect(() => {
     setActiveArtifact(null)
   }, [activeAgentId])
 
@@ -164,6 +249,32 @@ export function IndexPage() {
     dragDepthRef.current = 0
     setIsDraggingFiles(false)
   }, [activeView])
+
+  useEffect(() => {
+    if (routeState.view !== 'chat') return
+
+    const currentAgentId = state.targetAgentId ?? state.subscribedAgentId
+    if (currentAgentId === routeState.agentId) return
+
+    if (state.agents.some((agent) => agent.agentId === routeState.agentId)) {
+      clientRef.current?.subscribeToAgent(routeState.agentId)
+      return
+    }
+
+    if (state.agents.length === 0) return
+
+    const fallbackAgentId = chooseFallbackAgentId(state.agents)
+    if (!fallbackAgentId || fallbackAgentId === currentAgentId) return
+
+    clientRef.current?.subscribeToAgent(fallbackAgentId)
+    navigateToRoute({ view: 'chat', agentId: fallbackAgentId }, true)
+  }, [
+    navigateToRoute,
+    routeState,
+    state.agents,
+    state.subscribedAgentId,
+    state.targetAgentId,
+  ])
 
   const handleCompactManager = useCallback(
     async (customInstructions?: string) => {
@@ -214,7 +325,7 @@ export function IndexPage() {
   }
 
   const handleSelectAgent = (agentId: string) => {
-    setActiveView('chat')
+    navigateToRoute({ view: 'chat', agentId })
     clientRef.current?.subscribeToAgent(agentId)
   }
 
@@ -226,6 +337,7 @@ export function IndexPage() {
       const remainingAgents = state.agents.filter((entry) => entry.agentId !== agentId)
       const fallbackAgentId = chooseFallbackAgentId(remainingAgents)
       if (fallbackAgentId) {
+        navigateToRoute({ view: 'chat', agentId: fallbackAgentId })
         clientRef.current?.subscribeToAgent(fallbackAgentId)
       }
     }
@@ -243,7 +355,7 @@ export function IndexPage() {
   }, [wsUrl])
 
   const handleOpenSettingsPanel = () => {
-    setActiveView('settings')
+    navigateToRoute({ view: 'settings' })
   }
 
   const handleRequestDeleteManager = (managerId: string) => {
@@ -270,6 +382,7 @@ export function IndexPage() {
         )
         const fallbackAgentId = chooseFallbackAgentId(remainingAgents)
         if (fallbackAgentId) {
+          navigateToRoute({ view: 'chat', agentId: fallbackAgentId })
           clientRef.current.subscribeToAgent(fallbackAgentId)
         }
       }
@@ -357,6 +470,7 @@ export function IndexPage() {
         model: newManagerModel,
       })
 
+      navigateToRoute({ view: 'chat', agentId: manager.agentId })
       client.subscribeToAgent(manager.agentId)
       setIsCreateManagerDialogOpen(false)
       setNewManagerName('')
@@ -458,7 +572,12 @@ export function IndexPage() {
               managers={state.agents.filter((agent) => agent.role === 'manager')}
               slackStatus={state.slackStatus}
               telegramStatus={state.telegramStatus}
-              onBack={() => setActiveView('chat')}
+              onBack={() =>
+                navigateToRoute({
+                  view: 'chat',
+                  agentId: activeAgentId ?? DEFAULT_MANAGER_AGENT_ID,
+                })
+              }
             />
           ) : (
             <>
