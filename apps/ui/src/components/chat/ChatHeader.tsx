@@ -1,5 +1,6 @@
 import { Loader2, Minimize2, PanelRight, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { ContextWindowIndicator } from '@/components/chat/ContextWindowIndicator'
 import { cn } from '@/lib/utils'
 import type { AgentStatus } from '@/lib/ws-types'
 
@@ -12,6 +13,7 @@ interface ChatHeaderProps {
   activeAgentStatus: AgentStatus | null
   channelView: ChannelView
   onChannelViewChange: (view: ChannelView) => void
+  contextWindowUsage: { usedTokens: number; contextWindow: number } | null
   showCompact: boolean
   compactInProgress: boolean
   onCompact: () => void
@@ -69,6 +71,7 @@ export function ChatHeader({
   activeAgentStatus,
   channelView,
   onChannelViewChange,
+  contextWindowUsage,
   showCompact,
   compactInProgress,
   onCompact,
@@ -132,6 +135,13 @@ export function ChatHeader({
             onClick={() => onChannelViewChange('all')}
           />
         </div>
+
+        {contextWindowUsage ? (
+          <ContextWindowIndicator
+            usedTokens={contextWindowUsage.usedTokens}
+            contextWindow={contextWindowUsage.contextWindow}
+          />
+        ) : null}
 
         {showCompact ? (
           <Button

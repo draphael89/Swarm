@@ -35,6 +35,7 @@ import {
   MANAGER_MODEL_PRESETS,
   type AgentDescriptor,
   type ConversationAttachment,
+  type ConversationEntry,
   type ManagerModelPreset,
 } from '@/lib/ws-types'
 
@@ -45,6 +46,14 @@ export const Route = createFileRoute('/')({
 const DEFAULT_MANAGER_MODEL: ManagerModelPreset = 'pi-codex'
 const DEFAULT_DEV_WS_URL = 'ws://127.0.0.1:47187'
 const DEFAULT_MANAGER_AGENT_ID = 'opus-manager'
+const CHARS_PER_TOKEN_ESTIMATE = 4
+const OPUS_MODEL_ID_ALIASES = new Set(['claude-opus-4-6', 'claude-opus-4.6'])
+const CODEX_APP_MODEL_ID_ALIASES = new Set(['default', 'codex-app', 'codex-app-server'])
+const CONTEXT_WINDOW_BY_PRESET: Record<ManagerModelPreset, number> = {
+  'pi-opus': 200_000,
+  'pi-codex': 1_048_576,
+  'codex-app': 1_048_576,
+}
 type ActiveView = 'chat' | 'settings'
 type AppRouteState =
   | { view: 'chat'; agentId: string }
@@ -157,6 +166,51 @@ function resolveDefaultWsUrl(): string {
   return `${protocol}//${hostname}:${wsPort}`
 }
 
+function inferModelPreset(agent: AgentDescriptor): ManagerModelPreset | undefined {
+  const provider = agent.model.provider.trim().toLowerCase()
+  const modelId = agent.model.modelId.trim().toLowerCase()
+
+  if (provider === 'openai-codex' && modelId === 'gpt-5.3-codex') {
+    return 'pi-codex'
+  }
+
+  if (provider === 'anthropic' && OPUS_MODEL_ID_ALIASES.has(modelId)) {
+    return 'pi-opus'
+  }
+
+  if (provider === 'openai-codex-app-server' && CODEX_APP_MODEL_ID_ALIASES.has(modelId)) {
+    return 'codex-app'
+  }
+
+  return undefined
+}
+
+function contextWindowForAgent(agent: AgentDescriptor | null): number | null {
+  if (!agent) return null
+  const modelPreset = inferModelPreset(agent)
+  return modelPreset ? CONTEXT_WINDOW_BY_PRESET[modelPreset] : null
+}
+
+function estimateUsedTokens(messages: ConversationEntry[]): number {
+  let totalChars = 0
+
+  for (const entry of messages) {
+    if (entry.type !== 'conversation_message') {
+      continue
+    }
+
+    totalChars += entry.text.length
+
+    for (const attachment of entry.attachments ?? []) {
+      if (attachment.type === 'text') {
+        totalChars += attachment.text.length
+      }
+    }
+  }
+
+  return Math.ceil(totalChars / CHARS_PER_TOKEN_ESTIMATE)
+}
+
 export function IndexPage() {
   const wsUrl = import.meta.env.VITE_SWARM_WS_URL ?? resolveDefaultWsUrl()
   const clientRef = useRef<ManagerWsClient | null>(null)
@@ -255,6 +309,13 @@ export function IndexPage() {
 
     return state.agents.find((agent) => agent.agentId === activeAgentId)?.status ?? null
   }, [activeAgentId, state.agents, state.statuses])
+
+  const contextWindow = useMemo(() => contextWindowForAgent(activeAgent), [activeAgent])
+  const usedTokens = useMemo(() => estimateUsedTokens(state.messages), [state.messages])
+  const contextWindowUsage = useMemo(
+    () => (contextWindow ? { usedTokens, contextWindow } : null),
+    [contextWindow, usedTokens],
+  )
 
   const isLoading = activeAgentStatus === 'streaming'
 
@@ -648,6 +709,7 @@ export function IndexPage() {
                   activeAgentStatus={activeAgentStatus}
                   channelView={channelView}
                   onChannelViewChange={setChannelView}
+                  contextWindowUsage={contextWindowUsage}
                   showCompact={isActiveManager}
                   compactInProgress={isCompactingManager}
                   onCompact={() => void handleCompactManager()}
