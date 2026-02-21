@@ -1,6 +1,7 @@
 import { dirname, isAbsolute, resolve } from "node:path";
 import { homedir } from "node:os";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { getScheduleFilePath } from "./scheduler/schedule-storage.js";
 import { normalizeAllowlistRoots } from "./swarm/cwd-policy.js";
 import type { SwarmConfig } from "./swarm/types.js";
 
@@ -52,13 +53,14 @@ export function createConfig(): SwarmConfig {
     resolve(homedir(), "worktrees"),
     ...configuredAllowlistRoots
   ]);
+  const managerId = "manager";
 
   return {
     host: process.env.SWARM_HOST ?? "127.0.0.1",
     port: Number.parseInt(process.env.SWARM_PORT ?? "47187", 10),
     debug,
     allowNonManagerSubscriptions,
-    managerId: "manager",
+    managerId,
     managerDisplayName: "Manager",
     defaultModel: {
       provider: process.env.SWARM_MODEL_PROVIDER ?? "openai-codex",
@@ -81,7 +83,7 @@ export function createConfig(): SwarmConfig {
       repoMemorySkillFile,
       agentsStoreFile: resolve(swarmDir, "agents.json"),
       secretsFile,
-      schedulesFile: resolve(dataDir, "schedules.json")
+      schedulesFile: getScheduleFilePath(dataDir, managerId)
     }
   };
 }

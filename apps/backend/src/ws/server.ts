@@ -16,6 +16,7 @@ import { WebSocketServer, type RawData, WebSocket } from "ws";
 import type { GsuiteIntegrationService } from "../integrations/gsuite/gsuite-integration.js";
 import type { IntegrationRegistryService } from "../integrations/registry.js";
 import type { ClientCommand, ServerEvent } from "../protocol/ws-types.js";
+import { getScheduleFilePath } from "../scheduler/schedule-storage.js";
 import {
   isPathWithinRoots,
   normalizeAllowlistRoots,
@@ -28,6 +29,7 @@ const REBOOT_ENDPOINT_PATH = "/api/reboot";
 const READ_FILE_ENDPOINT_PATH = "/api/read-file";
 const TRANSCRIBE_ENDPOINT_PATH = "/api/transcribe";
 const SCHEDULES_ENDPOINT_PATH = "/api/schedules";
+const MANAGER_SCHEDULES_ENDPOINT_PATTERN = /^\/api\/managers\/([^/]+)\/schedules$/;
 const AGENT_COMPACT_ENDPOINT_PATTERN = /^\/api\/agents\/([^/]+)\/compact$/;
 const SETTINGS_ENV_ENDPOINT_PATH = "/api/settings/env";
 const SETTINGS_AUTH_ENDPOINT_PATH = "/api/settings/auth";
@@ -292,8 +294,12 @@ export class SwarmWebSocketServer {
         return;
       }
 
-      if (requestUrl.pathname === SCHEDULES_ENDPOINT_PATH) {
-        await this.handleSchedulesHttpRequest(request, response);
+      const schedulesRoute = resolveSchedulesRoute(
+        requestUrl.pathname,
+        this.swarmManager.getConfig().managerId
+      );
+      if (schedulesRoute) {
+        await this.handleSchedulesHttpRequest(request, response, schedulesRoute);
         return;
       }
 
@@ -369,7 +375,7 @@ export class SwarmWebSocketServer {
         this.applyCorsHeaders(request, response, READ_FILE_METHODS);
       } else if (requestUrl.pathname === TRANSCRIBE_ENDPOINT_PATH) {
         this.applyCorsHeaders(request, response, TRANSCRIBE_METHODS);
-      } else if (requestUrl.pathname === SCHEDULES_ENDPOINT_PATH) {
+      } else if (resolveSchedulesRoute(requestUrl.pathname, this.swarmManager.getConfig().managerId)) {
         this.applyCorsHeaders(request, response, "GET, OPTIONS");
       } else if (AGENT_COMPACT_ENDPOINT_PATTERN.test(requestUrl.pathname)) {
         this.applyCorsHeaders(request, response, "POST, OPTIONS");
@@ -665,7 +671,8 @@ export class SwarmWebSocketServer {
 
   private async handleSchedulesHttpRequest(
     request: IncomingMessage,
-    response: ServerResponse
+    response: ServerResponse,
+    route: SchedulesRoute
   ): Promise<void> {
     const methods = "GET, OPTIONS";
 
@@ -685,8 +692,13 @@ export class SwarmWebSocketServer {
 
     this.applyCorsHeaders(request, response, methods);
 
+    if (route.scope === "manager" && !this.isManagerAgent(route.managerId)) {
+      this.sendJson(response, 404, { error: `Unknown manager: ${route.managerId}` });
+      return;
+    }
+
     try {
-      const schedulesFile = this.swarmManager.getConfig().paths.schedulesFile;
+      const schedulesFile = getScheduleFilePath(this.swarmManager.getConfig().paths.dataDir, route.managerId);
       const raw = await readFile(schedulesFile, "utf8");
       const parsed = JSON.parse(raw) as { schedules?: unknown };
 
@@ -2493,6 +2505,11 @@ type SlackIntegrationRoute = {
   action: "config" | "test" | "channels";
 };
 
+type SchedulesRoute = {
+  managerId: string;
+  scope: "legacy" | "manager";
+};
+
 type TelegramIntegrationRoute = {
   managerId: string;
   action: "config" | "test";
@@ -2504,6 +2521,24 @@ function isSlackIntegrationPath(pathname: string): boolean {
 
 function isTelegramIntegrationPath(pathname: string): boolean {
   return resolveTelegramIntegrationRoute(pathname, "manager") !== null;
+}
+
+function resolveSchedulesRoute(pathname: string, defaultManagerId: string): SchedulesRoute | null {
+  if (pathname === SCHEDULES_ENDPOINT_PATH) {
+    return { managerId: defaultManagerId, scope: "legacy" };
+  }
+
+  const managerMatch = pathname.match(MANAGER_SCHEDULES_ENDPOINT_PATTERN);
+  if (!managerMatch) {
+    return null;
+  }
+
+  const managerId = decodePathSegment(managerMatch[1]);
+  if (!managerId) {
+    return null;
+  }
+
+  return { managerId, scope: "manager" };
 }
 
 function resolveSlackIntegrationRoute(

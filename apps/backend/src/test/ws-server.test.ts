@@ -3,13 +3,14 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { once } from 'node:events'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import WebSocket from 'ws'
 import { describe, expect, it, vi } from 'vitest'
 import { SessionManager } from '@mariozechner/pi-coding-agent'
 import { SwarmManager } from '../swarm/swarm-manager.js'
 import type { AgentDescriptor, RequestedDeliveryMode, SendMessageReceipt, SwarmConfig } from '../swarm/types.js'
 import type { SwarmAgentRuntime } from '../swarm/runtime-types.js'
+import { getScheduleFilePath } from '../scheduler/schedule-storage.js'
 import { SwarmWebSocketServer } from '../ws/server.js'
 import type { ServerEvent } from '../protocol/ws-types.js'
 
@@ -151,7 +152,7 @@ async function makeTempConfig(port: number, allowNonManagerSubscriptions = false
       repoMemorySkillFile,
       agentsStoreFile: join(swarmDir, 'agents.json'),
       secretsFile: join(dataDir, 'secrets.json'),
-      schedulesFile: join(dataDir, 'schedules.json'),
+      schedulesFile: getScheduleFilePath(dataDir, 'manager'),
     },
   }
 }
@@ -428,6 +429,7 @@ describe('SwarmWebSocketServer', () => {
     })
 
     await server.start()
+    await mkdir(dirname(config.paths.schedulesFile), { recursive: true })
 
     await writeFile(
       config.paths.schedulesFile,
@@ -490,7 +492,114 @@ describe('SwarmWebSocketServer', () => {
     }
   })
 
-  it('returns an empty schedule list when schedules.json is missing', async () => {
+  it('returns manager-scoped schedules through GET /api/managers/:managerId/schedules', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+    const secondaryManager = await manager.createManager('manager', {
+      name: 'release-manager',
+      cwd: config.paths.rootDir,
+    })
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+    const secondaryManagerScheduleFile = getScheduleFilePath(config.paths.dataDir, secondaryManager.agentId)
+    await mkdir(dirname(secondaryManagerScheduleFile), { recursive: true })
+
+    await writeFile(
+      secondaryManagerScheduleFile,
+      JSON.stringify(
+        {
+          schedules: [
+            {
+              id: 'weekly-check',
+              name: 'Weekly release check',
+              cron: '0 10 * * 1',
+              message: 'Review release readiness.',
+              oneShot: false,
+              timezone: 'America/Los_Angeles',
+              createdAt: '2026-02-20T08:00:00.000Z',
+              nextFireAt: '2026-02-23T18:00:00.000Z',
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+
+    try {
+      const response = await fetch(
+        `http://${config.host}:${config.port}/api/managers/${encodeURIComponent(secondaryManager.agentId)}/schedules`,
+      )
+      expect(response.status).toBe(200)
+
+      const payload = (await response.json()) as {
+        schedules: Array<{
+          id: string
+          name: string
+          cron: string
+          message: string
+          oneShot: boolean
+          timezone: string
+          createdAt: string
+          nextFireAt: string
+        }>
+      }
+
+      expect(payload.schedules).toEqual([
+        {
+          id: 'weekly-check',
+          name: 'Weekly release check',
+          cron: '0 10 * * 1',
+          message: 'Review release readiness.',
+          oneShot: false,
+          timezone: 'America/Los_Angeles',
+          createdAt: '2026-02-20T08:00:00.000Z',
+          nextFireAt: '2026-02-23T18:00:00.000Z',
+        },
+      ])
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('returns 404 for unknown manager schedule routes', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    try {
+      const response = await fetch(
+        `http://${config.host}:${config.port}/api/managers/unknown-manager/schedules`,
+      )
+      expect(response.status).toBe(404)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('returns an empty schedule list when the manager schedule file is missing', async () => {
     const port = await getAvailablePort()
     const config = await makeTempConfig(port)
 
