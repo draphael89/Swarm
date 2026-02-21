@@ -666,6 +666,7 @@ export function IndexPage() {
                 <MessageList
                   messages={visibleMessages}
                   isLoading={isLoading}
+                  activeAgentId={activeAgentId}
                   onSuggestionClick={handleSuggestionClick}
                   onArtifactClick={handleOpenArtifact}
                 />

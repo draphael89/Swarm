@@ -27,6 +27,7 @@ import { MarkdownMessage } from './MarkdownMessage'
 interface MessageListProps {
   messages: ConversationEntry[]
   isLoading: boolean
+  activeAgentId?: string | null
   onSuggestionClick?: (suggestion: string) => void
   onArtifactClick?: (artifact: ArtifactReference) => void
 }
@@ -734,14 +735,47 @@ function EmptyState({ onSuggestionClick }: { onSuggestionClick?: (suggestion: st
   )
 }
 
-export function MessageList({ messages, isLoading, onSuggestionClick, onArtifactClick }: MessageListProps) {
+export function MessageList({
+  messages,
+  isLoading,
+  activeAgentId,
+  onSuggestionClick,
+  onArtifactClick,
+}: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const previousAgentIdRef = useRef<string | null>(null)
+  const previousFirstEntryIdRef = useRef<string | null>(null)
+  const previousEntryCountRef = useRef(0)
+  const hasScrolledRef = useRef(false)
 
   const displayEntries = useMemo(() => buildDisplayEntries(messages), [messages])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [displayEntries, isLoading])
+    const nextAgentId = activeAgentId ?? null
+    const nextFirstEntryId = displayEntries[0]?.id ?? null
+    const nextEntryCount = displayEntries.length
+
+    const isInitialScroll = !hasScrolledRef.current
+    const didAgentChange = previousAgentIdRef.current !== nextAgentId
+    const didConversationReset =
+      previousEntryCountRef.current > 0 &&
+      (nextEntryCount === 0 ||
+        previousFirstEntryIdRef.current !== nextFirstEntryId ||
+        nextEntryCount < previousEntryCountRef.current)
+    const didInitialConversationLoad = previousEntryCountRef.current === 0 && nextEntryCount > 0
+
+    const behavior =
+      isInitialScroll || didAgentChange || didConversationReset || didInitialConversationLoad
+        ? 'instant'
+        : 'smooth'
+
+    bottomRef.current?.scrollIntoView({ behavior, block: 'end' })
+
+    hasScrolledRef.current = true
+    previousAgentIdRef.current = nextAgentId
+    previousFirstEntryIdRef.current = nextFirstEntryId
+    previousEntryCountRef.current = nextEntryCount
+  }, [activeAgentId, displayEntries, isLoading])
 
   if (displayEntries.length === 0 && !isLoading) {
     return <EmptyState onSuggestionClick={onSuggestionClick} />
