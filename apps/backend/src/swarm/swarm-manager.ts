@@ -3005,7 +3005,8 @@ function normalizeMessageTargetContext(input: MessageTargetContext): MessageTarg
         : "web",
     channelId: normalizeOptionalMetadataValue(input.channelId),
     userId: normalizeOptionalMetadataValue(input.userId),
-    threadTs: normalizeOptionalMetadataValue(input.threadTs)
+    threadTs: normalizeOptionalMetadataValue(input.threadTs),
+    integrationProfileId: normalizeOptionalMetadataValue(input.integrationProfileId)
   };
 }
 
@@ -3019,6 +3020,7 @@ function normalizeMessageSourceContext(input: MessageSourceContext): MessageSour
     userId: normalizeOptionalMetadataValue(input.userId),
     messageId: normalizeOptionalMetadataValue(input.messageId),
     threadTs: normalizeOptionalMetadataValue(input.threadTs),
+    integrationProfileId: normalizeOptionalMetadataValue(input.integrationProfileId),
     channelType:
       input.channelType === "dm" ||
       input.channelType === "channel" ||
@@ -3105,6 +3107,10 @@ function isMessageSourceContext(value: unknown): value is MessageSourceContext {
   }
 
   if (maybe.threadTs !== undefined && typeof maybe.threadTs !== "string") {
+    return false;
+  }
+
+  if (maybe.integrationProfileId !== undefined && typeof maybe.integrationProfileId !== "string") {
     return false;
   }
 

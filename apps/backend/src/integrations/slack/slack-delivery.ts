@@ -8,7 +8,9 @@ const SLACK_MESSAGE_LIMIT = 4096;
 
 export class SlackDeliveryBridge {
   private readonly swarmManager: SwarmManager;
+  private readonly managerId: string;
   private readonly getConfig: () => SlackIntegrationConfig;
+  private readonly getProfileId: () => string;
   private readonly getSlackClient: () => SlackWebApiClient | null;
   private readonly onError?: (message: string, error?: unknown) => void;
 
@@ -22,12 +24,16 @@ export class SlackDeliveryBridge {
 
   constructor(options: {
     swarmManager: SwarmManager;
+    managerId: string;
     getConfig: () => SlackIntegrationConfig;
+    getProfileId: () => string;
     getSlackClient: () => SlackWebApiClient | null;
     onError?: (message: string, error?: unknown) => void;
   }) {
     this.swarmManager = options.swarmManager;
+    this.managerId = options.managerId.trim() || this.swarmManager.getConfig().managerId;
     this.getConfig = options.getConfig;
+    this.getProfileId = options.getProfileId;
     this.getSlackClient = options.getSlackClient;
     this.onError = options.onError;
   }
@@ -54,7 +60,13 @@ export class SlackDeliveryBridge {
       return;
     }
 
-    if (event.agentId !== config.targetManagerId) {
+    if (event.agentId !== this.managerId) {
+      return;
+    }
+
+    const eventProfileId = normalizeOptionalString(event.sourceContext.integrationProfileId);
+    const profileId = normalizeOptionalString(this.getProfileId());
+    if (eventProfileId && profileId && eventProfileId !== profileId) {
       return;
     }
 

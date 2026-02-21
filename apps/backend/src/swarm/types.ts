@@ -44,11 +44,15 @@ export interface MessageSourceContext {
   userId?: string;
   messageId?: string;
   threadTs?: string;
+  integrationProfileId?: string;
   channelType?: "dm" | "channel" | "group" | "mpim";
   teamId?: string;
 }
 
-export type MessageTargetContext = Pick<MessageSourceContext, "channel" | "channelId" | "userId" | "threadTs">;
+export type MessageTargetContext = Pick<
+  MessageSourceContext,
+  "channel" | "channelId" | "userId" | "threadTs" | "integrationProfileId"
+>;
 
 export interface SendMessageReceipt {
   targetAgentId: string;

@@ -9,6 +9,8 @@ export type TelegramConnectionState =
 
 export interface TelegramStatusEvent {
   type: "telegram_status";
+  managerId?: string;
+  integrationProfileId?: string;
   state: TelegramConnectionState;
   enabled: boolean;
   updatedAt: string;
@@ -25,6 +27,8 @@ export class TelegramStatusTracker extends EventEmitter {
 
     this.snapshot = {
       type: "telegram_status",
+      managerId: initial?.managerId,
+      integrationProfileId: initial?.integrationProfileId,
       state: initial?.state ?? "disabled",
       enabled: initial?.enabled ?? false,
       updatedAt: new Date().toISOString(),
@@ -41,6 +45,8 @@ export class TelegramStatusTracker extends EventEmitter {
   update(next: {
     state?: TelegramConnectionState;
     enabled?: boolean;
+    managerId?: string;
+    integrationProfileId?: string;
     message?: string;
     botId?: string;
     botUsername?: string;
@@ -49,6 +55,11 @@ export class TelegramStatusTracker extends EventEmitter {
       ...this.snapshot,
       state: next.state ?? this.snapshot.state,
       enabled: next.enabled ?? this.snapshot.enabled,
+      managerId: "managerId" in next ? normalizeOptionalString(next.managerId) : this.snapshot.managerId,
+      integrationProfileId:
+        "integrationProfileId" in next
+          ? normalizeOptionalString(next.integrationProfileId)
+          : this.snapshot.integrationProfileId,
       message:
         next.message === undefined
           ? this.snapshot.message

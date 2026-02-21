@@ -7,6 +7,7 @@ import type {
 } from "./telegram-types.js";
 
 const INTEGRATIONS_DIR_NAME = "integrations";
+const INTEGRATIONS_MANAGERS_DIR_NAME = "managers";
 const TELEGRAM_CONFIG_FILE_NAME = "telegram.json";
 const DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MIN_FILE_BYTES = 1024;
@@ -16,16 +17,31 @@ const MAX_POLL_TIMEOUT_SECONDS = 60;
 const MIN_POLL_LIMIT = 1;
 const MAX_POLL_LIMIT = 100;
 
-export function getTelegramConfigPath(dataDir: string): string {
+export function getLegacyTelegramConfigPath(dataDir: string): string {
   return resolve(dataDir, INTEGRATIONS_DIR_NAME, TELEGRAM_CONFIG_FILE_NAME);
 }
 
-export function createDefaultTelegramConfig(defaultManagerId: string): TelegramIntegrationConfig {
+export function getTelegramConfigPath(dataDir: string, managerId: string): string {
+  return resolve(
+    dataDir,
+    INTEGRATIONS_DIR_NAME,
+    INTEGRATIONS_MANAGERS_DIR_NAME,
+    managerId,
+    TELEGRAM_CONFIG_FILE_NAME
+  );
+}
+
+export function buildTelegramProfileId(managerId: string): string {
+  const normalizedManagerId = normalizeManagerId(managerId);
+  return `telegram:${normalizedManagerId}`;
+}
+
+export function createDefaultTelegramConfig(managerId: string): TelegramIntegrationConfig {
   return {
+    profileId: buildTelegramProfileId(managerId),
     enabled: false,
     mode: "polling",
     botToken: "",
-    targetManagerId: defaultManagerId.trim() || "manager",
     allowedUserIds: [],
     polling: {
       timeoutSeconds: 25,
@@ -48,10 +64,10 @@ export function createDefaultTelegramConfig(defaultManagerId: string): TelegramI
 
 export async function loadTelegramConfig(options: {
   dataDir: string;
-  defaultManagerId: string;
+  managerId: string;
 }): Promise<TelegramIntegrationConfig> {
-  const defaults = createDefaultTelegramConfig(options.defaultManagerId);
-  const configPath = getTelegramConfigPath(options.dataDir);
+  const defaults = createDefaultTelegramConfig(options.managerId);
+  const configPath = getTelegramConfigPath(options.dataDir, options.managerId);
 
   try {
     const raw = await readFile(configPath, "utf8");
@@ -72,9 +88,10 @@ export async function loadTelegramConfig(options: {
 
 export async function saveTelegramConfig(options: {
   dataDir: string;
+  managerId: string;
   config: TelegramIntegrationConfig;
 }): Promise<void> {
-  const configPath = getTelegramConfigPath(options.dataDir);
+  const configPath = getTelegramConfigPath(options.dataDir, options.managerId);
   const tmpPath = `${configPath}.tmp`;
 
   await mkdir(dirname(configPath), { recursive: true });
@@ -84,8 +101,7 @@ export async function saveTelegramConfig(options: {
 
 export function mergeTelegramConfig(
   base: TelegramIntegrationConfig,
-  patch: unknown,
-  options?: { defaultManagerId?: string }
+  patch: unknown
 ): TelegramIntegrationConfig {
   const root = asRecord(patch);
   const polling = asRecord(root.polling);
@@ -93,13 +109,10 @@ export function mergeTelegramConfig(
   const attachments = asRecord(root.attachments);
 
   return {
+    profileId: normalizeProfileId(root.profileId, base.profileId),
     enabled: normalizeBoolean(root.enabled, base.enabled),
     mode: "polling",
     botToken: normalizeToken(root.botToken, base.botToken),
-    targetManagerId: normalizeString(
-      root.targetManagerId,
-      base.targetManagerId || options?.defaultManagerId || "manager"
-    ),
     allowedUserIds: normalizeStringArray(root.allowedUserIds, base.allowedUserIds),
     polling: {
       timeoutSeconds: normalizeInteger(
@@ -136,11 +149,11 @@ export function mergeTelegramConfig(
 
 export function maskTelegramConfig(config: TelegramIntegrationConfig): TelegramIntegrationConfigPublic {
   return {
+    profileId: config.profileId,
     enabled: config.enabled,
     mode: config.mode,
     botToken: config.botToken ? maskToken(config.botToken) : null,
     hasBotToken: config.botToken.trim().length > 0,
-    targetManagerId: config.targetManagerId,
     allowedUserIds: [...config.allowedUserIds],
     polling: {
       timeoutSeconds: config.polling.timeoutSeconds,
@@ -167,15 +180,6 @@ function normalizeParseMode(value: unknown, fallback: TelegramParseMode): Telegr
 
 function normalizeBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
-}
-
-function normalizeString(value: unknown, fallback: string): string {
-  if (typeof value !== "string") {
-    return fallback;
-  }
-
-  const trimmed = value.trim();
-  return trimmed || fallback;
 }
 
 function normalizeStringArray(value: unknown, fallback: string[]): string[] {
@@ -255,6 +259,15 @@ function normalizeToken(value: unknown, fallback: string): string {
   return trimmed;
 }
 
+function normalizeProfileId(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
 function maskToken(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -266,6 +279,11 @@ function maskToken(value: string): string {
   }
 
   return `${trimmed.slice(0, 5)}…${trimmed.slice(-3)}`;
+}
+
+function normalizeManagerId(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : "manager";
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

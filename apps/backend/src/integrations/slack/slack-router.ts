@@ -30,6 +30,8 @@ const DEDUPE_TTL_MS = 30 * 60 * 1000;
 
 export class SlackInboundRouter {
   private readonly swarmManager: SwarmManager;
+  private readonly managerId: string;
+  private readonly integrationProfileId: string;
   private readonly slackClient: SlackWebApiClient;
   private readonly getConfig: () => SlackIntegrationConfig;
   private readonly getBotUserId: () => string | undefined;
@@ -38,12 +40,16 @@ export class SlackInboundRouter {
 
   constructor(options: {
     swarmManager: SwarmManager;
+    managerId: string;
+    integrationProfileId: string;
     slackClient: SlackWebApiClient;
     getConfig: () => SlackIntegrationConfig;
     getBotUserId: () => string | undefined;
     onError?: (message: string, error?: unknown) => void;
   }) {
     this.swarmManager = options.swarmManager;
+    this.managerId = options.managerId.trim() || this.swarmManager.getConfig().managerId;
+    this.integrationProfileId = options.integrationProfileId.trim();
     this.slackClient = options.slackClient;
     this.getConfig = options.getConfig;
     this.getBotUserId = options.getBotUserId;
@@ -168,16 +174,14 @@ export class SlackInboundRouter {
       channelId: input.channel,
       userId: normalizeOptionalString(input.userId),
       threadTs: normalizeOptionalString(input.threadTs) ?? (shouldStartThread ? input.ts : undefined),
+      integrationProfileId: this.integrationProfileId,
       channelType: input.channelType,
       teamId: normalizeOptionalString(input.body.team_id)
     };
 
-    const targetManagerId =
-      normalizeOptionalString(config.targetManagerId) ?? this.swarmManager.getConfig().managerId;
-
     try {
       await this.swarmManager.handleUserMessage(normalizedText, {
-        targetAgentId: targetManagerId,
+        targetAgentId: this.managerId,
         attachments,
         sourceContext
       });

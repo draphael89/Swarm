@@ -13,6 +13,8 @@ const DEDUPE_TTL_MS = 30 * 60 * 1000;
 
 export class TelegramInboundRouter {
   private readonly swarmManager: SwarmManager;
+  private readonly managerId: string;
+  private readonly integrationProfileId: string;
   private readonly getConfig: () => TelegramIntegrationConfig;
   private readonly getBotId: () => string | undefined;
   private readonly onError?: (message: string, error?: unknown) => void;
@@ -20,11 +22,15 @@ export class TelegramInboundRouter {
 
   constructor(options: {
     swarmManager: SwarmManager;
+    managerId: string;
+    integrationProfileId: string;
     getConfig: () => TelegramIntegrationConfig;
     getBotId: () => string | undefined;
     onError?: (message: string, error?: unknown) => void;
   }) {
     this.swarmManager = options.swarmManager;
+    this.managerId = options.managerId.trim() || this.swarmManager.getConfig().managerId;
+    this.integrationProfileId = options.integrationProfileId.trim();
     this.getConfig = options.getConfig;
     this.getBotId = options.getBotId;
     this.onError = options.onError;
@@ -57,14 +63,12 @@ export class TelegramInboundRouter {
       return;
     }
 
-    const targetManagerId =
-      normalizeOptionalString(config.targetManagerId) ?? this.swarmManager.getConfig().managerId;
-
     const sourceContext: MessageSourceContext = {
       channel: "telegram",
       channelId: String(message.chat.id),
       userId: message.from ? String(message.from.id) : undefined,
       messageId: String(message.message_id),
+      integrationProfileId: this.integrationProfileId,
       threadTs:
         typeof message.message_thread_id === "number" && Number.isFinite(message.message_thread_id)
           ? String(message.message_thread_id)
@@ -74,7 +78,7 @@ export class TelegramInboundRouter {
 
     try {
       await this.swarmManager.handleUserMessage(text, {
-        targetAgentId: targetManagerId,
+        targetAgentId: this.managerId,
         attachments,
         sourceContext
       });

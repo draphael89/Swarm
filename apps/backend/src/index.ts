@@ -3,8 +3,7 @@ import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
 import { createConfig } from "./config.js";
 import { GsuiteIntegrationService } from "./integrations/gsuite/gsuite-integration.js";
-import { SlackIntegrationService } from "./integrations/slack/slack-integration.js";
-import { TelegramIntegrationService } from "./integrations/telegram/telegram-integration.js";
+import { IntegrationRegistryService } from "./integrations/registry.js";
 import { CronSchedulerService } from "./scheduler/cron-scheduler-service.js";
 import { SwarmManager } from "./swarm/swarm-manager.js";
 import { SwarmWebSocketServer } from "./ws/server.js";
@@ -26,19 +25,12 @@ async function main(): Promise<void> {
   });
   await scheduler.start();
 
-  const slackIntegration = new SlackIntegrationService({
+  const integrationRegistry = new IntegrationRegistryService({
     swarmManager,
     dataDir: config.paths.dataDir,
     defaultManagerId: config.managerId
   });
-  await slackIntegration.start();
-
-  const telegramIntegration = new TelegramIntegrationService({
-    swarmManager,
-    dataDir: config.paths.dataDir,
-    defaultManagerId: config.managerId
-  });
-  await telegramIntegration.start();
+  await integrationRegistry.start();
 
   const gsuiteIntegration = new GsuiteIntegrationService({
     dataDir: config.paths.dataDir
@@ -50,8 +42,7 @@ async function main(): Promise<void> {
     host: config.host,
     port: config.port,
     allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
-    slackIntegration,
-    telegramIntegration,
+    integrationRegistry,
     gsuiteIntegration
   });
   await wsServer.start();
@@ -62,8 +53,7 @@ async function main(): Promise<void> {
     console.log(`Received ${signal}. Shutting down...`);
     await Promise.allSettled([
       scheduler.stop(),
-      slackIntegration.stop(),
-      telegramIntegration.stop(),
+      integrationRegistry.stop(),
       gsuiteIntegration.stop(),
       wsServer.stop()
     ]);

@@ -8,7 +8,9 @@ const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 export class TelegramDeliveryBridge {
   private readonly swarmManager: SwarmManager;
+  private readonly managerId: string;
   private readonly getConfig: () => TelegramIntegrationConfig;
+  private readonly getProfileId: () => string;
   private readonly getTelegramClient: () => TelegramBotApiClient | null;
   private readonly onError?: (message: string, error?: unknown) => void;
 
@@ -22,12 +24,16 @@ export class TelegramDeliveryBridge {
 
   constructor(options: {
     swarmManager: SwarmManager;
+    managerId: string;
     getConfig: () => TelegramIntegrationConfig;
+    getProfileId: () => string;
     getTelegramClient: () => TelegramBotApiClient | null;
     onError?: (message: string, error?: unknown) => void;
   }) {
     this.swarmManager = options.swarmManager;
+    this.managerId = options.managerId.trim() || this.swarmManager.getConfig().managerId;
     this.getConfig = options.getConfig;
+    this.getProfileId = options.getProfileId;
     this.getTelegramClient = options.getTelegramClient;
     this.onError = options.onError;
   }
@@ -56,7 +62,13 @@ export class TelegramDeliveryBridge {
       return;
     }
 
-    if (event.agentId !== config.targetManagerId) {
+    if (event.agentId !== this.managerId) {
+      return;
+    }
+
+    const eventProfileId = normalizeOptionalString(event.sourceContext.integrationProfileId);
+    const profileId = normalizeOptionalString(this.getProfileId());
+    if (eventProfileId && profileId && eventProfileId !== profileId) {
       return;
     }
 
