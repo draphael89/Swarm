@@ -268,7 +268,7 @@ describe('SwarmManager', () => {
     expect(workerPrompt).toContain('Follow the memory skill workflow before editing MEMORY.md')
   })
 
-  it('auto-loads MEMORY.md context and wires built-in memory + brave-search + cron-scheduling skills', async () => {
+  it('auto-loads MEMORY.md context and wires built-in memory + brave-search + cron-scheduling + agent-browser skills', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
@@ -279,7 +279,7 @@ describe('SwarmManager', () => {
     const resources = await manager.getMemoryRuntimeResourcesForTest()
     expect(resources.memoryContextFile.path).toBe(config.paths.memoryFile)
     expect(resources.memoryContextFile.content).toBe(persistedMemory)
-    expect(resources.additionalSkillPaths).toHaveLength(3)
+    expect(resources.additionalSkillPaths).toHaveLength(4)
 
     const memorySkill = await readFile(resources.additionalSkillPaths[0], 'utf8')
     expect(memorySkill).toContain('name: memory')
@@ -292,6 +292,10 @@ describe('SwarmManager', () => {
     const cronSkill = await readFile(resources.additionalSkillPaths[2], 'utf8')
     expect(cronSkill).toContain('name: cron-scheduling')
     expect(cronSkill).toContain('schedule.js add')
+
+    const agentBrowserSkill = await readFile(resources.additionalSkillPaths[3], 'utf8')
+    expect(agentBrowserSkill).toContain('name: agent-browser')
+    expect(agentBrowserSkill).toContain('agent-browser snapshot -i --json')
   })
 
   it('loads skill env requirements and persists secrets to the settings store', async () => {
@@ -388,10 +392,11 @@ describe('SwarmManager', () => {
     await manager.boot()
 
     const resources = await manager.getMemoryRuntimeResourcesForTest()
-    expect(resources.additionalSkillPaths).toHaveLength(3)
+    expect(resources.additionalSkillPaths).toHaveLength(4)
     expect(resources.additionalSkillPaths[0]).toBe(config.paths.repoMemorySkillFile)
     expect(resources.additionalSkillPaths[1].endsWith(join('brave-search', 'SKILL.md'))).toBe(true)
     expect(resources.additionalSkillPaths[2].endsWith(join('cron-scheduling', 'SKILL.md'))).toBe(true)
+    expect(resources.additionalSkillPaths[3].endsWith(join('agent-browser', 'SKILL.md'))).toBe(true)
   })
 
   it('prefers repo brave-search skill override when present', async () => {
@@ -417,10 +422,11 @@ describe('SwarmManager', () => {
     await manager.boot()
 
     const resources = await manager.getMemoryRuntimeResourcesForTest()
-    expect(resources.additionalSkillPaths).toHaveLength(3)
+    expect(resources.additionalSkillPaths).toHaveLength(4)
     expect(resources.additionalSkillPaths[0].endsWith(join('memory', 'SKILL.md'))).toBe(true)
     expect(resources.additionalSkillPaths[1]).toBe(repoBraveSkillFile)
     expect(resources.additionalSkillPaths[2].endsWith(join('cron-scheduling', 'SKILL.md'))).toBe(true)
+    expect(resources.additionalSkillPaths[3].endsWith(join('agent-browser', 'SKILL.md'))).toBe(true)
   })
 
   it('uses repo manager archetype overrides on boot', async () => {
