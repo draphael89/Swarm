@@ -78,6 +78,7 @@ export interface SwarmPaths {
   repoMemorySkillFile: string;
   agentsStoreFile: string;
   secretsFile: string;
+  schedulesFile: string;
 }
 
 export interface SkillEnvRequirement {

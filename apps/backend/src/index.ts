@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
 import { createConfig } from "./config.js";
 import { SlackIntegrationService } from "./integrations/slack/slack-integration.js";
+import { CronSchedulerService } from "./scheduler/cron-scheduler-service.js";
 import { SwarmManager } from "./swarm/swarm-manager.js";
 import { SwarmWebSocketServer } from "./ws/server.js";
 
@@ -15,6 +16,13 @@ async function main(): Promise<void> {
 
   const swarmManager = new SwarmManager(config);
   await swarmManager.boot();
+
+  const scheduler = new CronSchedulerService({
+    swarmManager,
+    schedulesFile: config.paths.schedulesFile,
+    managerId: config.managerId
+  });
+  await scheduler.start();
 
   const slackIntegration = new SlackIntegrationService({
     swarmManager,
@@ -36,7 +44,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`Received ${signal}. Shutting down...`);
-    await Promise.allSettled([slackIntegration.stop(), wsServer.stop()]);
+    await Promise.allSettled([scheduler.stop(), slackIntegration.stop(), wsServer.stop()]);
     process.exit(0);
   };
 

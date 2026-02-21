@@ -139,6 +139,7 @@ async function makeTempConfig(port: number, allowNonManagerSubscriptions = false
       repoMemorySkillFile,
       agentsStoreFile: join(swarmDir, 'agents.json'),
       secretsFile: join(dataDir, 'secrets.json'),
+      schedulesFile: join(dataDir, 'schedules.json'),
     },
   }
 }
