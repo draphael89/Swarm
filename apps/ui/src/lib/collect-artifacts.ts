@@ -8,12 +8,13 @@ const MARKDOWN_LINK_HREF_PATTERN = /\]\(([^)]+)\)/g
 
 /**
  * Collect all unique artifact references from a list of conversation entries.
- * Deduplicates by normalized file path.
+ * Deduplicates by normalized file path and returns last-seen items first.
  */
 export function collectArtifactsFromMessages(messages: ConversationEntry[]): ArtifactReference[] {
   const seen = new Map<string, ArtifactReference>()
 
-  for (const message of messages) {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = messages[messageIndex]
     if (message.type !== 'conversation_message') continue
     if (message.role === 'user') continue
 

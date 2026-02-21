@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import {
   Code2,
   Database,
@@ -23,22 +22,6 @@ interface ArtifactsSidebarProps {
   onArtifactClick: (artifact: ArtifactReference) => void
 }
 
-interface GroupedArtifacts {
-  label: string
-  category: ArtifactCategory
-  items: ArtifactReference[]
-}
-
-const CATEGORY_ORDER: ArtifactCategory[] = ['document', 'code', 'data', 'image', 'other']
-
-const CATEGORY_LABELS: Record<ArtifactCategory, string> = {
-  document: 'Documents',
-  code: 'Code',
-  data: 'Data',
-  image: 'Images',
-  other: 'Other',
-}
-
 function getCategoryIcon(category: ArtifactCategory) {
   switch (category) {
     case 'document':
@@ -57,28 +40,6 @@ function getCategoryIcon(category: ArtifactCategory) {
 function getFileIcon(fileName: string) {
   const category = categorizeArtifact(fileName)
   return getCategoryIcon(category)
-}
-
-function groupArtifacts(artifacts: ArtifactReference[]): GroupedArtifacts[] {
-  const groups = new Map<ArtifactCategory, ArtifactReference[]>()
-
-  for (const artifact of artifacts) {
-    const category = categorizeArtifact(artifact.fileName)
-    const existing = groups.get(category)
-    if (existing) {
-      existing.push(artifact)
-    } else {
-      groups.set(category, [artifact])
-    }
-  }
-
-  return CATEGORY_ORDER
-    .filter((cat) => groups.has(cat))
-    .map((cat) => ({
-      label: CATEGORY_LABELS[cat],
-      category: cat,
-      items: groups.get(cat)!,
-    }))
 }
 
 function truncatePath(path: string, maxLength = 40): string {
@@ -105,9 +66,6 @@ export function ArtifactsSidebar({
   onClose,
   onArtifactClick,
 }: ArtifactsSidebarProps) {
-  const grouped = useMemo(() => groupArtifacts(artifacts), [artifacts])
-  const hasMultipleGroups = grouped.length > 1
-
   return (
     <div
       className={cn(
@@ -119,7 +77,7 @@ export function ArtifactsSidebar({
       aria-hidden={!isOpen}
     >
       {/* Header */}
-      <div className="flex h-[62px] shrink-0 items-center justify-between gap-2 border-b border-border/80 px-3">
+      <div className="flex h-[62px] shrink-0 items-center justify-between gap-2 px-3">
         <div className="flex items-center gap-2 min-w-0">
           <FileCode2 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <h2 className="text-xs font-semibold text-foreground truncate">
@@ -162,31 +120,14 @@ export function ArtifactsSidebar({
             </p>
           </div>
         ) : (
-          <div className="p-2">
-            {grouped.map((group) => {
-              const GroupIcon = getCategoryIcon(group.category)
-              return (
-                <div key={group.category} className="mb-1 last:mb-0">
-                  {hasMultipleGroups && (
-                    <div className="flex items-center gap-1.5 px-2 pb-1 pt-2">
-                      <GroupIcon className="size-3 text-muted-foreground/70" aria-hidden="true" />
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-                        {group.label}
-                      </span>
-                    </div>
-                  )}
-                  <div className="space-y-0.5">
-                    {group.items.map((artifact) => (
-                      <ArtifactRow
-                        key={artifact.path}
-                        artifact={artifact}
-                        onClick={onArtifactClick}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
+          <div className="space-y-0.5 p-2">
+            {artifacts.map((artifact) => (
+              <ArtifactRow
+                key={artifact.path}
+                artifact={artifact}
+                onClick={onArtifactClick}
+              />
+            ))}
           </div>
         )}
       </ScrollArea>

@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { anthropicOAuthProvider } from "@mariozechner/pi-ai/dist/utils/oauth/anthropic.js";
 import { openaiCodexOAuthProvider } from "@mariozechner/pi-ai/dist/utils/oauth/openai-codex.js";
 import type {
@@ -45,6 +45,7 @@ const RESTART_SIGNAL: NodeJS.Signals = "SIGUSR1";
 const MAX_HTTP_BODY_SIZE_BYTES = 64 * 1024;
 const MAX_READ_FILE_BODY_BYTES = 64 * 1024;
 const MAX_READ_FILE_CONTENT_BYTES = 2 * 1024 * 1024;
+const READ_FILE_METHODS = "GET, POST, OPTIONS";
 const SETTINGS_AUTH_LOGIN_METHODS = "POST, OPTIONS";
 const SETTINGS_AUTH_METHODS = "GET, PUT, DELETE, POST, OPTIONS";
 
@@ -246,7 +247,7 @@ export class SwarmWebSocketServer {
       }
 
       if (requestUrl.pathname === READ_FILE_ENDPOINT_PATH) {
-        await this.handleReadFileHttpRequest(request, response);
+        await this.handleReadFileHttpRequest(request, response, requestUrl);
         return;
       }
 
@@ -326,7 +327,7 @@ export class SwarmWebSocketServer {
       ) {
         this.applyCorsHeaders(request, response, SETTINGS_AUTH_METHODS);
       } else if (requestUrl.pathname === READ_FILE_ENDPOINT_PATH) {
-        this.applyCorsHeaders(request, response, "POST, OPTIONS");
+        this.applyCorsHeaders(request, response, READ_FILE_METHODS);
       } else if (AGENT_COMPACT_ENDPOINT_PATTERN.test(requestUrl.pathname)) {
         this.applyCorsHeaders(request, response, "POST, OPTIONS");
       } else if (
@@ -378,32 +379,54 @@ export class SwarmWebSocketServer {
     rebootTimer.unref();
   }
 
-  private async handleReadFileHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  private async handleReadFileHttpRequest(
+    request: IncomingMessage,
+    response: ServerResponse,
+    requestUrl: URL
+  ): Promise<void> {
     if (request.method === "OPTIONS") {
-      this.applyCorsHeaders(request, response, "POST, OPTIONS");
+      this.applyCorsHeaders(request, response, READ_FILE_METHODS);
       response.statusCode = 204;
       response.end();
       return;
     }
 
-    if (request.method !== "POST") {
-      this.applyCorsHeaders(request, response, "POST, OPTIONS");
-      response.setHeader("Allow", "POST, OPTIONS");
+    if (request.method !== "POST" && request.method !== "GET") {
+      this.applyCorsHeaders(request, response, READ_FILE_METHODS);
+      response.setHeader("Allow", READ_FILE_METHODS);
       this.sendJson(response, 405, { error: "Method Not Allowed" });
       return;
     }
 
-    this.applyCorsHeaders(request, response, "POST, OPTIONS");
+    this.applyCorsHeaders(request, response, READ_FILE_METHODS);
 
     try {
-      const payload = await this.parseJsonBody(request, MAX_READ_FILE_BODY_BYTES);
-      if (!payload || typeof payload !== "object") {
-        this.sendJson(response, 400, { error: "Request body must be a JSON object." });
-        return;
+      let requestedPath = "";
+
+      if (request.method === "GET") {
+        const pathFromQuery = requestUrl.searchParams.get("path");
+        if (typeof pathFromQuery !== "string" || pathFromQuery.trim().length === 0) {
+          this.sendJson(response, 400, { error: "path must be a non-empty string." });
+          return;
+        }
+        requestedPath = pathFromQuery;
+      } else {
+        const payload = await this.parseJsonBody(request, MAX_READ_FILE_BODY_BYTES);
+        if (!payload || typeof payload !== "object") {
+          this.sendJson(response, 400, { error: "Request body must be a JSON object." });
+          return;
+        }
+
+        const pathFromBody = (payload as { path?: unknown }).path;
+        if (typeof pathFromBody !== "string" || pathFromBody.trim().length === 0) {
+          this.sendJson(response, 400, { error: "path must be a non-empty string." });
+          return;
+        }
+
+        requestedPath = pathFromBody;
       }
 
-      const requestedPath = (payload as { path?: unknown }).path;
-      if (typeof requestedPath !== "string" || requestedPath.trim().length === 0) {
+      if (requestedPath.trim().length === 0) {
         this.sendJson(response, 400, { error: "path must be a non-empty string." });
         return;
       }
@@ -438,6 +461,16 @@ export class SwarmWebSocketServer {
         this.sendJson(response, 413, {
           error: `File is too large. Maximum supported size is ${MAX_READ_FILE_CONTENT_BYTES} bytes.`
         });
+        return;
+      }
+
+      if (request.method === "GET") {
+        const content = await readFile(resolvedPath);
+        response.statusCode = 200;
+        response.setHeader("Content-Type", resolveReadFileContentType(resolvedPath));
+        response.setHeader("Content-Length", String(content.byteLength));
+        response.setHeader("Cache-Control", "no-store");
+        response.end(content);
         return;
       }
 
@@ -2145,6 +2178,26 @@ function resolveSettingsAuthLoginProviderId(rawProvider: string): OAuthLoginProv
   }
 
   return SETTINGS_AUTH_LOGIN_PROVIDER_ALIASES[normalized];
+}
+
+function resolveReadFileContentType(path: string): string {
+  const extension = extname(path).toLowerCase();
+
+  switch (extension) {
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    case ".svg":
+      return "image/svg+xml; charset=utf-8";
+    default:
+      return "application/octet-stream";
+  }
 }
 
 function parseConversationAttachments(

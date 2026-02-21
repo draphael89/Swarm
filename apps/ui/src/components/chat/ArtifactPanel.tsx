@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { ExternalLink, FileCode2, FileText, Loader2, X } from 'lucide-react'
+import { ExternalLink, FileCode2, FileImage, FileText, Loader2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogOverlay, DialogPortal, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -22,6 +22,7 @@ interface ReadFileResult {
 }
 
 const MARKDOWN_FILE_PATTERN = /\.(md|markdown|mdx)$/i
+const IMAGE_FILE_PATTERN = /\.(png|jpg|jpeg|gif|webp|svg)$/i
 
 export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: ArtifactPanelProps) {
   const [isVisible, setIsVisible] = useState(false)
@@ -56,6 +57,16 @@ export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: Art
     if (!artifactPath) {
       setContent('')
       setResolvedPath(null)
+      setError(null)
+      setIsLoading(false)
+      return
+    }
+
+    const isImageArtifact =
+      IMAGE_FILE_PATTERN.test(artifact?.fileName ?? '') || IMAGE_FILE_PATTERN.test(artifactPath)
+    if (isImageArtifact) {
+      setContent('')
+      setResolvedPath(artifactPath)
       setError(null)
       setIsLoading(false)
       return
@@ -99,7 +110,7 @@ export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: Art
     return () => {
       abortController.abort()
     }
-  }, [artifactPath, wsUrl])
+  }, [artifact?.fileName, artifactPath, wsUrl])
 
   useEffect(() => {
     return () => {
@@ -122,13 +133,24 @@ export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: Art
   }
 
   const displayPath = resolvedPath ?? artifactPath ?? ''
+  const isImage = useMemo(
+    () => IMAGE_FILE_PATTERN.test(artifact?.fileName ?? '') || IMAGE_FILE_PATTERN.test(displayPath),
+    [artifact?.fileName, displayPath],
+  )
   const isMarkdown = useMemo(() => MARKDOWN_FILE_PATTERN.test(displayPath), [displayPath])
+  const imageFileUrl = useMemo(() => {
+    if (!isImage || !displayPath) {
+      return null
+    }
+
+    return resolveReadFileUrl(wsUrl, displayPath)
+  }, [displayPath, isImage, wsUrl])
 
   if (!artifact && !isClosing) {
     return null
   }
 
-  const FileIcon = isMarkdown ? FileText : FileCode2
+  const FileIcon = isImage ? FileImage : isMarkdown ? FileText : FileCode2
   const isOpen = Boolean(artifactPath) || isClosing
 
   return (
@@ -233,22 +255,36 @@ export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: Art
                 <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
                   {error}
                 </div>
+              ) : isImage ? (
+                imageFileUrl ? (
+                  <div className="mx-auto flex max-w-[820px] justify-center">
+                    <img
+                      src={imageFileUrl}
+                      alt={artifact?.fileName || 'Artifact image'}
+                      className="max-h-[calc(100vh-180px)] max-w-full rounded-lg border border-border/60 bg-muted/20 object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                    Unable to load image preview.
+                  </div>
+                )
               ) : isMarkdown ? (
-              <article className="mx-auto max-w-[680px]">
-                <MarkdownMessage
-                  content={content}
-                  variant="document"
-                  enableMermaid
-                  onArtifactClick={onArtifactClick}
-                />
-              </article>
-            ) : (
-              <ScrollArea className="w-full rounded-lg border border-border/60 bg-muted/25">
-                <pre className="p-4">
-                  <code className="font-mono text-[13px] leading-relaxed whitespace-pre text-foreground/90">{content}</code>
-                </pre>
-              </ScrollArea>
-            )}
+                <article className="mx-auto max-w-[680px]">
+                  <MarkdownMessage
+                    content={content}
+                    variant="document"
+                    enableMermaid
+                    onArtifactClick={onArtifactClick}
+                  />
+                </article>
+              ) : (
+                <ScrollArea className="w-full rounded-lg border border-border/60 bg-muted/25">
+                  <pre className="p-4">
+                    <code className="font-mono text-[13px] leading-relaxed whitespace-pre text-foreground/90">{content}</code>
+                  </pre>
+                </ScrollArea>
+              )}
           </div>
         </ScrollArea>
         </DialogPrimitive.Content>
@@ -312,4 +348,10 @@ function resolveReadFileEndpoint(wsUrl: string): string {
   } catch {
     return '/api/read-file'
   }
+}
+
+function resolveReadFileUrl(wsUrl: string, path: string): string {
+  const endpoint = resolveReadFileEndpoint(wsUrl)
+  const separator = endpoint.includes('?') ? '&' : '?'
+  return `${endpoint}${separator}path=${encodeURIComponent(path)}`
 }
