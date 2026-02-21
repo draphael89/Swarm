@@ -25,6 +25,7 @@ import type { SwarmManager } from "../swarm/swarm-manager.js";
 
 const REBOOT_ENDPOINT_PATH = "/api/reboot";
 const READ_FILE_ENDPOINT_PATH = "/api/read-file";
+const AGENT_COMPACT_ENDPOINT_PATTERN = /^\/api\/agents\/([^/]+)\/compact$/;
 const SETTINGS_ENV_ENDPOINT_PATH = "/api/settings/env";
 const SETTINGS_AUTH_ENDPOINT_PATH = "/api/settings/auth";
 const SETTINGS_AUTH_LOGIN_ENDPOINT_PATH = "/api/settings/auth/login";
@@ -227,6 +228,11 @@ export class SwarmWebSocketServer {
         return;
       }
 
+      if (AGENT_COMPACT_ENDPOINT_PATTERN.test(requestUrl.pathname)) {
+        await this.handleCompactAgentHttpRequest(request, response, requestUrl);
+        return;
+      }
+
       if (
         requestUrl.pathname === SETTINGS_ENV_ENDPOINT_PATH ||
         requestUrl.pathname.startsWith(`${SETTINGS_ENV_ENDPOINT_PATH}/`)
@@ -279,6 +285,8 @@ export class SwarmWebSocketServer {
       ) {
         this.applyCorsHeaders(request, response, SETTINGS_AUTH_METHODS);
       } else if (requestUrl.pathname === READ_FILE_ENDPOINT_PATH) {
+        this.applyCorsHeaders(request, response, "POST, OPTIONS");
+      } else if (AGENT_COMPACT_ENDPOINT_PATTERN.test(requestUrl.pathname)) {
         this.applyCorsHeaders(request, response, "POST, OPTIONS");
       } else if (
         requestUrl.pathname === SLACK_INTEGRATION_ENDPOINT_PATH ||
@@ -398,6 +406,69 @@ export class SwarmWebSocketServer {
       }
 
       this.sendJson(response, 500, { error: message });
+    }
+  }
+
+  private async handleCompactAgentHttpRequest(
+    request: IncomingMessage,
+    response: ServerResponse,
+    requestUrl: URL
+  ): Promise<void> {
+    const methods = "POST, OPTIONS";
+    const matched = requestUrl.pathname.match(AGENT_COMPACT_ENDPOINT_PATTERN);
+    const rawAgentId = matched?.[1] ?? "";
+
+    if (request.method === "OPTIONS") {
+      this.applyCorsHeaders(request, response, methods);
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+
+    if (request.method !== "POST") {
+      this.applyCorsHeaders(request, response, methods);
+      response.setHeader("Allow", methods);
+      this.sendJson(response, 405, { error: "Method Not Allowed" });
+      return;
+    }
+
+    this.applyCorsHeaders(request, response, methods);
+
+    const agentId = decodeURIComponent(rawAgentId).trim();
+    if (!agentId) {
+      this.sendJson(response, 400, { error: "Missing agent id" });
+      return;
+    }
+
+    const payload = await this.readJsonBody(request);
+    const customInstructions = parseCompactCustomInstructionsBody(payload);
+
+    try {
+      const result = await this.swarmManager.compactAgentContext(agentId, {
+        customInstructions,
+        sourceContext: { channel: "web" },
+        trigger: "api"
+      });
+
+      this.sendJson(response, 200, {
+        ok: true,
+        agentId,
+        result
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const statusCode =
+        message.includes("Unknown target agent")
+          ? 404
+          : message.includes("not running") ||
+              message.includes("does not support") ||
+              message.includes("only supported")
+            ? 409
+            : message.includes("Invalid") || message.includes("Missing")
+              ? 400
+              : 500;
+
+      this.sendJson(response, statusCode, { error: message });
     }
   }
 
@@ -1608,6 +1679,28 @@ function parseOptionalBoolean(value: string | null): boolean | undefined {
   }
 
   return undefined;
+}
+
+function parseCompactCustomInstructionsBody(value: unknown): string | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Request body must be a JSON object");
+  }
+
+  const customInstructions = (value as { customInstructions?: unknown }).customInstructions;
+  if (customInstructions === undefined) {
+    return undefined;
+  }
+
+  if (typeof customInstructions !== "string") {
+    throw new Error("customInstructions must be a string");
+  }
+
+  const trimmed = customInstructions.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function parseSettingsEnvUpdateBody(value: unknown): Record<string, string> {

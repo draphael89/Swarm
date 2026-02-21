@@ -16,6 +16,7 @@ import type { ServerEvent } from '../protocol/ws-types.js'
 class FakeRuntime {
   readonly descriptor: AgentDescriptor
   private readonly sessionManager: SessionManager
+  compactCalls: Array<string | undefined> = []
 
   constructor(descriptor: AgentDescriptor) {
     this.descriptor = descriptor
@@ -45,6 +46,14 @@ class FakeRuntime {
 
   async terminate(): Promise<void> {}
 
+  async compact(customInstructions?: string): Promise<unknown> {
+    this.compactCalls.push(customInstructions)
+    return {
+      status: 'ok',
+      customInstructions: customInstructions ?? null,
+    }
+  }
+
   getCustomEntries(customType: string): unknown[] {
     const entries = this.sessionManager.getEntries()
     return entries
@@ -61,9 +70,12 @@ class FakeRuntime {
 class TestSwarmManager extends SwarmManager {
   pickedDirectoryPath: string | null = null
   lastPickedDirectoryDefaultPath: string | undefined
+  readonly runtimeByAgentId = new Map<string, FakeRuntime>()
 
   protected override async createRuntimeForDescriptor(descriptor: AgentDescriptor): Promise<SwarmAgentRuntime> {
-    return new FakeRuntime(descriptor) as unknown as SwarmAgentRuntime
+    const runtime = new FakeRuntime(descriptor)
+    this.runtimeByAgentId.set(descriptor.agentId, runtime)
+    return runtime as unknown as SwarmAgentRuntime
   }
 
   override async pickDirectory(defaultPath?: string): Promise<string | null> {
@@ -248,6 +260,72 @@ describe('SwarmWebSocketServer', () => {
     } finally {
       killSpy.mockRestore()
       await rm(pidFile, { force: true })
+      await server.stop()
+    }
+  })
+
+  it('compacts manager context through POST /api/agents/:agentId/compact', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    try {
+      const response = await fetch(`http://${config.host}:${config.port}/api/agents/manager/compact`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          customInstructions: 'Preserve unresolved TODOs in the summary.',
+        }),
+      })
+
+      expect(response.status).toBe(200)
+      const payload = (await response.json()) as {
+        ok: boolean
+        agentId: string
+        result: { status: string; customInstructions: string | null }
+      }
+
+      expect(payload.ok).toBe(true)
+      expect(payload.agentId).toBe('manager')
+      expect(payload.result).toEqual({
+        status: 'ok',
+        customInstructions: 'Preserve unresolved TODOs in the summary.',
+      })
+
+      const runtime = manager.runtimeByAgentId.get('manager')
+      expect(runtime?.compactCalls).toEqual(['Preserve unresolved TODOs in the summary.'])
+
+      const history = manager.getConversationHistory('manager')
+      expect(
+        history.some(
+          (event) =>
+            event.type === 'conversation_message' &&
+            event.source === 'system' &&
+            event.text === 'Compacting manager context...',
+        ),
+      ).toBe(true)
+      expect(
+        history.some(
+          (event) =>
+            event.type === 'conversation_message' &&
+            event.source === 'system' &&
+            event.text === 'Compaction complete.',
+        ),
+      ).toBe(true)
+    } finally {
       await server.stop()
     }
   })
@@ -786,6 +864,69 @@ describe('SwarmWebSocketServer', () => {
 
     clientB.close()
     await once(clientB, 'close')
+    await server.stop()
+  })
+
+  it('handles /compact via websocket by compacting manager context', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe' }))
+    await waitForEvent(events, (event) => event.type === 'conversation_history')
+
+    client.send(
+      JSON.stringify({
+        type: 'user_message',
+        text: '/compact Keep unresolved work items in the summary.',
+      }),
+    )
+
+    await waitForEvent(
+      events,
+      (event) =>
+        event.type === 'conversation_message' &&
+        event.source === 'system' &&
+        event.text === 'Compacting manager context...',
+    )
+    await waitForEvent(
+      events,
+      (event) =>
+        event.type === 'conversation_message' && event.source === 'system' && event.text === 'Compaction complete.',
+    )
+
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'conversation_message' &&
+          event.source === 'user_input' &&
+          event.text.trim().toLowerCase().startsWith('/compact'),
+      ),
+    ).toBe(false)
+
+    const runtime = manager.runtimeByAgentId.get('manager')
+    expect(runtime?.compactCalls).toEqual(['Keep unresolved work items in the summary.'])
+
+    client.close()
+    await once(client, 'close')
     await server.stop()
   })
 

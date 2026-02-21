@@ -12,6 +12,7 @@ class FakeRuntime {
   private readonly sessionManager: SessionManager
   terminateCalls: Array<{ abort?: boolean } | undefined> = []
   sendCalls: Array<{ message: string | RuntimeUserMessage; delivery: RequestedDeliveryMode }> = []
+  compactCalls: Array<string | undefined> = []
   nextDeliveryId = 0
   busy = false
 
@@ -45,6 +46,14 @@ class FakeRuntime {
 
   async terminate(options?: { abort?: boolean }): Promise<void> {
     this.terminateCalls.push(options)
+  }
+
+  async compact(customInstructions?: string): Promise<unknown> {
+    this.compactCalls.push(customInstructions)
+    return {
+      status: 'ok',
+      customInstructions: customInstructions ?? null,
+    }
   }
 
   getCustomEntries(customType: string): unknown[] {
@@ -554,6 +563,54 @@ describe('SwarmManager', () => {
     expect(managerRuntime).toBeDefined()
     expect(managerRuntime?.sendCalls.at(-1)?.delivery).toBe('steer')
     expect(managerRuntime?.sendCalls.at(-1)?.message).toBe('[sourceContext] {"channel":"web"}\n\ninterrupt current plan')
+  })
+
+  it('handles /compact as a manager slash command without forwarding it as a user prompt', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await manager.handleUserMessage('/compact')
+
+    const managerRuntime = manager.runtimeByAgentId.get('manager')
+    expect(managerRuntime).toBeDefined()
+    expect(managerRuntime?.compactCalls).toEqual([undefined])
+    expect(managerRuntime?.sendCalls).toEqual([])
+
+    const history = manager.getConversationHistory('manager')
+    expect(
+      history.some(
+        (entry) =>
+          entry.type === 'conversation_message' &&
+          entry.role === 'system' &&
+          entry.text === 'Compacting manager context...',
+      ),
+    ).toBe(true)
+    expect(
+      history.some(
+        (entry) =>
+          entry.type === 'conversation_message' &&
+          entry.role === 'system' &&
+          entry.text === 'Compaction complete.',
+      ),
+    ).toBe(true)
+    expect(
+      history.some(
+        (entry) =>
+          entry.type === 'conversation_message' && entry.role === 'user' && entry.text === '/compact',
+      ),
+    ).toBe(false)
+  })
+
+  it('passes optional custom instructions for /compact slash commands', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    await manager.handleUserMessage('/compact focus the summary on open implementation tasks')
+
+    const managerRuntime = manager.runtimeByAgentId.get('manager')
+    expect(managerRuntime?.compactCalls).toEqual(['focus the summary on open implementation tasks'])
   })
 
   it('tags web user messages with default source metadata', async () => {

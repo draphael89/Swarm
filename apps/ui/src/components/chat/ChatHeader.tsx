@@ -1,4 +1,4 @@
-import { Trash2 } from 'lucide-react'
+import { Loader2, Minimize2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { AgentStatus } from '@/lib/ws-types'
@@ -12,6 +12,9 @@ interface ChatHeaderProps {
   activeAgentStatus: AgentStatus | null
   channelView: ChannelView
   onChannelViewChange: (view: ChannelView) => void
+  showCompact: boolean
+  compactInProgress: boolean
+  onCompact: () => void
   showNewChat: boolean
   onNewChat: () => void
 }
@@ -64,6 +67,9 @@ export function ChatHeader({
   activeAgentStatus,
   channelView,
   onChannelViewChange,
+  showCompact,
+  compactInProgress,
+  onCompact,
   showNewChat,
   onNewChat,
 }: ChatHeaderProps) {
@@ -122,6 +128,20 @@ export function ChatHeader({
             onClick={() => onChannelViewChange('all')}
           />
         </div>
+
+        {showCompact ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+            onClick={onCompact}
+            disabled={compactInProgress}
+            title={compactInProgress ? 'Compacting manager context...' : 'Compact manager context'}
+            aria-label={compactInProgress ? 'Compacting manager context' : 'Compact manager context'}
+          >
+            {compactInProgress ? <Loader2 className="size-3.5 animate-spin" /> : <Minimize2 className="size-3.5" />}
+          </Button>
+        ) : null}
 
         {showNewChat ? (
           <Button

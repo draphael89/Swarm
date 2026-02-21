@@ -682,6 +682,94 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     };
   }
 
+  async compactAgentContext(
+    agentId: string,
+    options?: {
+      customInstructions?: string;
+      sourceContext?: MessageSourceContext;
+      trigger?: "api" | "slash_command";
+    }
+  ): Promise<unknown> {
+    const descriptor = this.descriptors.get(agentId);
+    if (!descriptor) {
+      throw new Error(`Unknown target agent: ${agentId}`);
+    }
+
+    if (descriptor.status === "terminated" || descriptor.status === "stopped_on_restart") {
+      throw new Error(`Target agent is not running: ${agentId}`);
+    }
+
+    if (descriptor.role !== "manager") {
+      throw new Error(`Compaction is only supported for manager agents: ${agentId}`);
+    }
+
+    const runtime = this.runtimes.get(agentId);
+    if (!runtime) {
+      throw new Error(`Target runtime is not available: ${agentId}`);
+    }
+
+    const sourceContext = normalizeMessageSourceContext(options?.sourceContext ?? { channel: "web" });
+    const customInstructions = options?.customInstructions?.trim() || undefined;
+
+    this.logDebug("manager:compact:start", {
+      agentId,
+      trigger: options?.trigger ?? "api",
+      sourceContext,
+      customInstructionsPreview: previewForLog(customInstructions ?? "")
+    });
+
+    this.emitConversationMessage({
+      type: "conversation_message",
+      agentId,
+      role: "system",
+      text: "Compacting manager context...",
+      timestamp: this.now(),
+      source: "system",
+      sourceContext
+    });
+
+    try {
+      const result = await runtime.compact(customInstructions);
+
+      this.emitConversationMessage({
+        type: "conversation_message",
+        agentId,
+        role: "system",
+        text: "Compaction complete.",
+        timestamp: this.now(),
+        source: "system",
+        sourceContext
+      });
+
+      this.logDebug("manager:compact:complete", {
+        agentId,
+        trigger: options?.trigger ?? "api"
+      });
+
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.emitConversationMessage({
+        type: "conversation_message",
+        agentId,
+        role: "system",
+        text: `Compaction failed: ${message}`,
+        timestamp: this.now(),
+        source: "system",
+        sourceContext
+      });
+
+      this.logDebug("manager:compact:error", {
+        agentId,
+        trigger: options?.trigger ?? "api",
+        message
+      });
+
+      throw error;
+    }
+  }
+
   async handleUserMessage(
     text: string,
     options?: {
@@ -704,6 +792,17 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
     if (target.status === "terminated" || target.status === "stopped_on_restart") {
       throw new Error(`Target agent is not running: ${targetAgentId}`);
+    }
+
+    const compactCommand =
+      target.role === "manager" && attachments.length === 0 ? parseCompactSlashCommand(trimmed) : undefined;
+    if (compactCommand) {
+      await this.compactAgentContext(target.agentId, {
+        customInstructions: compactCommand.customInstructions,
+        sourceContext,
+        trigger: "slash_command"
+      });
+      return;
     }
 
     const managerContextId = target.role === "manager" ? target.agentId : target.managerId;
@@ -2800,6 +2899,22 @@ function formatInboundUserMessageForManager(text: string, sourceContext: Message
   }
 
   return `${sourceMetadataLine}\n\n${trimmed}`;
+}
+
+function parseCompactSlashCommand(text: string): { customInstructions?: string } | undefined {
+  const match = text.trim().match(/^\/compact(?:\s+([\s\S]+))?$/i);
+  if (!match) {
+    return undefined;
+  }
+
+  const customInstructions = match[1]?.trim();
+  if (!customInstructions) {
+    return {};
+  }
+
+  return {
+    customInstructions
+  };
 }
 
 function normalizeMessageTargetContext(input: MessageTargetContext): MessageTargetContext {
