@@ -1,357 +1,229 @@
-# G Suite Skill Plan (gogcli)
+# G Suite Skill Plan (gogcli, Simplified)
 
 ## Objective
-Give Swarm first-class Google Workspace access (Gmail, Calendar, Drive, Docs) through a built-in skill that wraps `gogcli`, with secure auth handling, explicit scope control, and a phased rollout that starts read-only.
+Ship Google Workspace support in Swarm with minimal maintenance:
 
-This plan follows the same documentation style as `docs/plans/telegram-integration.md` and follows the built-in skill shape used by `apps/backend/src/swarm/skills/builtins/brave-search/`.
+1. Install and use `gog` directly.
+2. Add a built-in `gsuite` skill that is just `SKILL.md` docs (no wrapper scripts).
+3. Run Google OAuth setup entirely from Swarm Settings UI.
 
----
-
-## Research Summary (gogcli)
-
-Source reviewed:
-- https://github.com/steipete/gogcli
-- `README.md` via:
-  - `curl -sL https://raw.githubusercontent.com/steipete/gogcli/main/README.md | head -300`
-
-Key findings relevant to Swarm integration:
-
-1. `gogcli` already supports the exact surfaces we need:
-   - Gmail (`search`, message/thread read, `send`)
-   - Calendar (`events`, `search`, `create`, `update`, `delete`, `freebusy`)
-   - Drive (`ls`, `search`, `get`, `upload`, `download`)
-   - Docs (`info`, `cat`, `create`, `update`, `export`)
-
-2. Auth model is compatible with Swarm:
-   - OAuth desktop credentials (`gog auth credentials <json>`)
-   - Per-account auth (`gog auth add <email>`)
-   - Optional Workspace service-account + domain-wide delegation (`gog auth service-account set`)
-
-3. Security features we can directly leverage:
-   - Least-privilege auth flags (`--services`, `--readonly`, `--drive-scope`)
-   - Secure keyring backends (`auto`, `keychain`, `file`)
-   - Command allowlist (`GOG_ENABLE_COMMANDS`)
-   - Token auto-refresh after initial authorization
-
-4. Installation options from README:
-   - Homebrew: `brew install steipete/tap/gogcli`
-   - AUR package (Linux/Arch)
-   - Build from source (`make`)
-   - No npm-based installation path is documented
+This revision incorporates feedback to remove wrapper-tool complexity and treat `gog` as the primary interface.
 
 ---
 
-## Scope and Non-Goals
+## Decisions from Feedback
 
-### In scope
-- Built-in G Suite skill in Swarm for Gmail, Calendar, Drive, Docs.
-- Settings UI section for G Suite credential setup and health checks.
-- Read-only tools first, write tools second.
-- OAuth and optional Workspace service-account paths.
+1. **No wrapper scripts in the skill**
+   - Do not add `gmail-search.js`, `calendar-events.js`, etc.
+   - Do not add a `gog-runner.js` abstraction.
+   - The skill should document direct CLI usage (`gog --help`, `gog <group> --help`, `gog ... --json`).
 
-### Out of scope (initial)
-- Google Chat/Classroom/Keep/Forms/Apps Script integration.
-- Background webhook/watch pipelines (e.g., Gmail push watch).
-- Broad autonomous email/event mutation without explicit guardrails.
+2. **OAuth flow moves into Swarm Settings**
+   - User flow in Settings:
+     - Click **Connect Google**
+     - Get auth URL
+     - Paste redirect URL/auth code
+     - Swarm completes OAuth and stores credentials for `gog`
 
----
-
-## Architecture Overview
-
-### 1) Built-in skill (agent-facing)
-Add a new built-in skill folder mirroring brave-search:
-
-`apps/backend/src/swarm/skills/builtins/gsuite/`
-
-Proposed contents:
-- `SKILL.md`
-- `package.json`
-- `lib/gog-runner.js` (shared command runner + validation)
-- `gmail-search.js`
-- `gmail-thread-get.js`
-- `calendar-events.js`
-- `calendar-search.js`
-- `drive-search.js`
-- `drive-get.js`
-- `docs-info.js`
-- `docs-cat.js`
-- `doctor.js` (binary/auth health check)
-
-Write-phase scripts added later:
-- `gmail-send.js`
-- `calendar-create.js`
-- `calendar-update.js`
-- `drive-upload.js`
-- `docs-create.js`
-- `docs-update.js`
-
-### 2) Integration service (app-facing setup + auth orchestration)
-Add a G Suite backend integration module similar to Slack’s service model:
-
-`apps/backend/src/integrations/gsuite/`
-
-Proposed files:
-- `gsuite-config.ts` (persisted non-secret config)
-- `gsuite-types.ts`
-- `gsuite-status.ts` (connection + auth health event)
-- `gsuite-install.ts` (detect version/path, install strategy checks)
-- `gsuite-auth.ts` (OAuth + service account setup flows)
-- `gsuite-integration.ts` (service lifecycle + test helpers)
-- `index.ts`
-
-### 3) Wiring points
-- `apps/backend/src/index.ts`: create/start/stop `GSuiteIntegrationService`.
-- `apps/backend/src/ws/server.ts`: add `/api/integrations/gsuite*` endpoints.
-- `apps/backend/src/swarm/swarm-manager.ts`: include built-in G Suite skill in `reloadSkillMetadata()` (same way brave-search is wired).
-- `apps/ui/src/components/chat/SettingsDialog.tsx`: add G Suite settings section.
-- `apps/ui/src/lib/ws-types.ts`: add optional `gsuite_status` event type.
+3. **Keep phased rollout**
+   - Read-only by default first.
+   - Write-capable auth/usage only as explicit opt-in in later phase.
 
 ---
 
-## Credential Setup Plan
+## Research Summary (gogcli Auth + Storage)
 
-### 1) OAuth setup (individual account)
+Sources reviewed:
+- `docs/plans/gsuite-skill.md` (previous draft)
+- `https://github.com/steipete/gogcli` README
+- `gogcli` source files:
+  - `internal/cmd/auth.go`
+  - `internal/googleauth/manual_state.go`
+  - `internal/config/paths.go`
+  - `internal/secrets/store.go`
+  - `docs/spec.md`
 
-1. Create Google Cloud OAuth Desktop credentials.
-2. Enable APIs: Gmail, Calendar, Drive, Docs.
-3. Store OAuth client JSON via backend setup action that runs:
-   - `gog auth credentials <path-to-oauth-client.json>`
-4. Run account authorization:
-   - Preferred local flow: `gog auth add <email>`
-   - Headless flow support in UI (recommended for daemon hosts):
-     - step 1: `gog auth add <email> --services gmail,calendar,drive,docs --readonly --drive-scope readonly --remote --step 1`
-     - step 2: `gog auth add <email> --services gmail,calendar,drive,docs --readonly --drive-scope readonly --remote --step 2 --auth-url '<redirect-url>'`
+Key findings:
 
-### 2) Service account setup (Workspace admin option)
+1. **OAuth client credentials command**
+   - `gog auth credentials <credentials.json|->`
+   - `-` is supported and reads from stdin, which is ideal for Settings JSON paste/upload.
 
-Optional enterprise path for domain-wide delegation:
+2. **Remote/headless OAuth flow is already exactly what Settings needs**
+   - Step 1:
+     - `gog --json auth add <email> ... --remote --step 1`
+     - Returns JSON with `auth_url` and `state_reused`.
+   - Step 2:
+     - `gog --json auth add <email> ... --remote --step 2 --auth-url '<redirect-url>'`
+     - Requires `state` in redirect URL and stores refresh token on success.
+   - Manual OAuth state file:
+     - `oauth-manual-state-<state>.json`
+     - TTL is 10 minutes.
 
-1. Workspace admin creates service account and enables domain-wide delegation.
-2. Admin allowlists required OAuth scopes in Admin Console.
-3. Store service account key via setup action that runs:
-   - `gog auth service-account set <impersonated-user-email> --key <path-to-service-account.json>`
-4. Verify precedence/health:
-   - `gog --account <email> auth status`
+3. **Where `gog` stores data**
+   - Base dir is `$(os.UserConfigDir())/gogcli/`
+   - Files include:
+     - `config.json`
+     - `credentials.json` / `credentials-<client>.json`
+     - `sa-<base64(email)>.json` (service account key)
+     - `oauth-manual-state-<state>.json` (temporary state)
+   - Refresh tokens are in keyring:
+     - OS keychain backend by default (`auto`)
+     - or encrypted file backend under `.../gogcli/keyring/` when forced to `file`
 
-### 3) Token + secret storage
+4. **Custom credential/config path support**
+   - There is no dedicated `gog` flag/env like `--config-dir` or `GOG_CONFIG_DIR`.
+   - Path is derived from `os.UserConfigDir()` (platform conventions).
+   - Practical control is via process env for each `gog` invocation:
+     - Linux: `XDG_CONFIG_HOME`
+     - Windows: `APPDATA`
+     - macOS: `HOME` (for `~/Library/Application Support/...`)
 
-- Let `gogcli` own refresh token lifecycle (auto-refresh built-in).
-- Store sensitive setup artifacts in Swarm secret storage (`secrets.json`) and write temporary credential files into `SWARM_DATA_DIR/integrations/gsuite/` with strict file permissions.
-- Recommended keyring backend for unattended daemon runs:
-  - `file` backend + `GOG_KEYRING_PASSWORD` in Swarm secrets.
-- Local macOS interactive users may use Keychain backend if preferred.
-
-### 4) Scope policy
-
-Default read-only auth profile for Phase 1:
-- `--services gmail,calendar,drive,docs`
-- `--readonly`
-- `--drive-scope readonly`
-
-Write profile for Phase 2 (explicit opt-in in settings):
-- remove `--readonly`
-- set Drive scope to `full` or `file` based on user choice
+5. **Useful env flags**
+   - `GOG_KEYRING_BACKEND`
+   - `GOG_KEYRING_PASSWORD`
+   - `GOG_ACCOUNT`
+   - `GOG_CLIENT`
+   - `GOG_ENABLE_COMMANDS`
 
 ---
 
-## Settings UI Integration (SettingsDialog)
+## Proposed Architecture
 
-Add a new **G Suite** section to `SettingsDialog.tsx` with Slack-style ergonomics.
+### 1) Minimal built-in skill (docs only)
 
-### Fields and controls
-- Enable G Suite integration toggle.
-- `gog` binary status:
-  - detected path
-  - version
-  - install hint if missing
-- Auth mode selector:
-  - OAuth (default)
-  - Service account (Workspace)
-- OAuth setup:
-  - account email
-  - OAuth client JSON upload/paste
-  - “Start auth” button (returns auth URL for remote flow)
-  - callback URL input + “Complete auth” button
-- Service account setup:
-  - impersonated user email
-  - service-account JSON upload/paste
-  - “Configure service account” button
-- Scope profile selector:
-  - Read-only (recommended)
-  - Write-enabled
-  - Drive scope: `readonly` / `file` / `full`
-- Command allowlist preview (`gmail,calendar,drive,docs,auth,time`).
-- “Test connection” button.
-- “Save settings” and “Disable integration” buttons.
-- Status badge (`disabled`, `ready`, `auth_required`, `error`).
+Add:
+- `apps/backend/src/swarm/skills/builtins/gsuite/SKILL.md`
 
-### Backend endpoints
+Do not add scripts/package for command wrappers.
+
+`SKILL.md` should contain:
+- Setup prerequisites (`gog` install + OAuth completed in Settings).
+- Command discovery (`gog --help`, `GOG_HELP=full gog --help`, `gog <group> --help`).
+- Practical examples for Gmail/Calendar/Drive/Docs with `--json`.
+- Guidance to use `--account` or `GOG_ACCOUNT`.
+- Reminder that read/write behavior is controlled by granted scopes.
+
+Swarm manager wiring:
+- Extend `reloadSkillMetadata()` to include `gsuite` SKILL path (same pattern as `memory` and `brave-search`).
+
+### 2) Backend integration service (Settings + command bridge)
+
+Add integration module:
+- `apps/backend/src/integrations/gsuite/`
+  - `gsuite-config.ts`
+  - `gsuite-types.ts`
+  - `gsuite-status.ts`
+  - `gsuite-integration.ts`
+  - `gsuite-gog.ts` (typed command executor, not wrappers)
+
+Behavior:
+- Backend executes `gog` directly with argv arrays.
+- All Settings actions map to real `gog` commands.
+- No shell wrapper scripts in skills folder.
+
+---
+
+## OAuth in Settings UI (Primary User Flow)
+
+Implement in `SettingsDialog.tsx` (modeled after existing OAuth UX patterns):
+
+1. User provides:
+   - Account email
+   - OAuth client JSON (paste or upload)
+   - Optional scope mode (read-only default)
+
+2. User clicks **Connect Google**:
+   - Backend first stores OAuth client:
+     - `gog --json auth credentials -` (stdin JSON payload)
+   - Backend starts auth URL generation:
+     - `gog --json auth add <email> --services gmail,calendar,drive,docs --readonly --drive-scope readonly --remote --step 1`
+   - UI shows returned `auth_url`.
+
+3. User authorizes in browser and pastes redirect URL into Settings.
+
+4. User clicks **Complete Connection**:
+   - Backend runs:
+     - `gog --json auth add <email> --services gmail,calendar,drive,docs --readonly --drive-scope readonly --remote --step 2 --auth-url '<redirect-url>'`
+   - On success: token stored and status updates to connected.
+
+5. Test button verifies:
+   - `gog --json auth status --account <email>`
+   - Optional lightweight API call (e.g. `gog --json gmail labels list --account <email>`)
+
+---
+
+## Storage Strategy in `SWARM_DATA_DIR`
+
+Goal: keep `gog` state isolated to Swarm-managed storage.
+
+Constraint from research:
+- `gog` does not expose an explicit config-dir flag/env.
+
+Plan:
+- Build one helper that returns env overrides for every `gog` process:
+  - `GOG_KEYRING_BACKEND=file`
+  - `GOG_KEYRING_PASSWORD=<from Swarm secrets>`
+  - Platform-specific config root override:
+    - Linux: `XDG_CONFIG_HOME=${SWARM_DATA_DIR}/integrations/gsuite/config-home`
+    - macOS: `HOME=${SWARM_DATA_DIR}/integrations/gsuite/home`
+    - Windows: `APPDATA=${SWARM_DATA_DIR}\\integrations\\gsuite\\appdata`
+
+Notes:
+- For macOS, forcing file backend avoids login-keychain coupling when `HOME` is redirected.
+- After setup, read resolved path via `gog --json auth status --account <email>` and assert it points under `SWARM_DATA_DIR`.
+
+---
+
+## API Surface
+
+Add REST endpoints:
+
 - `GET /api/integrations/gsuite`
 - `PUT /api/integrations/gsuite`
 - `DELETE /api/integrations/gsuite`
+- `POST /api/integrations/gsuite/oauth/credentials`
+- `POST /api/integrations/gsuite/oauth/start`
+- `POST /api/integrations/gsuite/oauth/complete`
 - `POST /api/integrations/gsuite/test`
-- `POST /api/integrations/gsuite/auth/start` (returns auth URL)
-- `POST /api/integrations/gsuite/auth/complete` (consumes redirect URL)
 
----
-
-## Skill Structure (Brave-Search Pattern)
-
-`SKILL.md` frontmatter pattern (example):
-
-```md
----
-name: gsuite
-description: Gmail, Calendar, Drive, and Docs access via gogcli.
-env:
-  - name: GOG_ACCOUNT
-    description: Default Google account email or alias
-    required: true
-  - name: GOG_KEYRING_PASSWORD
-    description: Required when keyring backend is file
-    required: false
-  - name: GOG_KEYRING_BACKEND
-    description: auto|keychain|file
-    required: false
-  - name: GOG_ENABLE_COMMANDS
-    description: Top-level command allowlist
-    required: false
----
-```
-
-Design notes:
-- Keep scripts small and single-purpose (same style as brave-search scripts).
-- Force JSON output for deterministic parsing: add `--json` in wrappers.
-- Shared runner validates args and blocks shell injection (no raw shell string eval).
-- Return concise, agent-friendly markdown summaries with raw JSON fallback when needed.
-
----
-
-## Tools to Expose
-
-### Phase 1: read-only toolset
-- Gmail:
-  - `gmail_search` → `gog gmail search ... --json`
-  - `gmail_thread_get` → `gog gmail thread get <threadId> --json`
-- Calendar:
-  - `calendar_events` → `gog calendar events ... --json`
-  - `calendar_search` → `gog calendar search ... --json`
-  - `calendar_freebusy` → `gog calendar freebusy ... --json`
-- Drive:
-  - `drive_search` → `gog drive search ... --json`
-  - `drive_get` → `gog drive get <fileId> --json`
-  - `drive_download` (read/export only)
-- Docs:
-  - `docs_info` → `gog docs info <docId> --json`
-  - `docs_cat` → `gog docs cat <docId>`
-
-### Phase 2: write toolset (explicit opt-in)
-- Gmail:
-  - `gmail_send`
-  - `gmail_draft_create`
-- Calendar:
-  - `calendar_create_event`
-  - `calendar_update_event`
-  - `calendar_delete_event`
-- Drive:
-  - `drive_upload`
-  - `drive_copy`
-- Docs:
-  - `docs_create`
-  - `docs_update`
-
-### Write-operation guardrails
-- Require `writeEnabled=true` in config.
-- Add confirmation prompts for destructive actions (`delete`, broad updates).
-- Optional recipient/domain allowlist for outgoing mail.
-
----
-
-## Installation Strategy (Binary / npm / Go)
-
-### Recommendation
-Use a pinned `gog` binary managed by host setup, with health checks in Settings.
-
-### Supported paths
-1. Homebrew (preferred on macOS hosts):
-   - `brew install steipete/tap/gogcli`
-2. Build from source (fallback / Linux):
-   - clone repo + `make`
-3. npm:
-   - no npm install path documented in gogcli README (treat as unsupported)
-
-### Runtime checks
-- At startup/test, run:
-  - `gog --version`
-  - `gog auth status --account <configured-account>`
-- Surface actionable errors in Settings UI.
-
----
-
-## Security Plan
-
-1. Least privilege by default:
-   - Phase 1 read-only scopes.
-   - No write commands enabled until explicit opt-in.
-
-2. Secret handling:
-   - Credential JSON and keyring password stored via Swarm secrets store.
-   - API responses only return masked values and `has*` booleans.
-
-3. Token refresh:
-   - Rely on `gog` auto-refresh.
-   - Add periodic `auth list --check` health signal.
-
-4. Command surface restriction:
-   - Set `GOG_ENABLE_COMMANDS` to minimum required commands.
-   - Validate and whitelist wrapper args per tool.
-
-5. Auditability:
-   - Log command category + outcome, never raw tokens/secret payloads.
+Payload expectations:
+- `oauth/credentials`: `{ oauthClientJson, clientName? }`
+- `oauth/start`: `{ email, services?, readonly?, driveScope?, forceConsent? }`
+- `oauth/complete`: `{ email, authUrl, services?, readonly?, driveScope?, forceConsent? }`
 
 ---
 
 ## Phased Implementation
 
-### Phase 0 — Spike + install detection
-- Add G Suite integration service skeleton.
-- Implement binary/version detection and install guidance.
-- Define persisted config shape + status events.
+### Phase 0 — Foundation
+- Add `gsuite` integration config/status scaffolding.
+- Add `gog` detection and version checks in backend + Settings.
+- Implement per-process env strategy for `SWARM_DATA_DIR` isolation.
 
-### Phase 1 — Credential UX + read-only auth
-- Add SettingsDialog G Suite section.
-- Implement OAuth credential storage + remote step1/step2 flow.
-- Implement optional service-account setup.
-- Persist auth mode/scope profile.
+### Phase 1 — Settings OAuth MVP
+- Add G Suite section in Settings.
+- Implement `oauth/credentials`, `oauth/start`, `oauth/complete`.
+- Default to read-only scopes.
+- Add connection test and status display.
 
-### Phase 2 — Built-in skill scaffolding
-- Add `apps/backend/src/swarm/skills/builtins/gsuite/`.
-- Add `SKILL.md` frontmatter and JS runner utilities.
-- Wire built-in skill path in `SwarmManager.reloadSkillMetadata()`.
+### Phase 2 — Minimal Skill Enablement
+- Add `apps/backend/src/swarm/skills/builtins/gsuite/SKILL.md` only.
+- Wire skill metadata loading for `gsuite`.
+- Ensure skill docs point agents to direct `gog` usage.
 
-### Phase 3 — Read-only tools (MVP ship)
-- Ship Gmail/Calendar/Drive/Docs read tools.
-- Add unit tests for arg validation and parsing.
-- Validate from real account in smoke test.
-
-### Phase 4 — Write tools (gated)
-- Add send/create/update/delete wrappers.
-- Add write enable toggle + warning copy in Settings.
-- Add confirmation requirements for destructive actions.
-
-### Phase 5 — Hardening + docs
-- Retry/backoff for transient API failures.
-- Better error mapping (auth/scopes/quota/rate-limit).
-- Add operator runbook and troubleshooting section.
+### Phase 3 — Hardening + Optional Write Opt-In
+- Add explicit write-scope toggle in Settings (off by default).
+- Improve error mapping for common OAuth/state/scope failures.
+- Document operator troubleshooting (`state expired`, missing scopes, keyring password issues).
 
 ---
 
 ## Validation Checklist
 
-- Plan covers OAuth + service-account credential setup.
-- SettingsDialog includes a dedicated G Suite credential section.
-- Skill structure follows brave-search pattern (`SKILL.md` + JS wrappers).
-- Tool matrix includes required read and write operations.
-- Installation strategy addresses binary + source build and clarifies npm unsupported.
-- Security model covers scope minimization, secret storage, and token refresh.
-- Rollout is phased with read-only first and write second.
+1. Plan removes wrapper scripts and runner abstraction from skill scope.
+2. OAuth flow is fully driven from Settings UI (URL generation + paste-back completion).
+3. Commands map directly to actual `gog auth` behavior (`--remote --step 1/2`).
+4. Storage behavior is documented with accurate path/keyring details.
+5. `SWARM_DATA_DIR` strategy is explicit despite lack of native `gog` config-dir flag.
+6. Phased rollout remains coherent and read-only first.
