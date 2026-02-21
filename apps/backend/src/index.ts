@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
 import { createConfig } from "./config.js";
 import { SlackIntegrationService } from "./integrations/slack/slack-integration.js";
+import { TelegramIntegrationService } from "./integrations/telegram/telegram-integration.js";
 import { SwarmManager } from "./swarm/swarm-manager.js";
 import { SwarmWebSocketServer } from "./ws/server.js";
 
@@ -23,12 +24,20 @@ async function main(): Promise<void> {
   });
   await slackIntegration.start();
 
+  const telegramIntegration = new TelegramIntegrationService({
+    swarmManager,
+    dataDir: config.paths.dataDir,
+    defaultManagerId: config.managerId
+  });
+  await telegramIntegration.start();
+
   const wsServer = new SwarmWebSocketServer({
     swarmManager,
     host: config.host,
     port: config.port,
     allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
-    slackIntegration
+    slackIntegration,
+    telegramIntegration
   });
   await wsServer.start();
 
@@ -36,7 +45,7 @@ async function main(): Promise<void> {
 
   const shutdown = async (signal: string): Promise<void> => {
     console.log(`Received ${signal}. Shutting down...`);
-    await Promise.allSettled([slackIntegration.stop(), wsServer.stop()]);
+    await Promise.allSettled([slackIntegration.stop(), telegramIntegration.stop(), wsServer.stop()]);
     process.exit(0);
   };
 

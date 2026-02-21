@@ -1424,8 +1424,14 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     const normalizedExplicitTarget = normalizeMessageTargetContext(explicitTargetContext);
 
-    if (normalizedExplicitTarget.channel === "slack" && !normalizedExplicitTarget.channelId) {
-      throw new Error('speak_to_user target.channelId is required when target.channel is "slack"');
+    if (
+      (normalizedExplicitTarget.channel === "slack" ||
+        normalizedExplicitTarget.channel === "telegram") &&
+      !normalizedExplicitTarget.channelId
+    ) {
+      throw new Error(
+        'speak_to_user target.channelId is required when target.channel is "slack" or "telegram"'
+      );
     }
 
     return normalizeMessageSourceContext(normalizedExplicitTarget);
@@ -2804,7 +2810,10 @@ function formatInboundUserMessageForManager(text: string, sourceContext: Message
 
 function normalizeMessageTargetContext(input: MessageTargetContext): MessageTargetContext {
   return {
-    channel: input.channel === "slack" ? "slack" : "web",
+    channel:
+      input.channel === "slack" || input.channel === "telegram"
+        ? input.channel
+        : "web",
     channelId: normalizeOptionalMetadataValue(input.channelId),
     userId: normalizeOptionalMetadataValue(input.userId),
     threadTs: normalizeOptionalMetadataValue(input.threadTs)
@@ -2813,9 +2822,13 @@ function normalizeMessageTargetContext(input: MessageTargetContext): MessageTarg
 
 function normalizeMessageSourceContext(input: MessageSourceContext): MessageSourceContext {
   return {
-    channel: input.channel === "slack" ? "slack" : "web",
+    channel:
+      input.channel === "slack" || input.channel === "telegram"
+        ? input.channel
+        : "web",
     channelId: normalizeOptionalMetadataValue(input.channelId),
     userId: normalizeOptionalMetadataValue(input.userId),
+    messageId: normalizeOptionalMetadataValue(input.messageId),
     threadTs: normalizeOptionalMetadataValue(input.threadTs),
     channelType:
       input.channelType === "dm" ||
@@ -2886,7 +2899,7 @@ function isMessageSourceContext(value: unknown): value is MessageSourceContext {
 
   const maybe = value as Partial<MessageSourceContext>;
 
-  if (maybe.channel !== "web" && maybe.channel !== "slack") {
+  if (maybe.channel !== "web" && maybe.channel !== "slack" && maybe.channel !== "telegram") {
     return false;
   }
 
@@ -2895,6 +2908,10 @@ function isMessageSourceContext(value: unknown): value is MessageSourceContext {
   }
 
   if (maybe.userId !== undefined && typeof maybe.userId !== "string") {
+    return false;
+  }
+
+  if (maybe.messageId !== undefined && typeof maybe.messageId !== "string") {
     return false;
   }
 

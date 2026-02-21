@@ -41,11 +41,17 @@ const spawnModelPresetSchema = Type.Union([
   Type.Literal("codex-app")
 ]);
 
-const messageChannelSchema = Type.Union([Type.Literal("web"), Type.Literal("slack")]);
+const messageChannelSchema = Type.Union([
+  Type.Literal("web"),
+  Type.Literal("slack"),
+  Type.Literal("telegram")
+]);
 
 const speakToUserTargetSchema = Type.Object({
   channel: messageChannelSchema,
-  channelId: Type.Optional(Type.String({ description: "Required when channel is 'slack'." })),
+  channelId: Type.Optional(
+    Type.String({ description: "Required when channel is 'slack' or 'telegram'." })
+  ),
   userId: Type.Optional(Type.String()),
   threadTs: Type.Optional(Type.String())
 });
@@ -188,7 +194,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
       name: "speak_to_user",
       label: "Speak To User",
       description:
-        "Publish a user-visible manager message into the websocket conversation feed. If target is omitted, delivery defaults to web. For Slack delivery, set target.channel='slack' with target.channelId.",
+        "Publish a user-visible manager message into the websocket conversation feed. If target is omitted, delivery defaults to web. For Slack/Telegram delivery, set target.channel and target.channelId explicitly.",
       parameters: Type.Object({
         text: Type.String({ description: "Message content to show to the user." }),
         target: Type.Optional(speakToUserTargetSchema)

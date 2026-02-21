@@ -22,12 +22,13 @@ export interface AgentDescriptor {
 
 export type DeliveryMode = 'auto' | 'followUp' | 'steer'
 
-export type MessageChannel = 'web' | 'slack'
+export type MessageChannel = 'web' | 'slack' | 'telegram'
 
 export interface MessageSourceContext {
   channel: MessageChannel
   channelId?: string
   userId?: string
+  messageId?: string
   threadTs?: string
   channelType?: 'dm' | 'channel' | 'group' | 'mpim'
   teamId?: string
@@ -152,6 +153,16 @@ export interface SlackStatusEvent {
   botUserId?: string
 }
 
+export interface TelegramStatusEvent {
+  type: 'telegram_status'
+  state: 'disabled' | 'connecting' | 'connected' | 'disconnected' | 'error'
+  enabled: boolean
+  updatedAt: string
+  message?: string
+  botId?: string
+  botUsername?: string
+}
+
 export type ConversationEntry = ConversationMessageEvent | ConversationLogEvent
 
 export type ServerEvent =
@@ -172,4 +183,5 @@ export type ServerEvent =
   | DirectoryValidatedEvent
   | DirectoryPickedEvent
   | SlackStatusEvent
+  | TelegramStatusEvent
   | { type: 'error'; code: string; message: string; requestId?: string }
