@@ -109,6 +109,11 @@ export class AgentRuntime implements SwarmAgentRuntime {
     await this.emitStatus();
   }
 
+  async compact(customInstructions?: string): Promise<unknown> {
+    this.ensureNotTerminated();
+    return await this.session.compact(customInstructions);
+  }
+
   getCustomEntries(customType: string): unknown[] {
     const entries = this.session.sessionManager.getEntries();
     const matches: unknown[] = [];

@@ -71,6 +71,8 @@ export interface SwarmAgentRuntime {
     requestedMode?: RequestedDeliveryMode
   ): Promise<SendMessageReceipt>;
 
+  compact(customInstructions?: string): Promise<unknown>;
+
   terminate(options?: { abort?: boolean }): Promise<void>;
 
   getCustomEntries(customType: string): unknown[];

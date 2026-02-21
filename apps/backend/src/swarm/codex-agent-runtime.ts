@@ -196,6 +196,11 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     await this.emitStatus();
   }
 
+  async compact(): Promise<unknown> {
+    this.ensureNotTerminated();
+    throw new Error(`Agent ${this.descriptor.agentId} does not support manual compaction`);
+  }
+
   getCustomEntries(customType: string): unknown[] {
     const entries = this.sessionManager.getEntries();
     const matches: unknown[] = [];

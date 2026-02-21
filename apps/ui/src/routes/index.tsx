@@ -93,6 +93,7 @@ export function IndexPage() {
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const [activeArtifact, setActiveArtifact] = useState<ArtifactReference | null>(null)
   const [channelView, setChannelView] = useState<ChannelView>('web')
+  const [isCompactingManager, setIsCompactingManager] = useState(false)
   const dragDepthRef = useRef(0)
 
   useEffect(() => {
@@ -156,8 +157,41 @@ export function IndexPage() {
     setActiveArtifact(null)
   }, [activeAgentId])
 
+  const handleCompactManager = useCallback(
+    async (customInstructions?: string) => {
+      if (!isActiveManager || !activeAgentId) return
+
+      setIsCompactingManager(true)
+
+      try {
+        await requestManagerCompaction(wsUrl, activeAgentId, customInstructions)
+        setState((previous) => ({
+          ...previous,
+          lastError: null,
+        }))
+      } catch (error) {
+        setState((previous) => ({
+          ...previous,
+          lastError: `Failed to compact manager context: ${toErrorMessage(error)}`,
+        }))
+      } finally {
+        setIsCompactingManager(false)
+      }
+    },
+    [activeAgentId, isActiveManager, wsUrl],
+  )
+
   const handleSend = (text: string, attachments?: ConversationAttachment[]) => {
     if (!activeAgentId) return
+
+    const compactCommand =
+      isActiveManager && (!attachments || attachments.length === 0)
+        ? parseCompactSlashCommand(text)
+        : null
+    if (compactCommand) {
+      void handleCompactManager(compactCommand.customInstructions)
+      return
+    }
 
     clientRef.current?.sendUserMessage(text, {
       agentId: activeAgentId,
@@ -411,6 +445,9 @@ export function IndexPage() {
             activeAgentStatus={activeAgentStatus}
             channelView={channelView}
             onChannelViewChange={setChannelView}
+            showCompact={isActiveManager}
+            compactInProgress={isCompactingManager}
+            onCompact={() => void handleCompactManager()}
             showNewChat={isActiveManager}
             onNewChat={handleNewChat}
           />
@@ -646,6 +683,53 @@ async function requestDaemonReboot(wsUrl: string): Promise<void> {
   if (!response.ok) {
     throw new Error(`Reboot request failed with status ${response.status}`)
   }
+}
+
+async function requestManagerCompaction(
+  wsUrl: string,
+  agentId: string,
+  customInstructions?: string,
+): Promise<void> {
+  const endpoint = resolveApiEndpoint(wsUrl, `/api/agents/${encodeURIComponent(agentId)}/compact`)
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(
+      customInstructions && customInstructions.trim().length > 0
+        ? { customInstructions: customInstructions.trim() }
+        : {},
+    ),
+  })
+
+  if (!response.ok) {
+    let errorMessage: string | undefined
+    try {
+      const payload = (await response.json()) as { error?: unknown }
+      if (typeof payload.error === 'string' && payload.error.trim().length > 0) {
+        errorMessage = payload.error.trim()
+      }
+    } catch {
+      // Ignore JSON parsing errors and fall back to status-based error text.
+    }
+
+    throw new Error(errorMessage ?? `Compaction request failed with status ${response.status}`)
+  }
+}
+
+function parseCompactSlashCommand(text: string): { customInstructions?: string } | null {
+  const match = text.trim().match(/^\/compact(?:\s+([\s\S]+))?$/i)
+  if (!match) {
+    return null
+  }
+
+  const customInstructions = match[1]?.trim()
+  if (!customInstructions) {
+    return {}
+  }
+
+  return { customInstructions }
 }
 
 function resolveApiEndpoint(wsUrl: string, path: string): string {
