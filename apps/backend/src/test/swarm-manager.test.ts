@@ -75,11 +75,16 @@ class TestSwarmManager extends SwarmManager {
   readonly createdRuntimeIds: string[] = []
   readonly systemPromptByAgentId = new Map<string, string>()
 
-  async getMemoryRuntimeResourcesForTest(): Promise<{
+  async getMemoryRuntimeResourcesForTest(agentId = 'manager'): Promise<{
     memoryContextFile: { path: string; content: string }
     additionalSkillPaths: string[]
   }> {
-    return this.getMemoryRuntimeResources()
+    const descriptor = this.getAgent(agentId)
+    if (!descriptor) {
+      throw new Error(`Unknown test agent: ${agentId}`)
+    }
+
+    return this.getMemoryRuntimeResources(descriptor)
   }
 
   async getSwarmContextFilesForTest(cwd: string): Promise<Array<{ path: string; content: string }>> {
@@ -108,13 +113,15 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
   const agentDir = join(dataDir, 'agent')
   const managerAgentDir = join(agentDir, 'manager')
   const repoArchetypesDir = join(root, '.swarm', 'archetypes')
-  const memoryFile = join(dataDir, 'MEMORY.md')
+  const memoryDir = join(dataDir, 'memory')
+  const memoryFile = join(memoryDir, 'manager.md')
   const repoMemorySkillFile = join(root, '.swarm', 'skills', 'memory', 'SKILL.md')
 
   await mkdir(swarmDir, { recursive: true })
   await mkdir(sessionsDir, { recursive: true })
   await mkdir(uploadsDir, { recursive: true })
   await mkdir(authDir, { recursive: true })
+  await mkdir(memoryDir, { recursive: true })
   await mkdir(agentDir, { recursive: true })
   await mkdir(managerAgentDir, { recursive: true })
   await mkdir(repoArchetypesDir, { recursive: true })
@@ -144,6 +151,7 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
       agentDir,
       managerAgentDir,
       repoArchetypesDir,
+      memoryDir,
       memoryFile,
       repoMemorySkillFile,
       agentsStoreFile: join(swarmDir, 'agents.json'),
@@ -186,7 +194,7 @@ describe('SwarmManager', () => {
     })
   })
 
-  it('bootstraps MEMORY.md in SWARM_DATA_DIR when missing', async () => {
+  it('bootstraps manager memory file in SWARM_DATA_DIR/memory when missing', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
 
@@ -197,7 +205,7 @@ describe('SwarmManager', () => {
     expect(memory).toContain('## User Preferences')
   })
 
-  it('preserves existing MEMORY.md content across restart', async () => {
+  it('preserves existing manager memory content across restart', async () => {
     const config = await makeTempConfig()
 
     const firstBoot = new TestSwarmManager(config)
@@ -214,6 +222,40 @@ describe('SwarmManager', () => {
 
     const resources = await secondBoot.getMemoryRuntimeResourcesForTest()
     expect(resources.memoryContextFile.content).toBe(persistedMemory)
+  })
+
+  it('migrates legacy global MEMORY.md into manager memory on first boot', async () => {
+    const config = await makeTempConfig()
+    const legacyMemoryFile = join(config.paths.dataDir, 'MEMORY.md')
+    const legacyContent = '# Swarm Memory\n\n## Project Facts\n- migrated legacy memory\n'
+
+    await writeFile(legacyMemoryFile, legacyContent, 'utf8')
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const managerMemory = await readFile(config.paths.memoryFile, 'utf8')
+    expect(managerMemory).toBe(legacyContent)
+
+    const markerContent = await readFile(join(config.paths.memoryDir, '.migrated'), 'utf8')
+    expect(markerContent).toContain('per-agent-memory-migration-complete')
+  })
+
+  it('workers load their owning manager memory file', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', { agentId: 'Memory Worker' })
+    const workerMemoryFile = join(config.paths.memoryDir, `${worker.agentId}.md`)
+
+    await writeFile(config.paths.memoryFile, '# Swarm Memory\n\n## Decisions\n- manager memory\n', 'utf8')
+    await writeFile(workerMemoryFile, '# Swarm Memory\n\n## Decisions\n- worker memory\n', 'utf8')
+
+    const resources = await manager.getMemoryRuntimeResourcesForTest(worker.agentId)
+    expect(resources.memoryContextFile.path).toBe(config.paths.memoryFile)
+    expect(resources.memoryContextFile.content).toContain('manager memory')
+    expect(resources.memoryContextFile.content).not.toContain('worker memory')
   })
 
   it('loads SWARM.md context files from the cwd ancestor chain', async () => {
@@ -260,7 +302,7 @@ describe('SwarmManager', () => {
     expect(managerPrompt).toContain('You are the manager agent in a multi-agent swarm.')
     expect(managerPrompt).toContain('End users only see two things')
     expect(managerPrompt).toContain('prefixed with "SYSTEM:"')
-    expect(managerPrompt).toContain('Shared long-term memory is stored at `${SWARM_DATA_DIR}/MEMORY.md`')
+    expect(managerPrompt).toContain('Your manager memory file is `${SWARM_MEMORY_FILE}`')
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Prompt Worker' })
     const workerPrompt = manager.systemPromptByAgentId.get(worker.agentId)
@@ -268,11 +310,12 @@ describe('SwarmManager', () => {
     expect(workerPrompt).toBeDefined()
     expect(workerPrompt).toContain('End users only see messages they send and manager speak_to_user outputs.')
     expect(workerPrompt).toContain('Incoming messages prefixed with "SYSTEM:"')
-    expect(workerPrompt).toContain('Persistent memory lives at ${SWARM_DATA_DIR}/MEMORY.md')
-    expect(workerPrompt).toContain('Follow the memory skill workflow before editing MEMORY.md')
+    expect(workerPrompt).toContain('Persistent memory for this runtime is at ${SWARM_MEMORY_FILE}')
+    expect(workerPrompt).toContain('Workers read their owning manager\'s memory file.')
+    expect(workerPrompt).toContain('Follow the memory skill workflow before editing the memory file')
   })
 
-  it('auto-loads MEMORY.md context and wires built-in memory + brave-search + cron-scheduling + agent-browser + image-generation + gsuite skills', async () => {
+  it('auto-loads per-runtime memory context and wires built-in memory + brave-search + cron-scheduling + agent-browser + image-generation + gsuite skills', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
     await manager.boot()
@@ -287,7 +330,7 @@ describe('SwarmManager', () => {
 
     const memorySkill = await readFile(resources.additionalSkillPaths[0], 'utf8')
     expect(memorySkill).toContain('name: memory')
-    expect(memorySkill).toContain('Persistent memory file: `${SWARM_DATA_DIR}/MEMORY.md`')
+    expect(memorySkill).toContain('In this runtime, use `${SWARM_MEMORY_FILE}`')
 
     const braveSkill = await readFile(resources.additionalSkillPaths[1], 'utf8')
     expect(braveSkill).toContain('name: brave-search')
@@ -477,7 +520,7 @@ describe('SwarmManager', () => {
     const mergerPrompt = manager.systemPromptByAgentId.get(merger.agentId)
     expect(mergerPrompt).toContain('You are the merger agent in a multi-agent swarm.')
     expect(mergerPrompt).toContain('Own branch integration and merge execution tasks.')
-    expect(mergerPrompt).toContain('Shared memory is `${SWARM_DATA_DIR}/MEMORY.md`')
+    expect(mergerPrompt).toContain('This runtime memory file is `${SWARM_MEMORY_FILE}`')
   })
 
   it('applies deterministic merger archetype mapping for merger-* worker ids', async () => {

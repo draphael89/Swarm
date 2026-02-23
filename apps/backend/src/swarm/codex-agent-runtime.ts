@@ -70,6 +70,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     now?: () => string;
     systemPrompt: string;
     tools: ToolDefinition[];
+    runtimeEnv?: Record<string, string | undefined>;
   }) {
     this.descriptor = options.descriptor;
     this.callbacks = options.callbacks;
@@ -82,13 +83,24 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     this.sandboxSettings = buildCodexSandboxSettings();
 
     const command = process.env.CODEX_BIN?.trim() || "codex";
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      ...process.env
+    };
+
+    for (const [name, value] of Object.entries(options.runtimeEnv ?? {})) {
+      if (typeof value === "string" && value.trim().length > 0) {
+        runtimeEnv[name] = value;
+      } else {
+        delete runtimeEnv[name];
+      }
+    }
 
     this.rpc = new CodexJsonRpcClient({
       command,
       args: ["app-server", "--listen", "stdio://"],
       spawnOptions: {
         cwd: options.descriptor.cwd,
-        env: process.env
+        env: runtimeEnv
       },
       onNotification: async (notification) => {
         await this.handleNotification(notification);
@@ -111,6 +123,7 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     now?: () => string;
     systemPrompt: string;
     tools: ToolDefinition[];
+    runtimeEnv?: Record<string, string | undefined>;
   }): Promise<CodexAgentRuntime> {
     const runtime = new CodexAgentRuntime(options);
 

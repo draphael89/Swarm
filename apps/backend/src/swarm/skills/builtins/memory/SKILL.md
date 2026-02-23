@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Update persistent swarm memory in ${SWARM_DATA_DIR}/MEMORY.md when the user explicitly asks to remember, update, or forget durable information.
+description: Update persistent swarm memory in ${SWARM_MEMORY_FILE} when the user explicitly asks to remember, update, or forget durable information.
 ---
 
 # Persistent Memory Workflow
@@ -13,11 +13,11 @@ Use this skill when the user explicitly asks to:
 Do not write memory for normal one-off requests.
 
 ## File location
-- Persistent memory file: `${SWARM_DATA_DIR}/MEMORY.md`.
-- In this runtime, use the exact MEMORY.md path shown in your loaded context.
+- Persistent memory files are stored at `${SWARM_DATA_DIR}/memory/<agentId>.md`.
+- In this runtime, use `${SWARM_MEMORY_FILE}` (also shown in your loaded context).
 
 ## Steps
-1. Read current MEMORY.md with `read` before changing it.
+1. Read the current memory file with `read` before changing it.
 2. Apply minimal edits:
    - prefer `edit` for targeted changes,
    - use `write` only for full rewrites.

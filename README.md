@@ -127,7 +127,7 @@ Swarm injects built-in `SKILL.md` instructions into agent runtime context at sta
 
 Built-in skills:
 
-- `memory`: persistent memory workflow (`$SWARM_DATA_DIR/MEMORY.md`)
+- `memory`: persistent memory workflow (`$SWARM_DATA_DIR/memory/<agentId>.md`, runtime alias: `$SWARM_MEMORY_FILE`)
 - `brave-search`: Brave Search API web research + content extraction
 - `cron-scheduling`: persistent schedule creation/list/remove via cron
 - `gsuite`: Google Workspace workflows through `gog` CLI

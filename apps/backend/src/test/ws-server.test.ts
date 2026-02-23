@@ -115,13 +115,15 @@ async function makeTempConfig(port: number, allowNonManagerSubscriptions = false
   const agentDir = join(dataDir, 'agent')
   const managerAgentDir = join(agentDir, 'manager')
   const repoArchetypesDir = join(root, '.swarm', 'archetypes')
-  const memoryFile = join(dataDir, 'MEMORY.md')
+  const memoryDir = join(dataDir, 'memory')
+  const memoryFile = join(memoryDir, 'manager.md')
   const repoMemorySkillFile = join(root, '.swarm', 'skills', 'memory', 'SKILL.md')
 
   await mkdir(swarmDir, { recursive: true })
   await mkdir(sessionsDir, { recursive: true })
   await mkdir(uploadsDir, { recursive: true })
   await mkdir(authDir, { recursive: true })
+  await mkdir(memoryDir, { recursive: true })
   await mkdir(agentDir, { recursive: true })
   await mkdir(managerAgentDir, { recursive: true })
   await mkdir(repoArchetypesDir, { recursive: true })
@@ -151,6 +153,7 @@ async function makeTempConfig(port: number, allowNonManagerSubscriptions = false
       agentDir,
       managerAgentDir,
       repoArchetypesDir,
+      memoryDir,
       memoryFile,
       repoMemorySkillFile,
       agentsStoreFile: join(swarmDir, 'agents.json'),
