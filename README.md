@@ -17,7 +17,7 @@ Swarm is a local-first agent manager built around a manager/worker orchestration
 - Multi-agent orchestration (manager + workers)
 - Web UI with real-time streaming
 - Slack & Telegram integration
-- Built-in skills (web search, cron scheduling, G Suite, browser)
+- Built-in skills (memory, web search, cron scheduling, browser, image generation, G Suite)
 - File attachments (drag/drop/paste)
 - Artifact panel for file references
 - Dark mode
@@ -50,10 +50,10 @@ Core flow:
 ### Install
 
 ```bash
-git clone <your-repo-url> swarm
+git clone https://github.com/SawyerHood/swarm.git
 cd swarm
 pnpm install
-cp .env.example .env
+cp .env.example .env # optional
 ```
 
 ### Run in development
@@ -132,6 +132,7 @@ Built-in skills:
 - `cron-scheduling`: persistent schedule creation/list/remove via cron
 - `gsuite`: Google Workspace workflows through `gog` CLI
 - `agent-browser`: interactive browser automation via `agent-browser` CLI
+- `image-generation`: image generation workflows
 
 Skill-declared env vars appear in **Settings → Environment Variables** and are stored locally for runtime use.
 
@@ -146,7 +147,7 @@ Skill-declared env vars appear in **Settings → Environment Variables** and are
 3. Enable integration, paste tokens, choose target manager, and configure channel/listen options.
 4. Click **Test connection**, then **Save Slack settings**.
 
-Config is persisted at `$SWARM_DATA_DIR/integrations/slack.json`.
+Config is persisted at `$SWARM_DATA_DIR/integrations/managers/<manager-id>/slack.json`.
 
 ### Telegram
 
@@ -155,7 +156,7 @@ Config is persisted at `$SWARM_DATA_DIR/integrations/slack.json`.
 3. Enable integration, set bot token, target manager, and optional user allowlist.
 4. Click **Test connection**, then **Save Telegram settings**.
 
-Config is persisted at `$SWARM_DATA_DIR/integrations/telegram.json`.
+Config is persisted at `$SWARM_DATA_DIR/integrations/managers/<manager-id>/telegram.json`.
 
 ## Development
 
