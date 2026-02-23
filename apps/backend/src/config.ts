@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { getScheduleFilePath } from "./scheduler/schedule-storage.js";
 import { normalizeAllowlistRoots } from "./swarm/cwd-policy.js";
+import { getAgentMemoryPath, getMemoryDirPath } from "./swarm/memory-paths.js";
 import type { SwarmConfig } from "./swarm/types.js";
 
 export function createConfig(): SwarmConfig {
@@ -24,6 +25,7 @@ export function createConfig(): SwarmConfig {
 
   const dataDirEnv = process.env.SWARM_DATA_DIR?.trim();
   const dataDir = dataDirEnv ? resolveDataDir(rootDir, dataDirEnv) : defaultDataDir;
+  const managerId = "manager";
   const swarmDir = resolve(dataDir, "swarm");
   const sessionsDir = resolve(dataDir, "sessions");
   const uploadsDir = resolve(dataDir, "uploads");
@@ -38,7 +40,8 @@ export function createConfig(): SwarmConfig {
   const agentDir = resolve(dataDir, "agent");
   const managerAgentDir = resolve(agentDir, "manager");
   const repoArchetypesDir = resolve(rootDir, ".swarm", "archetypes");
-  const memoryFile = resolve(dataDir, "MEMORY.md");
+  const memoryDir = getMemoryDirPath(dataDir);
+  const memoryFile = getAgentMemoryPath(dataDir, managerId);
   const repoMemorySkillFile = resolve(rootDir, ".swarm", "skills", "memory", "SKILL.md");
   const secretsFile = resolve(dataDir, "secrets.json");
   const defaultCwd = process.env.SWARM_DEFAULT_CWD ? resolve(process.env.SWARM_DEFAULT_CWD) : rootDir;
@@ -54,7 +57,6 @@ export function createConfig(): SwarmConfig {
     resolve(homedir(), "worktrees"),
     ...configuredAllowlistRoots
   ]);
-  const managerId = "manager";
 
   return {
     host: process.env.SWARM_HOST ?? "127.0.0.1",
@@ -81,6 +83,7 @@ export function createConfig(): SwarmConfig {
       agentDir,
       managerAgentDir,
       repoArchetypesDir,
+      memoryDir,
       memoryFile,
       repoMemorySkillFile,
       agentsStoreFile: resolve(swarmDir, "agents.json"),

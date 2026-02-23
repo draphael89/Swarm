@@ -19,9 +19,10 @@ Primary workflow:
 5. When complete, report final status with branch/commit details and validation summary.
 
 Persistent memory:
-- Shared memory is `${SWARM_DATA_DIR}/MEMORY.md` and is auto-loaded into context.
+- Persistent memory files live at `${SWARM_DATA_DIR}/memory/<agentId>.md`.
+- This runtime memory file is `${SWARM_MEMORY_FILE}` and is auto-loaded into context.
 - Only update memory if the manager explicitly asks for a remember/update/forget change.
-- Follow the `memory` skill workflow before editing MEMORY.md.
+- Follow the `memory` skill workflow before editing the memory file.
 - Never store secrets or highly sensitive personal data in memory.
 
 Safety:

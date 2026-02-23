@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getModel, type Model } from "@mariozechner/pi-ai";
@@ -21,6 +21,11 @@ import {
 } from "./archetypes/archetype-prompt-registry.js";
 import { AgentRuntime } from "./agent-runtime.js";
 import { CodexAgentRuntime } from "./codex-agent-runtime.js";
+import {
+  getAgentMemoryPath as getAgentMemoryPathForDataDir,
+  getLegacyMemoryPath,
+  getMemoryMigrationMarkerPath
+} from "./memory-paths.js";
 import {
   listDirectories,
   normalizeAllowlistRoots,
@@ -79,9 +84,10 @@ const DEFAULT_WORKER_SYSTEM_PROMPT = `You are a worker agent in a swarm.
 - End users only see messages they send and manager speak_to_user outputs.
 - Your plain assistant text is not directly visible to end users.
 - Incoming messages prefixed with "SYSTEM:" are internal control/context updates, not direct end-user chat.
-- Persistent memory lives at \${SWARM_DATA_DIR}/MEMORY.md and is auto-loaded into context.
+- Persistent memory for this runtime is at \${SWARM_MEMORY_FILE} and is auto-loaded into context.
+- Workers read their owning manager's memory file.
 - Only write memory when explicitly asked to remember/update/forget durable information.
-- Follow the memory skill workflow before editing MEMORY.md, and never store secrets in memory.`;
+- Follow the memory skill workflow before editing the memory file, and never store secrets in memory.`;
 const MANAGER_ARCHETYPE_ID = "manager";
 const MERGER_ARCHETYPE_ID = "merger";
 const INTERNAL_MODEL_MESSAGE_PREFIX = "SYSTEM: ";
@@ -176,6 +182,7 @@ const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
 ## Open Follow-ups
 - (none yet)
 `;
+const MEMORY_MIGRATION_MARKER_CONTENT = "per-agent-memory-migration-complete\n";
 const SKILL_FRONTMATTER_BLOCK_PATTERN = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/;
 const SETTINGS_ENV_MASK = "********";
 const SETTINGS_AUTH_MASK = "********";
@@ -256,7 +263,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
 
     await this.ensureDirectories();
-    await this.ensureMemoryFile();
     await this.loadSecretsStore();
     await this.reloadSkillMetadata();
 
@@ -280,6 +286,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     this.prepareDescriptorsForBoot();
+    await this.ensureMemoryFilesForBoot();
     await this.saveStore();
 
     this.loadConversationHistoriesFromStore();
@@ -1621,19 +1628,23 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
   }
 
-  protected async getMemoryRuntimeResources(): Promise<{
+  protected async getMemoryRuntimeResources(descriptor: AgentDescriptor): Promise<{
     memoryContextFile: { path: string; content: string };
     additionalSkillPaths: string[];
   }> {
-    await this.ensureMemoryFile();
+    await this.ensureAgentMemoryFile(descriptor.agentId);
+
+    const memoryOwnerAgentId = this.resolveMemoryOwnerAgentId(descriptor);
+    const memoryFilePath = this.getAgentMemoryPath(memoryOwnerAgentId);
+    await this.ensureAgentMemoryFile(memoryOwnerAgentId);
 
     if (this.skillMetadata.length === 0) {
       await this.reloadSkillMetadata();
     }
 
     const memoryContextFile = {
-      path: this.config.paths.memoryFile,
-      content: await readFile(this.config.paths.memoryFile, "utf8")
+      path: memoryFilePath,
+      content: await readFile(memoryFilePath, "utf8")
     };
 
     return {
@@ -1931,6 +1942,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     const thinkingLevel = normalizeThinkingLevel(descriptor.model.thinkingLevel);
     const runtimeAgentDir =
       descriptor.role === "manager" ? this.config.paths.managerAgentDir : this.config.paths.agentDir;
+    const memoryResources = await this.getMemoryRuntimeResources(descriptor);
 
     this.logDebug("runtime:create:start", {
       runtime: "pi",
@@ -1941,14 +1953,13 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       cwd: descriptor.cwd,
       authFile: this.config.paths.authFile,
       agentDir: runtimeAgentDir,
-      memoryFile: this.config.paths.memoryFile,
+      memoryFile: memoryResources.memoryContextFile.path,
       managerSystemPromptSource:
         descriptor.role === "manager" ? `archetype:${MANAGER_ARCHETYPE_ID}` : undefined
     });
 
     const authStorage = AuthStorage.create(this.config.paths.authFile);
     const modelRegistry = new ModelRegistry(authStorage);
-    const memoryResources = await this.getMemoryRuntimeResources();
     const swarmContextFiles = await this.getSwarmContextFiles(descriptor.cwd);
     const applyRuntimeContext = (base: { agentsFiles: Array<{ path: string; content: string }> }) => ({
       agentsFiles: this.mergeRuntimeContextFiles(base.agentsFiles, {
@@ -2035,7 +2046,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     systemPrompt: string
   ): Promise<SwarmAgentRuntime> {
     const swarmTools = buildSwarmTools(this, descriptor);
-    const memoryResources = await this.getMemoryRuntimeResources();
+    const memoryResources = await this.getMemoryRuntimeResources(descriptor);
     const swarmContextFiles = await this.getSwarmContextFiles(descriptor.cwd);
 
     const codexSystemPrompt = this.buildCodexRuntimeSystemPrompt(systemPrompt, {
@@ -2067,7 +2078,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       },
       now: this.now,
       systemPrompt: codexSystemPrompt,
-      tools: swarmTools
+      tools: swarmTools,
+      runtimeEnv: {
+        SWARM_DATA_DIR: this.config.paths.dataDir,
+        SWARM_MEMORY_FILE: memoryResources.memoryContextFile.path
+      }
     });
 
     this.logDebug("runtime:create:ready", {
@@ -2363,6 +2378,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       this.config.paths.sessionsDir,
       this.config.paths.uploadsDir,
       this.config.paths.authDir,
+      this.config.paths.memoryDir,
       this.config.paths.agentDir,
       this.config.paths.managerAgentDir
     ];
@@ -2372,9 +2388,97 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
   }
 
-  private async ensureMemoryFile(): Promise<void> {
+  private getAgentMemoryPath(agentId: string): string {
+    return getAgentMemoryPathForDataDir(this.config.paths.dataDir, agentId);
+  }
+
+  private resolveMemoryOwnerAgentId(descriptor: AgentDescriptor): string {
+    if (descriptor.role === "manager") {
+      return descriptor.agentId;
+    }
+
+    const managerId = descriptor.managerId.trim();
+    return managerId.length > 0 ? managerId : this.config.managerId;
+  }
+
+  private async ensureMemoryFilesForBoot(): Promise<void> {
+    const managerIds = Array.from(
+      new Set(
+        Array.from(this.descriptors.values())
+          .filter((descriptor) => descriptor.role === "manager")
+          .map((descriptor) => descriptor.agentId)
+      )
+    );
+
+    if (managerIds.length === 0) {
+      managerIds.push(this.config.managerId);
+    }
+
+    await this.migrateLegacyMemoryFileIfNeeded(managerIds);
+
+    const memoryAgentIds = new Set<string>([this.config.managerId, ...managerIds]);
+    for (const descriptor of this.descriptors.values()) {
+      memoryAgentIds.add(descriptor.agentId);
+      if (descriptor.role === "worker") {
+        memoryAgentIds.add(this.resolveMemoryOwnerAgentId(descriptor));
+      }
+    }
+
+    for (const agentId of memoryAgentIds) {
+      await this.ensureAgentMemoryFile(agentId);
+    }
+  }
+
+  private async migrateLegacyMemoryFileIfNeeded(managerIds: string[]): Promise<void> {
+    const legacyMemoryFilePath = getLegacyMemoryPath(this.config.paths.dataDir);
+    if (!existsSync(legacyMemoryFilePath)) {
+      return;
+    }
+
+    const migrationMarkerPath = getMemoryMigrationMarkerPath(this.config.paths.dataDir);
+    if (existsSync(migrationMarkerPath)) {
+      return;
+    }
+
+    const existingMemoryFiles = await this.listMemoryMarkdownFiles();
+    if (existingMemoryFiles.length > 0) {
+      return;
+    }
+
+    const memoryContent = await readFile(legacyMemoryFilePath, "utf8");
+
+    for (const managerId of managerIds) {
+      const managerMemoryPath = this.getAgentMemoryPath(managerId);
+      if (existsSync(managerMemoryPath)) {
+        continue;
+      }
+
+      await mkdir(dirname(managerMemoryPath), { recursive: true });
+      await writeFile(managerMemoryPath, memoryContent, "utf8");
+    }
+
+    await writeFile(migrationMarkerPath, MEMORY_MIGRATION_MARKER_CONTENT, "utf8");
+  }
+
+  private async listMemoryMarkdownFiles(): Promise<string[]> {
     try {
-      await readFile(this.config.paths.memoryFile, "utf8");
+      const entries = await readdir(this.config.paths.memoryDir, { withFileTypes: true });
+      return entries
+        .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".md"))
+        .map((entry) => entry.name);
+    } catch (error) {
+      if (isEnoentError(error)) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  private async ensureAgentMemoryFile(agentId: string): Promise<void> {
+    const memoryFilePath = this.getAgentMemoryPath(agentId);
+
+    try {
+      await readFile(memoryFilePath, "utf8");
       return;
     } catch (error) {
       if (!isEnoentError(error)) {
@@ -2382,7 +2486,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       }
     }
 
-    await writeFile(this.config.paths.memoryFile, DEFAULT_MEMORY_FILE_CONTENT, "utf8");
+    await mkdir(dirname(memoryFilePath), { recursive: true });
+    await writeFile(memoryFilePath, DEFAULT_MEMORY_FILE_CONTENT, "utf8");
   }
 
   private async deleteManagerSessionFile(sessionFile: string): Promise<void> {
