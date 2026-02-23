@@ -1,6 +1,7 @@
 {
   "name": "@swarm/ui",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 47188 --strictPort",

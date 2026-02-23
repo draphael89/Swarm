@@ -1,75 +1,57 @@
-# Terry Local - Agent Notes
+# Swarm - Agent Notes
 
 ## What This Project Is
-`terry-local` is a local-first agent manager inspired by Terragon. It runs:
+`swarm` is a local-first multi-agent orchestration platform. It runs:
 
-1. A local Node daemon for agent orchestration and persistence.
-2. A TanStack Start + Vite SPA for dashboard + chat UI.
+1. A Node.js backend for manager/worker orchestration and persistence.
+2. A TanStack Start + Vite SPA for dashboard, chat, settings, and artifacts.
 3. Realtime updates over WebSocket.
 
-The current dev workflow runs daemon + web app in one process on one port.
-
-## Original Codebase Reference
-This implementation is based on the original Terragon codebase, especially:
-
-- `/Users/sawyerhood/terry-root/terragon/apps/www` (UI, styles, UX behavior)
-- Dashboard + thread list + chat + promptbox surfaces and their dependency closure
-
-When making UI changes in parity scope, treat Terragon `apps/www` as source-of-truth.
-
-## Scope and Parity Expectations
-In-scope parity target:
-
-1. Dashboard layout and behavior.
-2. Thread list/sidebar behavior.
-3. Chat thread rendering + streaming behavior.
-4. Prompt/composer interactions.
-5. Styling/tokens/animations for these surfaces.
-
-Parity means matching the original app’s visual structure and interaction states as closely as possible, not redesigning.
+## Scope Expectations
+For dashboard/chat/settings work, preserve existing behavior and interaction patterns unless the task explicitly requests a redesign.
 
 ## Architecture (Current)
 
 ### Frontend
-- SPA with TanStack Start + Vite.
-- UI state uses Jotai for dashboard/chat domain state.
-- Thread list/detail + optimistic updates are managed through Jotai-backed query/mutation hooks.
+- SPA with TanStack Start + Vite in `apps/ui`.
+- Real-time client state and transport in `apps/ui/src/lib/ws-client.ts`.
+- Core UI surfaces in `apps/ui/src/components/chat/*` and `apps/ui/src/components/settings/*`.
 
-### Backend/Daemon
-- HTTP + WS server in `src/daemon/*`.
-- REST endpoints under `/api/*`.
-- WS endpoint at `/ws`.
-- Runtime adapters handle Claude + Codex execution and stream normalized events.
-- Log replay/indexing is used for historical recovery/backfill.
+### Backend
+- HTTP + WebSocket server in `apps/backend/src/ws/server.ts`.
+- Agent orchestration and runtime logic in `apps/backend/src/swarm/*`.
+- Integrations in `apps/backend/src/integrations/*`.
+- Scheduler in `apps/backend/src/scheduler/*`.
 
 ### Contracts
-Canonical shared contracts are in:
+Canonical wire contracts are defined in:
 
-- `src/contracts/agent.ts`
-- `src/contracts/rest.ts`
-- `src/contracts/ws.ts`
-- `src/contracts/provider-events.ts`
+- `apps/backend/src/protocol/ws-types.ts`
+- `apps/ui/src/lib/ws-types.ts`
 
 ## Run and Test
 
-### Dev (single process)
+### Development
 ```bash
 pnpm dev
 ```
-Serves UI + API + WS from the same server/port (default `http://127.0.0.1:47322`).
-Default ports:
-- Dev (`pnpm dev`): `http://127.0.0.1:47322`
-- Prod daemon (`pnpm daemon:start`): `http://127.0.0.1:47321`
+Starts backend + UI in one command (two local ports):
+- Backend HTTP + WS: `http://127.0.0.1:47187` / `ws://127.0.0.1:47187`
+- UI: `http://127.0.0.1:47188`
+
+### Production
+```bash
+pnpm prod
+```
+Default production ports:
+- Backend HTTP + WS: `http://127.0.0.1:47287` / `ws://127.0.0.1:47287`
+- UI preview: `http://127.0.0.1:47289`
 
 ### Useful checks
 ```bash
 pnpm build
 pnpm test
-```
-
-Health endpoint:
-```bash
-curl http://127.0.0.1:47322/api/health
+pnpm exec tsc --noEmit
 ```
 
 ## Shadcn UI
@@ -93,28 +75,14 @@ pnpm dlx shadcn@latest add button label switch select tabs separator scroll-area
 
 Generated components go to `apps/ui/src/components/ui/`. Check available components and usage at https://ui.shadcn.com/docs.
 
-Currently installed: badge, button, card, checkbox, dialog, input, label, scroll-area, select, separator, switch, tabs, textarea, tooltip.
-
-## Important Implementation Notes
-
-1. Root route now has an explicit `notFoundComponent` to avoid TanStack router fallback warnings.
-2. Agent icon assets used by chat (`/agents/*`, `/ampcode.svg`) are expected in `public/`.
-3. Thread detail responses are sanitized to avoid leaking internal fields.
-4. Sending a message to an already running thread returns `409` instead of a generic server failure.
+Currently installed: badge, button, card, checkbox, context-menu, dialog, input, label, scroll-area, select, separator, switch, tabs, textarea, tooltip.
 
 ## Working Rules for Future Changes
 
-1. Preserve parity-first behavior in dashboard/chat scope.
-2. Prefer adapting boundaries (Next -> SPA/router/env shims) over redesigning component logic.
-3. Keep canonical event flow deterministic (dedupe-aware) across SDK stream + log replay.
-4. Keep Jotai as source of truth for migrated dashboard/chat state.
-5. Validate changes with:
-   - UI smoke check (dashboard, thread open, composer send/stop).
-   - API/WS smoke check.
-   - Build pass (`pnpm build`).
-6. Before finishing any task, always run a full TypeScript typecheck and fix all reported errors:
+1. Preserve behavior and interaction parity for existing dashboard/chat/settings flows unless a task calls for change.
+2. Keep event handling deterministic across live stream and replayed history.
+3. Prefer working within existing backend/frontend boundaries instead of introducing broad architectural churn.
+4. Validate changes with UI smoke checks (manager creation, chat send/stop, settings updates).
+5. Before finishing any task, run a full TypeScript typecheck and fix reported errors:
    - `pnpm exec tsc --noEmit`
-7. Always prefer shadcn/ui components over hand-rolled HTML elements for UI surfaces and controls.
-8. Add new shadcn/ui components from `apps/ui` using:
-   - `pnpm dlx shadcn@latest add <component>`
-   - Check component availability/usage at `https://ui.shadcn.com/docs`
+6. Prefer shadcn/ui components over hand-rolled HTML for UI controls and surfaces.
