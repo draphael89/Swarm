@@ -1,0 +1,54 @@
+import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
+import appCss from '../styles.css?url'
+
+export const Route = createRootRoute({
+  head: () => ({
+    meta: [
+      { charSet: 'utf-8' },
+      { name: 'viewport', content: 'width=device-width, initial-scale=1' },
+      { title: 'Swarm \u2014 Local-First AI Agent Orchestration' },
+      {
+        name: 'description',
+        content:
+          'Swarm is an open-source, local-first AI agent orchestration platform with manager/worker delegation, multi-model runtimes, and a real-time streaming interface.',
+      },
+      { property: 'og:title', content: 'Swarm \u2014 Local-First AI Agent Orchestration' },
+      {
+        property: 'og:description',
+        content:
+          'Run manager + worker AI agents locally with streaming chat, artifacts, schedules, and channel integrations.',
+      },
+      { property: 'og:type', content: 'website' },
+      { name: 'theme-color', content: '#07090f' },
+    ],
+    links: [
+      { rel: 'stylesheet', href: appCss },
+      { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+      { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+      {
+        rel: 'preconnect',
+        href: 'https://fonts.gstatic.com',
+        crossOrigin: 'anonymous',
+      },
+      {
+        rel: 'stylesheet',
+        href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap',
+      },
+    ],
+  }),
+  shellComponent: RootDocument,
+})
+
+function RootDocument({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <head>
+        <HeadContent />
+      </head>
+      <body>
+        {children}
+        <Scripts />
+      </body>
+    </html>
+  )
+}
