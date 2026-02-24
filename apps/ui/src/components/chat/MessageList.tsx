@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   AlertCircle,
   Check,
+  ChevronDown,
   ChevronRight,
   File,
   FileText,
@@ -772,6 +773,7 @@ export function MessageList({
   const previousEntryCountRef = useRef(0)
   const hasScrolledRef = useRef(false)
   const isAtBottomRef = useRef(true)
+  const [showScrollButton, setShowScrollButton] = useState(false)
 
   const displayEntries = useMemo(() => buildDisplayEntries(messages), [messages])
 
@@ -779,10 +781,13 @@ export function MessageList({
     const container = scrollContainerRef.current
     if (!container) {
       isAtBottomRef.current = true
+      setShowScrollButton(false)
       return
     }
 
-    isAtBottomRef.current = isNearBottom(container)
+    const isAtBottom = isNearBottom(container)
+    isAtBottomRef.current = isAtBottom
+    setShowScrollButton(!isAtBottom)
   }
 
   const handleScroll = () => {
@@ -813,6 +818,7 @@ export function MessageList({
         block: 'end',
       })
       isAtBottomRef.current = true
+      setShowScrollButton(false)
     }
 
     hasScrolledRef.current = true
@@ -825,38 +831,66 @@ export function MessageList({
     return <EmptyState activeAgentId={activeAgentId} onSuggestionClick={onSuggestionClick} />
   }
 
+  const handleScrollToBottom = () => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    isAtBottomRef.current = true
+    setShowScrollButton(false)
+  }
+
   return (
-    <div
-      ref={scrollContainerRef}
-      onScroll={handleScroll}
-      className={cn(
-        'min-h-0 flex-1 overflow-y-auto',
-        '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent',
-        '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent',
-        '[scrollbar-width:thin] [scrollbar-color:transparent_transparent]',
-        'hover:[&::-webkit-scrollbar-thumb]:bg-border hover:[scrollbar-color:var(--color-border)_transparent]',
-      )}
-    >
-      <div className="space-y-2 p-2 md:p-3">
-        {displayEntries.map((entry) => {
-          if (entry.type === 'conversation_message') {
-            return (
-              <ConversationMessage
-                key={entry.id}
-                message={entry.message}
-                onArtifactClick={onArtifactClick}
-              />
-            )
-          }
+    <div className="relative min-h-0 flex-1">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className={cn(
+          'min-h-0 flex-1 overflow-y-auto',
+          '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent',
+          '[&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-transparent',
+          '[scrollbar-width:thin] [scrollbar-color:transparent_transparent]',
+          'hover:[&::-webkit-scrollbar-thumb]:bg-border hover:[scrollbar-color:var(--color-border)_transparent]',
+        )}
+      >
+        <div className="space-y-2 p-2 md:p-3">
+          {displayEntries.map((entry) => {
+            if (entry.type === 'conversation_message') {
+              return (
+                <ConversationMessage
+                  key={entry.id}
+                  message={entry.message}
+                  onArtifactClick={onArtifactClick}
+                />
+              )
+            }
 
-          if (entry.type === 'tool_execution') {
-            return <ToolExecutionRow key={entry.id} entry={entry.entry} />
-          }
+            if (entry.type === 'tool_execution') {
+              return <ToolExecutionRow key={entry.id} entry={entry.entry} />
+            }
 
-          return <RuntimeErrorLog key={entry.id} entry={entry.entry} />
-        })}
-        {isLoading ? <LoadingIndicator /> : null}
-        <div ref={bottomRef} />
+            return <RuntimeErrorLog key={entry.id} entry={entry.entry} />
+          })}
+          {isLoading ? <LoadingIndicator /> : null}
+          <div ref={bottomRef} />
+        </div>
+      </div>
+
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center px-4">
+        <Button
+          type="button"
+          size="icon"
+          tabIndex={showScrollButton ? 0 : -1}
+          aria-hidden={!showScrollButton}
+          aria-label="Scroll to latest message"
+          onClick={handleScrollToBottom}
+          className={cn(
+            'size-9 rounded-full bg-background/80 text-foreground shadow-md ring-1 ring-border backdrop-blur-sm',
+            'transition-opacity transition-transform duration-200',
+            showScrollButton
+              ? 'pointer-events-auto translate-y-0 opacity-100'
+              : 'pointer-events-none translate-y-2 opacity-0',
+          )}
+        >
+          <ChevronDown className="size-4" aria-hidden="true" />
+        </Button>
       </div>
     </div>
   )
