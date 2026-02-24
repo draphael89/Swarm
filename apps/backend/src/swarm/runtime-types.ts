@@ -54,10 +54,26 @@ export type RuntimeSessionEvent =
   | { type: "auto_retry_start" }
   | { type: "auto_retry_end" };
 
+export interface RuntimeErrorEvent {
+  phase:
+    | "prompt_dispatch"
+    | "prompt_start"
+    | "steer_delivery"
+    | "compaction"
+    | "interrupt"
+    | "thread_resume"
+    | "startup"
+    | "runtime_exit";
+  message: string;
+  stack?: string;
+  details?: Record<string, unknown>;
+}
+
 export interface SwarmRuntimeCallbacks {
   onStatusChange: (agentId: string, status: AgentStatus, pendingCount: number) => void | Promise<void>;
   onSessionEvent?: (agentId: string, event: RuntimeSessionEvent) => void | Promise<void>;
   onAgentEnd?: (agentId: string) => void | Promise<void>;
+  onRuntimeError?: (agentId: string, error: RuntimeErrorEvent) => void | Promise<void>;
 }
 
 export interface SwarmAgentRuntime {

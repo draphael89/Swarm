@@ -8,6 +8,7 @@ import {
 } from "./codex-tool-bridge.js";
 import type {
   RuntimeImageAttachment,
+  RuntimeErrorEvent,
   RuntimeSessionEvent,
   RuntimeUserMessage,
   RuntimeUserMessageInput,
@@ -134,6 +135,9 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       runtime.rpc.dispose();
 
       const normalized = normalizeCodexStartupError(error);
+      runtime.logRuntimeError("startup", normalized, {
+        action: "initialize"
+      });
       throw normalized;
     }
   }
@@ -167,7 +171,15 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       };
     }
 
-    await this.startTurn(message);
+    try {
+      await this.startTurn(message);
+    } catch (error) {
+      await this.recoverFromTurnFailure("prompt_start", error, {
+        textPreview: previewForLog(message.text),
+        imageCount: message.images?.length ?? 0
+      });
+      throw error;
+    }
 
     return {
       targetAgentId: this.descriptor.agentId,
@@ -188,7 +200,11 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
           threadId: this.threadId,
           turnId: this.activeTurnId
         });
-      } catch {
+      } catch (error) {
+        this.logRuntimeError("interrupt", error, {
+          threadId: this.threadId,
+          turnId: this.activeTurnId
+        });
         // Ignore best-effort interruption errors during shutdown.
       }
     }
@@ -306,7 +322,10 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
           this.persistRuntimeState();
           return;
         }
-      } catch {
+      } catch (error) {
+        this.logRuntimeError("thread_resume", error, {
+          threadId: persisted.threadId
+        });
         // Fall through to thread/start when resume fails.
       }
     }
@@ -413,11 +432,14 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         });
 
         this.queuedSteers.shift();
-      } catch {
-        this.queuedSteers.shift();
-        this.pendingDeliveries = this.pendingDeliveries.filter(
-          (delivery) => delivery.deliveryId !== queued.deliveryId
-        );
+      } catch (error) {
+        await this.recoverFromTurnFailure("steer_delivery", error, {
+          queuedDeliveryId: queued.deliveryId,
+          queuedCount: this.queuedSteers.length,
+          pendingCount: this.pendingDeliveries.length,
+          activeTurnId: this.activeTurnId
+        });
+        break;
       }
     }
   }
@@ -668,9 +690,28 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       return;
     }
 
+    this.logRuntimeError("runtime_exit", error, {
+      activeTurnId: this.activeTurnId,
+      queuedCount: this.queuedSteers.length,
+      pendingCount: this.pendingDeliveries.length
+    });
+    await this.reportRuntimeError({
+      phase: "runtime_exit",
+      message: error.message,
+      stack: error.stack,
+      details: {
+        activeTurnId: this.activeTurnId,
+        queuedCount: this.queuedSteers.length,
+        pendingCount: this.pendingDeliveries.length
+      }
+    });
+
     this.pendingDeliveries = [];
     this.queuedSteers = [];
     this.toolNameByItemId.clear();
+    this.startRequestPending = false;
+    this.activeTurnId = undefined;
+    this.threadId = undefined;
 
     this.status = "terminated";
     this.descriptor.status = "terminated";
@@ -716,6 +757,78 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     }
 
     await this.callbacks.onSessionEvent(this.descriptor.agentId, event);
+  }
+
+  private async recoverFromTurnFailure(
+    phase: RuntimeErrorEvent["phase"],
+    error: unknown,
+    details?: Record<string, unknown>
+  ): Promise<void> {
+    const normalized = normalizeRuntimeError(error);
+    this.logRuntimeError(phase, error, details);
+    await this.reportRuntimeError({
+      phase,
+      message: normalized.message,
+      stack: normalized.stack,
+      details
+    });
+
+    if (this.status === "terminated") {
+      return;
+    }
+
+    const hadActiveTurn = this.status === "streaming" || Boolean(this.activeTurnId);
+    this.startRequestPending = false;
+    this.activeTurnId = undefined;
+    await this.updateStatus("idle");
+
+    if (hadActiveTurn) {
+      await this.emitSessionEvent({
+        type: "turn_end",
+        toolResults: []
+      });
+      await this.emitSessionEvent({ type: "agent_end" });
+
+      if (this.callbacks.onAgentEnd) {
+        try {
+          await this.callbacks.onAgentEnd(this.descriptor.agentId);
+        } catch (callbackError) {
+          this.logRuntimeError(phase, callbackError, {
+            callback: "onAgentEnd"
+          });
+        }
+      }
+    }
+  }
+
+  private async reportRuntimeError(error: RuntimeErrorEvent): Promise<void> {
+    if (!this.callbacks.onRuntimeError) {
+      return;
+    }
+
+    try {
+      await this.callbacks.onRuntimeError(this.descriptor.agentId, error);
+    } catch (callbackError) {
+      this.logRuntimeError(error.phase, callbackError, {
+        callback: "onRuntimeError"
+      });
+    }
+  }
+
+  private logRuntimeError(
+    phase: RuntimeErrorEvent["phase"],
+    error: unknown,
+    details?: Record<string, unknown>
+  ): void {
+    const normalized = normalizeRuntimeError(error);
+    console.error(`[swarm][${this.now()}] runtime:error`, {
+      runtime: "codex-app-server",
+      agentId: this.descriptor.agentId,
+      phase,
+      message: normalized.message,
+      stack: normalized.stack,
+      ...details
+    });
   }
 }
 
@@ -1060,4 +1173,23 @@ function buildMessageKey(text: string, images: RuntimeImageAttachment[]): string
     .join(",");
 
   return `text=${normalizedText}|images=${imageKey}`;
+}
+
+function normalizeRuntimeError(error: unknown): { message: string; stack?: string } {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      stack: error.stack
+    };
+  }
+
+  return {
+    message: String(error)
+  };
+}
+
+function previewForLog(text: string, maxLength = 160): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength)}...`;
 }
