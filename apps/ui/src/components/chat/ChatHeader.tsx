@@ -1,4 +1,4 @@
-import { Loader2, Minimize2, PanelRight, Trash2 } from 'lucide-react'
+import { Loader2, Menu, Minimize2, PanelRight, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ContextWindowIndicator } from '@/components/chat/ContextWindowIndicator'
 import { cn } from '@/lib/utils'
@@ -21,6 +21,7 @@ interface ChatHeaderProps {
   onNewChat: () => void
   isArtifactsPanelOpen: boolean
   onToggleArtifactsPanel: () => void
+  onToggleMobileSidebar?: () => void
 }
 
 function formatAgentStatus(status: AgentStatus | null): string {
@@ -79,13 +80,27 @@ export function ChatHeader({
   onNewChat,
   isArtifactsPanelOpen,
   onToggleArtifactsPanel,
+  onToggleMobileSidebar,
 }: ChatHeaderProps) {
   const isStreaming = connected && activeAgentStatus === 'streaming'
   const statusLabel = connected ? formatAgentStatus(activeAgentStatus) : 'Reconnecting'
 
   return (
-    <header className="sticky top-0 z-10 flex h-[62px] w-full shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-border/80 bg-card/80 px-4 backdrop-blur">
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+    <header className="sticky top-0 z-10 flex h-[62px] w-full shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-border/80 bg-card/80 px-2 backdrop-blur md:px-4">
+      <div className="flex min-w-0 flex-1 items-center gap-2 md:gap-3">
+        {/* Mobile hamburger */}
+        {onToggleMobileSidebar ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-9 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground md:hidden"
+            onClick={onToggleMobileSidebar}
+            aria-label="Open sidebar"
+          >
+            <Menu className="size-4" />
+          </Button>
+        ) : null}
+
         <div
           className="relative inline-flex size-5 shrink-0 items-center justify-center"
           aria-label={`Agent status: ${statusLabel.toLowerCase()}`}
@@ -122,8 +137,8 @@ export function ChatHeader({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="inline-flex h-8 items-center rounded-md border border-border/70 bg-muted/40 p-1">
+      <div className="flex shrink-0 items-center gap-1 md:gap-2">
+        <div className="hidden sm:inline-flex h-8 items-center rounded-md border border-border/70 bg-muted/40 p-1">
           <ChannelToggleButton
             label="Web"
             active={channelView === 'web'}
@@ -137,10 +152,12 @@ export function ChatHeader({
         </div>
 
         {contextWindowUsage ? (
-          <ContextWindowIndicator
-            usedTokens={contextWindowUsage.usedTokens}
-            contextWindow={contextWindowUsage.contextWindow}
-          />
+          <span className="hidden sm:inline-flex">
+            <ContextWindowIndicator
+              usedTokens={contextWindowUsage.usedTokens}
+              contextWindow={contextWindowUsage.contextWindow}
+            />
+          </span>
         ) : null}
 
         {showCompact ? (

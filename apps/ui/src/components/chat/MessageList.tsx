@@ -808,7 +808,7 @@ export function MessageList({
         'hover:[&::-webkit-scrollbar-thumb]:bg-border hover:[scrollbar-color:var(--color-border)_transparent]',
       )}
     >
-      <div className="space-y-2 p-3">
+      <div className="space-y-2 p-2 md:p-3">
         {displayEntries.map((entry) => {
           if (entry.type === 'conversation_message') {
             return (

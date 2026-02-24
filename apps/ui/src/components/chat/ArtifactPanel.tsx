@@ -175,7 +175,8 @@ export function ArtifactPanel({ artifact, wsUrl, onClose, onArtifactClick }: Art
         />
         <DialogPrimitive.Content
           className={cn(
-            'fixed right-0 top-0 z-50 flex h-full w-full max-w-[min(880px,90vw)] flex-col',
+            'fixed right-0 top-0 z-50 flex h-full w-full flex-col',
+            'max-md:max-w-full md:max-w-[min(880px,90vw)]',
             'border-l border-border/80 bg-background',
             'shadow-[-8px_0_32px_-4px_rgba(0,0,0,0.12)] outline-none',
             'transition-all duration-[260ms] ease-[cubic-bezier(0.32,0.72,0,1)]',

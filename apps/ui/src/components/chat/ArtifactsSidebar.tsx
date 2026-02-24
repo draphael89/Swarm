@@ -342,7 +342,11 @@ export function ArtifactsSidebar({
       className={cn(
         'flex h-full shrink-0 flex-col border-l border-border/80 bg-card/50',
         'transition-[width,opacity] duration-200 ease-out',
-        isOpen ? 'w-[300px] opacity-100' : 'w-0 opacity-0 overflow-hidden',
+        // Mobile: full screen overlay when open
+        isOpen
+          ? 'max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-full max-md:border-l-0 md:w-[300px] md:opacity-100'
+          : 'w-0 opacity-0 overflow-hidden max-md:hidden',
+        isOpen && 'opacity-100',
       )}
       aria-label="Artifacts panel"
       aria-hidden={!isOpen}

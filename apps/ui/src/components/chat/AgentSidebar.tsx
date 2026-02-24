@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CircleDashed, RotateCcw, Settings, SquarePen, UserStar } from 'lucide-react'
+import { ChevronDown, ChevronRight, CircleDashed, RotateCcw, Settings, SquarePen, UserStar, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { useEffect, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -12,6 +12,8 @@ interface AgentSidebarProps {
   statuses: Record<string, { status: AgentStatus; pendingCount: number }>
   selectedAgentId: string | null
   isSettingsActive: boolean
+  isMobileOpen?: boolean
+  onMobileClose?: () => void
   onAddManager: () => void
   onSelectAgent: (agentId: string) => void
   onDeleteAgent: (agentId: string) => void
@@ -268,6 +270,8 @@ export function AgentSidebar({
   statuses,
   selectedAgentId,
   isSettingsActive,
+  isMobileOpen = false,
+  onMobileClose,
   onAddManager,
   onSelectAgent,
   onDeleteAgent,
@@ -312,13 +316,29 @@ export function AgentSidebar({
     })
   }
 
-  return (
-    <aside className="flex w-[20rem] min-w-[20rem] shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+  const handleSelectAgent = (agentId: string) => {
+    onSelectAgent(agentId)
+    onMobileClose?.()
+  }
+
+  const handleOpenSettings = () => {
+    onOpenSettings()
+    onMobileClose?.()
+  }
+
+  const sidebarContent = (
+    <aside
+      className={cn(
+        'flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground',
+        // Desktop: fixed width in flex layout
+        'max-md:w-full md:w-[20rem] md:min-w-[20rem] md:shrink-0',
+      )}
+    >
       <div className="mb-2 flex h-[62px] shrink-0 items-center gap-2 border-b border-sidebar-border px-2">
         <button
           type="button"
           onClick={onAddManager}
-          className="flex flex-1 items-center gap-2 rounded-md p-2 text-sm transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+          className="flex min-h-[44px] flex-1 items-center gap-2 rounded-md p-2 text-sm transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
           title="Create manager"
           aria-label="Add manager"
         >
@@ -335,6 +355,17 @@ export function AgentSidebar({
           />
           <span className="hidden xl:inline">{connected ? 'Live' : 'Retrying'}</span>
         </div>
+        {/* Mobile close button */}
+        {onMobileClose ? (
+          <button
+            type="button"
+            onClick={onMobileClose}
+            className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground md:hidden"
+            aria-label="Close sidebar"
+          >
+            <X className="size-4" />
+          </button>
+        ) : null}
       </div>
 
       <div className="px-3 pb-1">
@@ -369,7 +400,7 @@ export function AgentSidebar({
                       agent={manager}
                       liveStatus={managerLiveStatus}
                       isSelected={managerIsSelected}
-                      onSelect={() => onSelectAgent(manager.agentId)}
+                      onSelect={() => handleSelectAgent(manager.agentId)}
                       onDelete={() => onDeleteManager(manager.agentId)}
                       nameClassName="font-semibold"
                       className="min-w-0 flex-1 py-1.5 pl-7 pr-1.5"
@@ -429,7 +460,7 @@ export function AgentSidebar({
                                 agent={worker}
                                 liveStatus={workerLiveStatus}
                                 isSelected={workerIsSelected}
-                                onSelect={() => onSelectAgent(worker.agentId)}
+                                onSelect={() => handleSelectAgent(worker.agentId)}
                                 onDelete={() => onDeleteAgent(worker.agentId)}
                                 nameClassName="font-normal"
                                 className="py-1.5 pl-7 pr-1.5"
@@ -460,7 +491,7 @@ export function AgentSidebar({
                           agent={worker}
                           liveStatus={workerLiveStatus}
                           isSelected={workerIsSelected}
-                          onSelect={() => onSelectAgent(worker.agentId)}
+                          onSelect={() => handleSelectAgent(worker.agentId)}
                           onDelete={() => onDeleteAgent(worker.agentId)}
                           nameClassName="font-normal"
                           className="py-1.5 pl-7 pr-1.5"
@@ -479,9 +510,9 @@ export function AgentSidebar({
         <div className="space-y-1">
           <button
             type="button"
-            onClick={onOpenSettings}
+            onClick={handleOpenSettings}
             className={cn(
-              'flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
+              'flex min-h-[44px] w-full items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60',
               isSettingsActive
                 ? 'bg-sidebar-accent text-sidebar-accent-foreground'
                 : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-foreground',
@@ -495,7 +526,7 @@ export function AgentSidebar({
           <button
             type="button"
             onClick={onReboot}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
+            className="flex min-h-[44px] w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
           >
             <RotateCcw aria-hidden="true" className="size-4" />
             <span>Reboot</span>
@@ -503,5 +534,41 @@ export function AgentSidebar({
         </div>
       </div>
     </aside>
+  )
+
+  return (
+    <>
+      {/* Desktop: render inline */}
+      <div className="hidden md:flex md:shrink-0">
+        {sidebarContent}
+      </div>
+
+      {/* Mobile: render as overlay */}
+      <div
+        className={cn(
+          'fixed inset-0 z-40 md:hidden',
+          isMobileOpen ? 'pointer-events-auto' : 'pointer-events-none',
+        )}
+      >
+        {/* Backdrop */}
+        <div
+          className={cn(
+            'absolute inset-0 bg-black/50 transition-opacity duration-200',
+            isMobileOpen ? 'opacity-100' : 'opacity-0',
+          )}
+          onClick={onMobileClose}
+          aria-hidden="true"
+        />
+        {/* Sidebar panel */}
+        <div
+          className={cn(
+            'relative z-10 h-full w-[80vw] max-w-[20rem] transition-transform duration-200 ease-out',
+            isMobileOpen ? 'translate-x-0' : '-translate-x-full',
+          )}
+        >
+          {sidebarContent}
+        </div>
+      </div>
+    </>
   )
 }

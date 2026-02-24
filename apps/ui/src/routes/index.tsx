@@ -256,6 +256,7 @@ export function IndexPage() {
   const [isArtifactsPanelOpen, setIsArtifactsPanelOpen] = useState(false)
   const [channelView, setChannelView] = useState<ChannelView>('web')
   const [isCompactingManager, setIsCompactingManager] = useState(false)
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false)
   const dragDepthRef = useRef(0)
 
   useEffect(() => {
@@ -358,6 +359,7 @@ export function IndexPage() {
   useEffect(() => {
     setActiveArtifact(null)
     setIsArtifactsPanelOpen(false)
+    setIsMobileSidebarOpen(false)
   }, [activeAgentId])
 
   useEffect(() => {
@@ -667,6 +669,8 @@ export function IndexPage() {
           statuses={state.statuses}
           selectedAgentId={activeAgentId}
           isSettingsActive={activeView === 'settings'}
+          isMobileOpen={isMobileSidebarOpen}
+          onMobileClose={() => setIsMobileSidebarOpen(false)}
           onAddManager={handleOpenCreateManagerDialog}
           onSelectAgent={handleSelectAgent}
           onDeleteAgent={handleDeleteAgent}
@@ -717,6 +721,7 @@ export function IndexPage() {
                   onNewChat={handleNewChat}
                   isArtifactsPanelOpen={isArtifactsPanelOpen}
                   onToggleArtifactsPanel={handleToggleArtifactsPanel}
+                  onToggleMobileSidebar={() => setIsMobileSidebarOpen((prev) => !prev)}
                 />
 
                 {state.lastError ? (
