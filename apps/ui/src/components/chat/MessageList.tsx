@@ -33,6 +33,7 @@ interface MessageListProps {
 }
 
 const suggestions = ['Plan a swarm workflow', 'Debug manager state', 'Summarize latest run']
+const AUTO_SCROLL_THRESHOLD_PX = 100
 
 type ConversationMessageEntry = Extract<ConversationEntry, { type: 'conversation_message' }>
 type ConversationLogEntry = Extract<ConversationEntry, { type: 'conversation_log' }>
@@ -256,6 +257,11 @@ function humanizeToolName(toolName: string): string {
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/[_-]/g, ' ')
     .trim()
+}
+
+function isNearBottom(container: HTMLElement, threshold = AUTO_SCROLL_THRESHOLD_PX): boolean {
+  const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+  return distanceFromBottom <= threshold
 }
 
 function isToolExecutionLog(entry: ConversationLogEntry): entry is ToolExecutionLogEntry {
@@ -759,13 +765,29 @@ export function MessageList({
   onSuggestionClick,
   onArtifactClick,
 }: MessageListProps) {
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const previousAgentIdRef = useRef<string | null>(null)
   const previousFirstEntryIdRef = useRef<string | null>(null)
   const previousEntryCountRef = useRef(0)
   const hasScrolledRef = useRef(false)
+  const isAtBottomRef = useRef(true)
 
   const displayEntries = useMemo(() => buildDisplayEntries(messages), [messages])
+
+  const updateIsAtBottom = () => {
+    const container = scrollContainerRef.current
+    if (!container) {
+      isAtBottomRef.current = true
+      return
+    }
+
+    isAtBottomRef.current = isNearBottom(container)
+  }
+
+  const handleScroll = () => {
+    updateIsAtBottom()
+  }
 
   useEffect(() => {
     const nextAgentId = activeAgentId ?? null
@@ -781,12 +803,17 @@ export function MessageList({
         nextEntryCount < previousEntryCountRef.current)
     const didInitialConversationLoad = previousEntryCountRef.current === 0 && nextEntryCount > 0
 
-    const behavior =
+    const shouldForceScroll =
       isInitialScroll || didAgentChange || didConversationReset || didInitialConversationLoad
-        ? 'instant'
-        : 'smooth'
+    const shouldAutoScroll = shouldForceScroll || isAtBottomRef.current
 
-    bottomRef.current?.scrollIntoView({ behavior, block: 'end' })
+    if (shouldAutoScroll) {
+      bottomRef.current?.scrollIntoView({
+        behavior: shouldForceScroll ? 'instant' : 'smooth',
+        block: 'end',
+      })
+      isAtBottomRef.current = true
+    }
 
     hasScrolledRef.current = true
     previousAgentIdRef.current = nextAgentId
@@ -800,6 +827,8 @@ export function MessageList({
 
   return (
     <div
+      ref={scrollContainerRef}
+      onScroll={handleScroll}
       className={cn(
         'min-h-0 flex-1 overflow-y-auto',
         '[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent',
