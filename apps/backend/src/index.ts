@@ -131,7 +131,7 @@ async function main(): Promise<void> {
   });
 }
 
-function collectManagerIds(agents: unknown[], fallbackManagerId: string): Set<string> {
+function collectManagerIds(agents: unknown[], fallbackManagerId?: string): Set<string> {
   const managerIds = new Set<string>();
 
   for (const agent of agents) {
@@ -151,8 +151,10 @@ function collectManagerIds(agents: unknown[], fallbackManagerId: string): Set<st
     managerIds.add(descriptor.agentId.trim());
   }
 
-  if (managerIds.size === 0 && fallbackManagerId.trim().length > 0) {
-    managerIds.add(fallbackManagerId.trim());
+  const normalizedFallbackManagerId =
+    typeof fallbackManagerId === "string" ? fallbackManagerId.trim() : "";
+  if (managerIds.size === 0 && normalizedFallbackManagerId.length > 0) {
+    managerIds.add(normalizedFallbackManagerId);
   }
 
   return managerIds;

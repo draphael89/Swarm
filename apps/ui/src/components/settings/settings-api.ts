@@ -322,7 +322,10 @@ export async function submitSettingsAuthOAuthPrompt(wsUrl: string, provider: Set
 /* ------------------------------------------------------------------ */
 
 function resolveManagerIntegrationEndpoint(wsUrl: string, managerId: string, provider: 'slack' | 'telegram', suffix = ''): string {
-  const normalizedManagerId = managerId.trim() || 'manager'
+  const normalizedManagerId = managerId.trim()
+  if (!normalizedManagerId) {
+    throw new Error('managerId is required.')
+  }
   return resolveApiEndpoint(wsUrl, `/api/managers/${encodeURIComponent(normalizedManagerId)}/integrations/${provider}${suffix}`)
 }
 

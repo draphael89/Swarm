@@ -127,7 +127,10 @@ function resolveApiEndpoint(wsUrl: string, path: string): string {
 }
 
 function resolveManagerSchedulesEndpoint(wsUrl: string, managerId: string): string {
-  const normalizedManagerId = managerId.trim() || 'manager'
+  const normalizedManagerId = managerId.trim()
+  if (!normalizedManagerId) {
+    throw new Error('managerId is required.')
+  }
   return resolveApiEndpoint(wsUrl, `/api/managers/${encodeURIComponent(normalizedManagerId)}/schedules`)
 }
 
@@ -302,6 +305,14 @@ export function ArtifactsSidebar({
 
   useEffect(() => {
     if (!isOpen || activeTab !== 'schedules') {
+      return
+    }
+
+    if (!managerId.trim()) {
+      setSchedules([])
+      setSelectedScheduleId(null)
+      setSchedulesError('Select a manager to load schedules.')
+      setIsLoadingSchedules(false)
       return
     }
 

@@ -112,7 +112,7 @@ export interface SwarmConfig {
   port: number;
   debug: boolean;
   allowNonManagerSubscriptions: boolean;
-  managerId: string;
+  managerId?: string;
   managerDisplayName: string;
   defaultModel: AgentModelDescriptor;
   defaultCwd: string;

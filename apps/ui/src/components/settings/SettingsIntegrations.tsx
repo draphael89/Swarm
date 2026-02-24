@@ -287,13 +287,13 @@ export function SettingsIntegrations({
       ),
     [managers],
   )
-  const [selectedIntegrationManagerId, setSelectedIntegrationManagerId] = useState<string>('manager')
+  const [selectedIntegrationManagerId, setSelectedIntegrationManagerId] = useState<string>('')
 
   useEffect(() => {
     setSelectedIntegrationManagerId((previous) => {
       const availableIds = managerOptions.map((m) => m.agentId)
       if (availableIds.includes(previous)) return previous
-      return availableIds[0] ?? 'manager'
+      return availableIds[0] ?? ''
     })
   }, [managerOptions])
 
@@ -344,9 +344,19 @@ export function SettingsIntegrations({
     telegramStatus && (!telegramStatus.managerId || telegramStatus.managerId === selectedIntegrationManagerId)
       ? telegramStatus
       : telegramStatusFromApi
+  const hasSelectedIntegrationManager = selectedIntegrationManagerId.trim().length > 0
 
   // ---- Load functions ----
   const loadSlack = useCallback(async () => {
+    if (!hasSelectedIntegrationManager) {
+      setSlackConfig(null)
+      setSlackDraft(null)
+      setSlackChannels([])
+      setSlackStatusFromApi(null)
+      setSlackError(null)
+      return
+    }
+
     setIsLoadingSlack(true)
     setSlackError(null)
     try {
@@ -360,9 +370,17 @@ export function SettingsIntegrations({
     } finally {
       setIsLoadingSlack(false)
     }
-  }, [wsUrl, selectedIntegrationManagerId])
+  }, [hasSelectedIntegrationManager, wsUrl, selectedIntegrationManagerId])
 
   const loadTelegram = useCallback(async () => {
+    if (!hasSelectedIntegrationManager) {
+      setTelegramConfig(null)
+      setTelegramDraft(null)
+      setTelegramStatusFromApi(null)
+      setTelegramError(null)
+      return
+    }
+
     setIsLoadingTelegram(true)
     setTelegramError(null)
     try {
@@ -375,7 +393,7 @@ export function SettingsIntegrations({
     } finally {
       setIsLoadingTelegram(false)
     }
-  }, [wsUrl, selectedIntegrationManagerId])
+  }, [hasSelectedIntegrationManager, wsUrl, selectedIntegrationManagerId])
 
   const loadGsuite = useCallback(async () => {
     setIsLoadingGsuite(true)
@@ -402,7 +420,7 @@ export function SettingsIntegrations({
 
   // ---- Slack handlers ----
   const handleSaveSlack = async () => {
-    if (!slackDraft) return
+    if (!slackDraft || !hasSelectedIntegrationManager) return
     setSlackError(null); setSlackSuccess(null); setIsSavingSlack(true)
     try {
       const updated = await updateSlackSettings(wsUrl, selectedIntegrationManagerId, buildSlackPatch(slackDraft))
@@ -412,7 +430,7 @@ export function SettingsIntegrations({
   }
 
   const handleTestSlack = async () => {
-    if (!slackDraft) return
+    if (!slackDraft || !hasSelectedIntegrationManager) return
     setSlackError(null); setSlackSuccess(null); setIsTestingSlack(true)
     const patch: Record<string, unknown> = {}
     if (slackDraft.appToken.trim()) patch.appToken = slackDraft.appToken.trim()
@@ -427,6 +445,7 @@ export function SettingsIntegrations({
   }
 
   const handleDisableSlack = async () => {
+    if (!hasSelectedIntegrationManager) return
     setSlackError(null); setSlackSuccess(null); setIsDisablingSlack(true)
     try {
       const disabled = await disableSlackSettings(wsUrl, selectedIntegrationManagerId)
@@ -436,7 +455,7 @@ export function SettingsIntegrations({
   }
 
   const handleLoadChannels = async () => {
-    if (!slackDraft) return
+    if (!slackDraft || !hasSelectedIntegrationManager) return
     setSlackError(null); setIsLoadingChannels(true)
     try {
       const channels = await fetchSlackChannels(wsUrl, selectedIntegrationManagerId, slackDraft.includePrivateChannels)
@@ -447,7 +466,7 @@ export function SettingsIntegrations({
 
   // ---- Telegram handlers ----
   const handleSaveTelegram = async () => {
-    if (!telegramDraft) return
+    if (!telegramDraft || !hasSelectedIntegrationManager) return
     setTelegramError(null); setTelegramSuccess(null); setIsSavingTelegram(true)
     try {
       const updated = await updateTelegramSettings(wsUrl, selectedIntegrationManagerId, buildTelegramPatch(telegramDraft))
@@ -457,7 +476,7 @@ export function SettingsIntegrations({
   }
 
   const handleTestTelegram = async () => {
-    if (!telegramDraft) return
+    if (!telegramDraft || !hasSelectedIntegrationManager) return
     setTelegramError(null); setTelegramSuccess(null); setIsTestingTelegram(true)
     const patch: Record<string, unknown> = {}
     if (telegramDraft.botToken.trim()) patch.botToken = telegramDraft.botToken.trim()
@@ -470,6 +489,7 @@ export function SettingsIntegrations({
   }
 
   const handleDisableTelegram = async () => {
+    if (!hasSelectedIntegrationManager) return
     setTelegramError(null); setTelegramSuccess(null); setIsDisablingTelegram(true)
     try {
       const disabled = await disableTelegramSettings(wsUrl, selectedIntegrationManagerId)
@@ -552,7 +572,8 @@ export function SettingsIntegrations({
       >
         <SettingsWithCTA label="Active manager" description="Select which manager handles integrations">
           <Select
-            value={selectedIntegrationManagerId}
+            value={hasSelectedIntegrationManager ? selectedIntegrationManagerId : undefined}
+            disabled={managerOptions.length === 0}
             onValueChange={(value) => {
               setSelectedIntegrationManagerId(value)
               setSlackError(null); setSlackSuccess(null)
@@ -564,7 +585,7 @@ export function SettingsIntegrations({
             </SelectTrigger>
             <SelectContent>
               {managerOptions.length === 0 ? (
-                <SelectItem value={selectedIntegrationManagerId}>{selectedIntegrationManagerId}</SelectItem>
+                <SelectItem value="__no_manager__" disabled>No managers available</SelectItem>
               ) : (
                 managerOptions.map((m) => (
                   <SelectItem key={m.agentId} value={m.agentId}>{m.agentId}</SelectItem>
@@ -572,6 +593,9 @@ export function SettingsIntegrations({
               )}
             </SelectContent>
           </Select>
+          {!hasSelectedIntegrationManager ? (
+            <p className="text-[11px] text-muted-foreground">Create a manager to configure Slack and Telegram.</p>
+          ) : null}
         </SettingsWithCTA>
       </SettingsSection>
 
@@ -659,7 +683,9 @@ export function SettingsIntegrations({
       >
         {effectiveSlackStatus?.message ? <p className="text-[11px] text-muted-foreground">{effectiveSlackStatus.message}</p> : null}
         <FeedbackBanner error={slackError} success={slackSuccess} />
-        {isLoadingSlack || !slackDraft ? (
+        {!hasSelectedIntegrationManager ? (
+          <p className="text-[11px] text-muted-foreground">Select a manager to configure Slack integration.</p>
+        ) : isLoadingSlack || !slackDraft ? (
           <div className="flex items-center justify-center py-8"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
         ) : (
           <div className="space-y-3">
@@ -698,7 +724,7 @@ export function SettingsIntegrations({
             <div className="space-y-2 rounded-md border border-border/70 p-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-medium">Channel picker</p>
-                <Button type="button" variant="outline" size="sm" onClick={() => void handleLoadChannels()} disabled={isLoadingChannels}>
+                <Button type="button" variant="outline" size="sm" onClick={() => void handleLoadChannels()} disabled={isLoadingChannels || !hasSelectedIntegrationManager}>
                   {isLoadingChannels ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null}
                   {isLoadingChannels ? 'Loading...' : 'Refresh channels'}
                 </Button>
@@ -734,15 +760,15 @@ export function SettingsIntegrations({
               ) : <p className="text-[11px] text-muted-foreground">No channel list loaded yet. Use Refresh channels.</p>}
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => void handleTestSlack()} disabled={isTestingSlack} className="gap-1.5">
+              <Button type="button" variant="outline" onClick={() => void handleTestSlack()} disabled={isTestingSlack || !hasSelectedIntegrationManager} className="gap-1.5">
                 {isTestingSlack ? <Loader2 className="size-3.5 animate-spin" /> : <TestTube2 className="size-3.5" />}
                 {isTestingSlack ? 'Testing...' : 'Test connection'}
               </Button>
-              <Button type="button" variant="outline" onClick={() => void handleDisableSlack()} disabled={isDisablingSlack} className="gap-1.5">
+              <Button type="button" variant="outline" onClick={() => void handleDisableSlack()} disabled={isDisablingSlack || !hasSelectedIntegrationManager} className="gap-1.5">
                 {isDisablingSlack ? <Loader2 className="size-3.5 animate-spin" /> : <Plug className="size-3.5" />}
                 {isDisablingSlack ? 'Disabling...' : 'Disable'}
               </Button>
-              <Button type="button" onClick={() => void handleSaveSlack()} disabled={isSavingSlack} className="gap-1.5">
+              <Button type="button" onClick={() => void handleSaveSlack()} disabled={isSavingSlack || !hasSelectedIntegrationManager} className="gap-1.5">
                 {isSavingSlack ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
                 {isSavingSlack ? 'Saving...' : 'Save Slack settings'}
               </Button>
@@ -759,7 +785,9 @@ export function SettingsIntegrations({
       >
         {effectiveTelegramStatus?.message ? <p className="text-[11px] text-muted-foreground">{effectiveTelegramStatus.message}</p> : null}
         <FeedbackBanner error={telegramError} success={telegramSuccess} />
-        {isLoadingTelegram || !telegramDraft ? (
+        {!hasSelectedIntegrationManager ? (
+          <p className="text-[11px] text-muted-foreground">Select a manager to configure Telegram integration.</p>
+        ) : isLoadingTelegram || !telegramDraft ? (
           <div className="flex items-center justify-center py-8"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
         ) : (
           <div className="space-y-3">
@@ -803,15 +831,15 @@ export function SettingsIntegrations({
               <Input id="telegram-max-file-bytes" value={telegramDraft.maxFileBytes} onChange={(e) => setTelegramDraft((prev) => (prev ? { ...prev, maxFileBytes: e.target.value } : prev))} placeholder="10485760" inputMode="numeric" />
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => void handleTestTelegram()} disabled={isTestingTelegram} className="gap-1.5">
+              <Button type="button" variant="outline" onClick={() => void handleTestTelegram()} disabled={isTestingTelegram || !hasSelectedIntegrationManager} className="gap-1.5">
                 {isTestingTelegram ? <Loader2 className="size-3.5 animate-spin" /> : <TestTube2 className="size-3.5" />}
                 {isTestingTelegram ? 'Testing...' : 'Test connection'}
               </Button>
-              <Button type="button" variant="outline" onClick={() => void handleDisableTelegram()} disabled={isDisablingTelegram} className="gap-1.5">
+              <Button type="button" variant="outline" onClick={() => void handleDisableTelegram()} disabled={isDisablingTelegram || !hasSelectedIntegrationManager} className="gap-1.5">
                 {isDisablingTelegram ? <Loader2 className="size-3.5 animate-spin" /> : <Plug className="size-3.5" />}
                 {isDisablingTelegram ? 'Disabling...' : 'Disable'}
               </Button>
-              <Button type="button" onClick={() => void handleSaveTelegram()} disabled={isSavingTelegram} className="gap-1.5">
+              <Button type="button" onClick={() => void handleSaveTelegram()} disabled={isSavingTelegram || !hasSelectedIntegrationManager} className="gap-1.5">
                 {isSavingTelegram ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
                 {isSavingTelegram ? 'Saving...' : 'Save Telegram settings'}
               </Button>

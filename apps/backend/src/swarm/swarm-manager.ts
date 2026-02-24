@@ -315,10 +315,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return this.sortedDescriptors().map((descriptor) => ({ ...descriptor, model: { ...descriptor.model } }));
   }
 
-  getConversationHistory(agentId: string = this.config.managerId): ConversationEntryEvent[] {
-    let history = this.conversationEntriesByAgentId.get(agentId);
+  getConversationHistory(agentId?: string): ConversationEntryEvent[] {
+    const resolvedAgentId = normalizeOptionalAgentId(agentId) ?? this.resolvePreferredManagerId();
+    if (!resolvedAgentId) {
+      return [];
+    }
+
+    let history = this.conversationEntriesByAgentId.get(resolvedAgentId);
     if (!history) {
-      const descriptor = this.descriptors.get(agentId);
+      const descriptor = this.descriptors.get(resolvedAgentId);
       if (descriptor && !this.shouldPreloadHistoryForDescriptor(descriptor)) {
         history = this.loadConversationHistoryForDescriptor(descriptor);
       }
@@ -421,7 +426,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   ): Promise<AgentDescriptor> {
     const callerDescriptor = this.descriptors.get(callerAgentId);
     if (!callerDescriptor || callerDescriptor.role !== "manager") {
-      const canBootstrap = callerAgentId === this.config.managerId && !this.hasRunningManagers();
+      const canBootstrap = !this.hasRunningManagers();
       if (!canBootstrap) {
         throw new Error("Only manager can create managers");
       }
@@ -869,7 +874,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     const sourceContext = normalizeMessageSourceContext(options?.sourceContext ?? { channel: "web" });
 
-    const targetAgentId = options?.targetAgentId ?? this.config.managerId;
+    const targetAgentId = options?.targetAgentId ?? this.resolvePreferredManagerId();
+    if (!targetAgentId) {
+      throw new Error("No manager is available. Create a manager first.");
+    }
     const target = this.descriptors.get(targetAgentId);
     if (!target) {
       throw new Error(`Unknown target agent: ${targetAgentId}`);
@@ -1185,10 +1193,58 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     console.log(prefix, details);
   }
 
+  private getConfiguredManagerId(): string | undefined {
+    return normalizeOptionalAgentId(this.config.managerId);
+  }
+
+  private resolvePreferredManagerId(options?: { includeStoppedOnRestart?: boolean }): string | undefined {
+    const includeStoppedOnRestart = options?.includeStoppedOnRestart ?? false;
+    const configuredManagerId = this.getConfiguredManagerId();
+    if (configuredManagerId) {
+      const configuredManager = this.descriptors.get(configuredManagerId);
+      if (configuredManager && this.isAvailableManagerDescriptor(configuredManager, includeStoppedOnRestart)) {
+        return configuredManagerId;
+      }
+    }
+
+    const firstManager = Array.from(this.descriptors.values())
+      .filter((descriptor) => this.isAvailableManagerDescriptor(descriptor, includeStoppedOnRestart))
+      .sort((left, right) => {
+        if (left.createdAt !== right.createdAt) {
+          return left.createdAt.localeCompare(right.createdAt);
+        }
+        return left.agentId.localeCompare(right.agentId);
+      })[0];
+
+    return firstManager?.agentId;
+  }
+
+  private isAvailableManagerDescriptor(
+    descriptor: AgentDescriptor,
+    includeStoppedOnRestart: boolean
+  ): boolean {
+    if (descriptor.role !== "manager") {
+      return false;
+    }
+
+    if (descriptor.status === "terminated") {
+      return false;
+    }
+
+    if (!includeStoppedOnRestart && descriptor.status === "stopped_on_restart") {
+      return false;
+    }
+
+    return true;
+  }
+
   private sortedDescriptors(): AgentDescriptor[] {
+    const configuredManagerId = this.getConfiguredManagerId();
     return Array.from(this.descriptors.values()).sort((a, b) => {
-      if (a.agentId === this.config.managerId) return -1;
-      if (b.agentId === this.config.managerId) return 1;
+      if (configuredManagerId) {
+        if (a.agentId === configuredManagerId) return -1;
+        if (b.agentId === configuredManagerId) return 1;
+      }
 
       if (a.role === "manager" && b.role !== "manager") return -1;
       if (b.role === "manager" && a.role !== "manager") return 1;
@@ -1271,6 +1327,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
   private async restoreRuntimesForBoot(): Promise<void> {
     let shouldPersist = false;
+    const configuredManagerId = this.getConfiguredManagerId();
 
     for (const descriptor of this.sortedDescriptors()) {
       if (!this.shouldRestoreRuntimeForDescriptor(descriptor)) {
@@ -1284,7 +1341,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         this.runtimes.set(descriptor.agentId, runtime);
         this.emitStatus(descriptor.agentId, descriptor.status, runtime.getPendingCount());
       } catch (error) {
-        if (descriptor.role === "manager" && descriptor.agentId === this.config.managerId) {
+        if (
+          descriptor.role === "manager" &&
+          configuredManagerId &&
+          descriptor.agentId === configuredManagerId
+        ) {
           throw error;
         }
 
@@ -1306,14 +1367,16 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       await this.saveStore();
     }
 
-    const primaryManager = this.descriptors.get(this.config.managerId);
-    if (
-      primaryManager &&
-      primaryManager.role === "manager" &&
-      primaryManager.status !== "terminated" &&
-      !this.runtimes.has(this.config.managerId)
-    ) {
-      throw new Error("Primary manager runtime is not initialized");
+    if (configuredManagerId) {
+      const primaryManager = this.descriptors.get(configuredManagerId);
+      if (
+        primaryManager &&
+        primaryManager.role === "manager" &&
+        primaryManager.status !== "terminated" &&
+        !this.runtimes.has(configuredManagerId)
+      ) {
+        throw new Error("Primary manager runtime is not initialized");
+      }
     }
   }
 
@@ -1361,9 +1424,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
           touched = true;
         }
       } else {
-        const maybeManagerId = typeof descriptor.managerId === "string" ? descriptor.managerId.trim() : "";
+        const maybeManagerId = normalizeOptionalAgentId(descriptor.managerId);
         if (!maybeManagerId) {
-          descriptor.managerId = this.config.managerId;
+          descriptor.managerId = "";
           touched = true;
         }
 
@@ -1378,20 +1441,23 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       }
     }
 
-    const primaryManager = this.descriptors.get(this.config.managerId);
-    if (primaryManager) {
-      primaryManager.role = "manager";
-      primaryManager.managerId = primaryManager.agentId;
-      primaryManager.archetypeId = MANAGER_ARCHETYPE_ID;
-      primaryManager.status = "idle";
-      primaryManager.sessionFile = join(this.config.paths.sessionsDir, `${primaryManager.agentId}.jsonl`);
-      primaryManager.updatedAt = now;
+    const configuredManagerId = this.getConfiguredManagerId();
+    if (configuredManagerId) {
+      const primaryManager = this.descriptors.get(configuredManagerId);
+      if (primaryManager && primaryManager.role === "manager") {
+        primaryManager.role = "manager";
+        primaryManager.managerId = primaryManager.agentId;
+        primaryManager.archetypeId = MANAGER_ARCHETYPE_ID;
+        primaryManager.status = "idle";
+        primaryManager.sessionFile = join(this.config.paths.sessionsDir, `${primaryManager.agentId}.jsonl`);
+        primaryManager.updatedAt = now;
 
-      if (!primaryManager.cwd) {
-        primaryManager.cwd = this.config.defaultCwd;
+        if (!primaryManager.cwd) {
+          primaryManager.cwd = this.config.defaultCwd;
+        }
+
+        primaryManager.model = this.normalizePersistedModelDescriptor(primaryManager.model);
       }
-
-      primaryManager.model = this.normalizePersistedModelDescriptor(primaryManager.model);
     }
 
     const liveManagerIds = new Set(
@@ -1399,16 +1465,18 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         .filter((descriptor) => descriptor.role === "manager" && descriptor.status !== "terminated")
         .map((descriptor) => descriptor.agentId)
     );
-    const fallbackManagerId = liveManagerIds.has(this.config.managerId)
-      ? this.config.managerId
-      : liveManagerIds.values().next().value;
+    const fallbackManagerId =
+      configuredManagerId && liveManagerIds.has(configuredManagerId)
+        ? configuredManagerId
+        : liveManagerIds.values().next().value;
 
     for (const descriptor of this.descriptors.values()) {
       if (descriptor.role !== "worker") {
         continue;
       }
 
-      if (fallbackManagerId && !liveManagerIds.has(descriptor.managerId)) {
+      const managerId = normalizeOptionalAgentId(descriptor.managerId);
+      if (fallbackManagerId && (!managerId || !liveManagerIds.has(managerId))) {
         descriptor.managerId = fallbackManagerId;
         descriptor.updatedAt = now;
       }
@@ -1416,9 +1484,12 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   private getBootLogManagerDescriptor(): AgentDescriptor | undefined {
-    const configuredManager = this.descriptors.get(this.config.managerId);
-    if (configuredManager && configuredManager.role === "manager" && configuredManager.status !== "terminated") {
-      return configuredManager;
+    const configuredManagerId = this.getConfiguredManagerId();
+    if (configuredManagerId) {
+      const configuredManager = this.descriptors.get(configuredManagerId);
+      if (configuredManager && configuredManager.role === "manager" && configuredManager.status !== "terminated") {
+        return configuredManager;
+      }
     }
 
     return Array.from(this.descriptors.values()).find(
@@ -1523,8 +1594,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error("spawn_agent agentId must include at least one letter or number");
     }
 
-    if (base === this.config.managerId) {
-      throw new Error(`spawn_agent agentId \"${this.config.managerId}\" is reserved`);
+    const configuredManagerId = this.getConfiguredManagerId();
+    if (configuredManagerId && base === configuredManagerId) {
+      throw new Error(`spawn_agent agentId \"${configuredManagerId}\" is reserved`);
     }
 
     if (!this.descriptors.has(base)) {
@@ -1611,8 +1683,13 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     maybeReason?: "user_new_command" | "api_reset"
   ): { managerId: string; reason: "user_new_command" | "api_reset" } {
     if (managerIdOrReason === "user_new_command" || managerIdOrReason === "api_reset") {
+      const managerId = this.resolvePreferredManagerId({ includeStoppedOnRestart: true });
+      if (!managerId) {
+        throw new Error("No manager is available.");
+      }
+
       return {
-        managerId: this.config.managerId,
+        managerId,
         reason: managerIdOrReason
       };
     }
@@ -2448,26 +2525,34 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       return descriptor.agentId;
     }
 
-    const managerId = descriptor.managerId.trim();
-    return managerId.length > 0 ? managerId : this.config.managerId;
+    const managerId = normalizeOptionalAgentId(descriptor.managerId);
+    if (managerId) {
+      return managerId;
+    }
+
+    return this.resolvePreferredManagerId({ includeStoppedOnRestart: true }) ?? descriptor.agentId;
   }
 
   private async ensureMemoryFilesForBoot(): Promise<void> {
+    const configuredManagerId = this.getConfiguredManagerId();
     const managerIds = Array.from(
       new Set(
         Array.from(this.descriptors.values())
           .filter((descriptor) => descriptor.role === "manager")
-          .map((descriptor) => descriptor.agentId)
+          .map((descriptor) => normalizeOptionalAgentId(descriptor.agentId))
+          .filter((managerId): managerId is string => Boolean(managerId))
       )
     );
 
-    if (managerIds.length === 0) {
-      managerIds.push(this.config.managerId);
+    if (configuredManagerId && !managerIds.includes(configuredManagerId)) {
+      managerIds.push(configuredManagerId);
     }
 
-    await this.migrateLegacyMemoryFileIfNeeded(managerIds);
+    if (managerIds.length > 0) {
+      await this.migrateLegacyMemoryFileIfNeeded(managerIds);
+    }
 
-    const memoryAgentIds = new Set<string>([this.config.managerId, ...managerIds]);
+    const memoryAgentIds = new Set<string>(managerIds);
     for (const descriptor of this.descriptors.values()) {
       memoryAgentIds.add(descriptor.agentId);
       if (descriptor.role === "worker") {
@@ -2654,6 +2739,15 @@ function normalizeAgentId(input: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
+}
+
+function normalizeOptionalAgentId(input: string | undefined): string | undefined {
+  if (typeof input !== "string") {
+    return undefined;
+  }
+
+  const trimmed = input.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function normalizeEnvVarName(name: string): string | undefined {

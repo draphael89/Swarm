@@ -42,7 +42,7 @@ export class SlackIntegrationService extends EventEmitter {
 
     this.swarmManager = options.swarmManager;
     this.dataDir = options.dataDir;
-    this.managerId = options.managerId.trim() || this.swarmManager.getConfig().managerId;
+    this.managerId = normalizeManagerId(options.managerId);
     this.config = createDefaultSlackConfig(this.managerId);
 
     this.statusTracker = new SlackStatusTracker({
@@ -353,4 +353,13 @@ function toErrorMessage(error: unknown): string {
   }
 
   return String(error);
+}
+
+function normalizeManagerId(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("managerId is required");
+  }
+
+  return trimmed;
 }

@@ -48,7 +48,7 @@ export class SlackInboundRouter {
     onError?: (message: string, error?: unknown) => void;
   }) {
     this.swarmManager = options.swarmManager;
-    this.managerId = options.managerId.trim() || this.swarmManager.getConfig().managerId;
+    this.managerId = normalizeManagerId(options.managerId);
     this.integrationProfileId = options.integrationProfileId.trim();
     this.slackClient = options.slackClient;
     this.getConfig = options.getConfig;
@@ -571,6 +571,15 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeManagerId(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("managerId is required");
+  }
+
+  return trimmed;
 }
 
 function isTextMimeType(mimeType: string): boolean {

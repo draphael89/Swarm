@@ -26,11 +26,12 @@ type IntegrationProvider = "slack" | "telegram";
 const INTEGRATIONS_DIR_NAME = "integrations";
 const INTEGRATIONS_MANAGERS_DIR_NAME = "managers";
 const MIGRATION_MARKER_FILE_NAME = ".migrated";
+const LEGACY_DEFAULT_MANAGER_ID = "manager";
 
 export class IntegrationRegistryService extends EventEmitter {
   private readonly swarmManager: SwarmManager;
   private readonly dataDir: string;
-  private readonly defaultManagerId: string;
+  private readonly defaultManagerId: string | undefined;
   private readonly slackProfiles = new Map<string, SlackIntegrationService>();
   private readonly telegramProfiles = new Map<string, TelegramIntegrationService>();
   private started = false;
@@ -47,12 +48,14 @@ export class IntegrationRegistryService extends EventEmitter {
   constructor(options: {
     swarmManager: SwarmManager;
     dataDir: string;
-    defaultManagerId: string;
+    defaultManagerId?: string;
   }) {
     super();
     this.swarmManager = options.swarmManager;
     this.dataDir = options.dataDir;
-    this.defaultManagerId = options.defaultManagerId.trim() || this.swarmManager.getConfig().managerId;
+    this.defaultManagerId =
+      normalizeOptionalManagerId(options.defaultManagerId) ??
+      normalizeOptionalManagerId(this.swarmManager.getConfig().managerId);
   }
 
   async start(): Promise<void> {
@@ -282,7 +285,10 @@ export class IntegrationRegistryService extends EventEmitter {
   }
 
   private async discoverKnownManagerIds(): Promise<Set<string>> {
-    const managerIds = new Set<string>([this.defaultManagerId]);
+    const managerIds = new Set<string>();
+    if (this.defaultManagerId) {
+      managerIds.add(this.defaultManagerId);
+    }
 
     for (const descriptor of this.swarmManager.listAgents()) {
       if (descriptor.role !== "manager") {
@@ -347,18 +353,22 @@ export class IntegrationRegistryService extends EventEmitter {
       return;
     }
 
-    const defaultManagerId = normalizeManagerId(this.defaultManagerId);
+    const defaultManagerId =
+      this.defaultManagerId ??
+      this.swarmManager.listAgents().find((descriptor) => descriptor.role === "manager")?.agentId ??
+      LEGACY_DEFAULT_MANAGER_ID;
+    const normalizedDefaultManagerId = normalizeManagerId(defaultManagerId);
     if (hasLegacySlack) {
       await copyFileToManagerProfile({
         sourcePath: legacySlackPath,
-        destinationPath: getSlackConfigPath(this.dataDir, defaultManagerId)
+        destinationPath: getSlackConfigPath(this.dataDir, normalizedDefaultManagerId)
       });
     }
 
     if (hasLegacyTelegram) {
       await copyFileToManagerProfile({
         sourcePath: legacyTelegramPath,
-        destinationPath: getTelegramConfigPath(this.dataDir, defaultManagerId)
+        destinationPath: getTelegramConfigPath(this.dataDir, normalizedDefaultManagerId)
       });
     }
 
@@ -420,6 +430,15 @@ function normalizeManagerId(value: string): string {
   }
 
   return trimmed;
+}
+
+function normalizeOptionalManagerId(value: string | undefined): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 async function pathExists(path: string): Promise<boolean> {

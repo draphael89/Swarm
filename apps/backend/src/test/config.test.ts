@@ -12,6 +12,7 @@ const MANAGED_ENV_KEYS = [
   'SWARM_PORT',
   'SWARM_DEBUG',
   'SWARM_ALLOW_NON_MANAGER_SUBSCRIPTIONS',
+  'SWARM_MANAGER_ID',
   'SWARM_DEFAULT_CWD',
   'SWARM_MODEL_PROVIDER',
   'SWARM_MODEL_ID',
@@ -66,6 +67,7 @@ describe('createConfig', () => {
       expect(config.paths.repoMemorySkillFile).toBe(resolve(config.paths.rootDir, '.swarm', 'skills', 'memory', 'SKILL.md'))
       expect(config.paths.secretsFile).toBe(resolve(homedir(), '.swarm-dev', 'secrets.json'))
       expect(config.paths.schedulesFile).toBe(resolve(homedir(), '.swarm-dev', 'schedules', 'manager.json'))
+      expect(config.managerId).toBeUndefined()
       expect(config.cwdAllowlistRoots).toContain(config.paths.rootDir)
       expect(config.cwdAllowlistRoots).toContain(resolve(homedir(), 'worktrees'))
     })
@@ -119,6 +121,15 @@ describe('createConfig', () => {
 
       expect(config.cwdAllowlistRoots).toContain(resolve(config.paths.rootDir, 'sandbox'))
       expect(config.cwdAllowlistRoots).toContain(resolve('/tmp/custom-root'))
+    })
+  })
+
+  it('respects SWARM_MANAGER_ID when provided', async () => {
+    await withEnv({ SWARM_MANAGER_ID: 'opus-manager' }, () => {
+      const config = createConfig()
+      expect(config.managerId).toBe('opus-manager')
+      expect(config.paths.memoryFile).toBe(resolve(homedir(), '.swarm-dev', 'memory', 'opus-manager.md'))
+      expect(config.paths.schedulesFile).toBe(resolve(homedir(), '.swarm-dev', 'schedules', 'opus-manager.json'))
     })
   })
 })

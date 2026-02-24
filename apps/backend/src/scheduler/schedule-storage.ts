@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 const SCHEDULES_DIR_NAME = "schedules";
 const LEGACY_GLOBAL_SCHEDULES_FILE_NAME = "schedules.json";
 const MIGRATION_MARKER_FILE_NAME = ".migrated";
+const LEGACY_DEFAULT_MANAGER_ID = "manager";
 
 export function normalizeManagerId(value: string): string {
   const normalized = value.trim();
@@ -70,7 +71,7 @@ export async function listManagerIdsWithSchedules(dataDir: string): Promise<stri
 
 export async function migrateLegacyGlobalSchedulesIfNeeded(options: {
   dataDir: string;
-  defaultManagerId: string;
+  defaultManagerId?: string;
 }): Promise<void> {
   const migrationMarkerPath = getMigrationMarkerPath(options.dataDir);
   if (await pathExists(migrationMarkerPath)) {
@@ -86,7 +87,10 @@ export async function migrateLegacyGlobalSchedulesIfNeeded(options: {
     return;
   }
 
-  const managerSchedulesPath = getScheduleFilePath(options.dataDir, options.defaultManagerId);
+  const managerSchedulesPath = getScheduleFilePath(
+    options.dataDir,
+    normalizeOptionalManagerId(options.defaultManagerId) ?? LEGACY_DEFAULT_MANAGER_ID
+  );
   await mkdir(dirname(managerSchedulesPath), { recursive: true });
 
   if (!(await pathExists(managerSchedulesPath))) {
@@ -125,4 +129,13 @@ function isEnoentError(error: unknown): boolean {
     "code" in error &&
     (error as { code?: string }).code === "ENOENT"
   );
+}
+
+function normalizeOptionalManagerId(value: string | undefined): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
 }

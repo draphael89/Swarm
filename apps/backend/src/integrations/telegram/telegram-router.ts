@@ -29,7 +29,7 @@ export class TelegramInboundRouter {
     onError?: (message: string, error?: unknown) => void;
   }) {
     this.swarmManager = options.swarmManager;
-    this.managerId = options.managerId.trim() || this.swarmManager.getConfig().managerId;
+    this.managerId = normalizeManagerId(options.managerId);
     this.integrationProfileId = options.integrationProfileId.trim();
     this.getConfig = options.getConfig;
     this.getBotId = options.getBotId;
@@ -194,4 +194,13 @@ function normalizeUpdateId(value: unknown): number | undefined {
   }
 
   return Math.trunc(value);
+}
+
+function normalizeManagerId(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("managerId is required");
+  }
+
+  return trimmed;
 }

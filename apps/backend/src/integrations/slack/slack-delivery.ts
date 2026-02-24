@@ -31,7 +31,7 @@ export class SlackDeliveryBridge {
     onError?: (message: string, error?: unknown) => void;
   }) {
     this.swarmManager = options.swarmManager;
-    this.managerId = options.managerId.trim() || this.swarmManager.getConfig().managerId;
+    this.managerId = normalizeManagerId(options.managerId);
     this.getConfig = options.getConfig;
     this.getProfileId = options.getProfileId;
     this.getSlackClient = options.getSlackClient;
@@ -167,4 +167,13 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeManagerId(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("managerId is required");
+  }
+
+  return trimmed;
 }
