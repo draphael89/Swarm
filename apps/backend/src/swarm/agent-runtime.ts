@@ -3,6 +3,7 @@ import type { AgentSession, AgentSessionEvent } from "@mariozechner/pi-coding-ag
 import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 import type {
   RuntimeImageAttachment,
+  RuntimeErrorEvent,
   RuntimeSessionEvent,
   RuntimeUserMessage,
   RuntimeUserMessageInput,
@@ -30,6 +31,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
   private unsubscribe: (() => void) | undefined;
   private readonly inFlightPrompts = new Set<Promise<void>>();
   private promptDispatchPending = false;
+  private ignoreNextAgentStart = false;
 
   constructor(options: {
     descriptor: AgentDescriptor;
@@ -102,6 +104,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
     this.session.dispose();
     this.pendingDeliveries = [];
     this.promptDispatchPending = false;
+    this.ignoreNextAgentStart = false;
     this.inFlightPrompts.clear();
     this.status = "terminated";
     this.descriptor.status = "terminated";
@@ -111,7 +114,14 @@ export class AgentRuntime implements SwarmAgentRuntime {
 
   async compact(customInstructions?: string): Promise<unknown> {
     this.ensureNotTerminated();
-    return await this.session.compact(customInstructions);
+    try {
+      return await this.session.compact(customInstructions);
+    } catch (error) {
+      this.logRuntimeError("compaction", error, {
+        customInstructionsPreview: previewForLog(customInstructions ?? "")
+      });
+      throw error;
+    }
   }
 
   getCustomEntries(customType: string): unknown[] {
@@ -133,16 +143,12 @@ export class AgentRuntime implements SwarmAgentRuntime {
 
   private dispatchPrompt(message: RuntimeUserMessage): void {
     this.promptDispatchPending = true;
+    this.ignoreNextAgentStart = false;
 
     const images = toImageContent(message.images);
     const run = this.sendToSession(message.text, images)
-      .catch((error) => {
-        // Avoid unhandled rejections for fire-and-forget delivery.
-        // Runtime status updates still flow through AgentSession events.
-        console.error(
-          `[agent-runtime:${this.descriptor.agentId}] prompt failed:`,
-          error instanceof Error ? error.message : String(error)
-        );
+      .catch(async (error) => {
+        await this.handlePromptDispatchError(error, message);
       })
       .finally(() => {
         this.promptDispatchPending = false;
@@ -184,6 +190,13 @@ export class AgentRuntime implements SwarmAgentRuntime {
 
     if (event.type === "agent_start") {
       this.promptDispatchPending = false;
+      if (this.ignoreNextAgentStart) {
+        this.ignoreNextAgentStart = false;
+        if (this.status !== "terminated") {
+          await this.updateStatus("idle");
+        }
+        return;
+      }
       await this.updateStatus("streaming");
       return;
     }
@@ -203,6 +216,43 @@ export class AgentRuntime implements SwarmAgentRuntime {
       if (key !== undefined) {
         this.consumePendingMessage(key);
         await this.emitStatus();
+      }
+    }
+  }
+
+  private async handlePromptDispatchError(error: unknown, message: RuntimeUserMessage): Promise<void> {
+    const normalized = normalizeRuntimeError(error);
+    const phase: RuntimeErrorEvent["phase"] = isLikelyCompactionError(normalized.message)
+      ? "compaction"
+      : "prompt_dispatch";
+    const details = {
+      textPreview: previewForLog(message.text),
+      imageCount: message.images?.length ?? 0,
+      pendingCount: this.pendingDeliveries.length
+    };
+
+    this.logRuntimeError(phase, error, details);
+
+    await this.reportRuntimeError({
+      phase,
+      message: normalized.message,
+      stack: normalized.stack,
+      details
+    });
+
+    this.ignoreNextAgentStart = true;
+
+    if (this.status !== "terminated") {
+      await this.updateStatus("idle");
+    }
+
+    if (this.status !== "terminated" && this.callbacks.onAgentEnd) {
+      try {
+        await this.callbacks.onAgentEnd(this.descriptor.agentId);
+      } catch (callbackError) {
+        this.logRuntimeError(phase, callbackError, {
+          callback: "onAgentEnd"
+        });
       }
     }
   }
@@ -242,6 +292,36 @@ export class AgentRuntime implements SwarmAgentRuntime {
 
   private async emitStatus(): Promise<void> {
     await this.callbacks.onStatusChange(this.descriptor.agentId, this.status, this.pendingDeliveries.length);
+  }
+
+  private async reportRuntimeError(error: RuntimeErrorEvent): Promise<void> {
+    if (!this.callbacks.onRuntimeError) {
+      return;
+    }
+
+    try {
+      await this.callbacks.onRuntimeError(this.descriptor.agentId, error);
+    } catch (callbackError) {
+      this.logRuntimeError(error.phase, callbackError, {
+        callback: "onRuntimeError"
+      });
+    }
+  }
+
+  private logRuntimeError(
+    phase: RuntimeErrorEvent["phase"],
+    error: unknown,
+    details?: Record<string, unknown>
+  ): void {
+    const normalized = normalizeRuntimeError(error);
+    console.error(`[swarm][${this.now()}] runtime:error`, {
+      runtime: "pi",
+      agentId: this.descriptor.agentId,
+      phase,
+      message: normalized.message,
+      stack: normalized.stack,
+      ...details
+    });
   }
 }
 
@@ -357,6 +437,29 @@ function extractMessageKeyFromContent(content: unknown): string | undefined {
   }
 
   return buildMessageKey(textParts.join("\n"), images);
+}
+
+function previewForLog(text: string, maxLength = 160): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength)}...`;
+}
+
+function normalizeRuntimeError(error: unknown): { message: string; stack?: string } {
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      stack: error.stack
+    };
+  }
+
+  return {
+    message: String(error)
+  };
+}
+
+function isLikelyCompactionError(message: string): boolean {
+  return /\bcompact(?:ion)?\b/i.test(message);
 }
 
 function buildMessageKey(text: string, images: RuntimeImageAttachment[]): string | undefined {

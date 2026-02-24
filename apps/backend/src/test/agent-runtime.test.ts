@@ -209,6 +209,82 @@ describe('AgentRuntime', () => {
     expect(Array.isArray(session.userMessageCalls[0])).toBe(true)
   })
 
+  it('surfaces prompt failures, resets status to idle, and invokes onAgentEnd', async () => {
+    const session = new FakeSession()
+    const statuses: string[] = []
+    const runtimeErrors: Array<{ phase: string; message: string }> = []
+    let agentEndCalls = 0
+
+    session.prompt = async (): Promise<void> => {
+      session.emit({ type: 'agent_start' })
+      throw new Error('provider outage')
+    }
+
+    const runtime = new AgentRuntime({
+      descriptor: makeDescriptor(),
+      session: session as any,
+      callbacks: {
+        onStatusChange: (_agentId, status) => {
+          statuses.push(status)
+        },
+        onRuntimeError: (_agentId, error) => {
+          runtimeErrors.push({
+            phase: error.phase,
+            message: error.message,
+          })
+        },
+        onAgentEnd: () => {
+          agentEndCalls += 1
+        },
+      },
+    })
+
+    const receipt = await runtime.sendMessage('trigger failure')
+    expect(receipt.acceptedMode).toBe('prompt')
+
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(runtimeErrors).toEqual([
+      expect.objectContaining({
+        phase: 'prompt_dispatch',
+        message: 'provider outage',
+      }),
+    ])
+    expect(statuses).toContain('streaming')
+    expect(statuses).toContain('idle')
+    expect(runtime.getStatus()).toBe('idle')
+    expect(agentEndCalls).toBe(1)
+  })
+
+  it('reports compaction-related prompt failures with compaction phase', async () => {
+    const session = new FakeSession()
+    const phases: string[] = []
+
+    session.prompt = async (): Promise<void> => {
+      throw new Error('auto compaction failed while preparing prompt')
+    }
+
+    const runtime = new AgentRuntime({
+      descriptor: makeDescriptor(),
+      session: session as any,
+      callbacks: {
+        onStatusChange: () => {},
+        onRuntimeError: (_agentId, error) => {
+          phases.push(error.phase)
+        },
+      },
+    })
+
+    await runtime.sendMessage('trigger compaction failure')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(phases.at(-1)).toBe('compaction')
+    expect(runtime.getStatus()).toBe('idle')
+  })
+
   it('terminates by aborting active session and marking status terminated', async () => {
     const session = new FakeSession()
 

@@ -44,6 +44,7 @@ import {
 } from "./model-presets.js";
 import type {
   RuntimeImageAttachment,
+  RuntimeErrorEvent,
   RuntimeSessionEvent,
   RuntimeUserMessage,
   SwarmAgentRuntime
@@ -2048,6 +2049,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         },
         onAgentEnd: async (agentId) => {
           await this.handleRuntimeAgentEnd(agentId);
+        },
+        onRuntimeError: async (agentId, error) => {
+          await this.handleRuntimeError(agentId, error);
         }
       },
       now: this.now
@@ -2087,6 +2091,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         },
         onAgentEnd: async (agentId) => {
           await this.handleRuntimeAgentEnd(agentId);
+        },
+        onRuntimeError: async (agentId, error) => {
+          await this.handleRuntimeError(agentId, error);
         }
       },
       now: this.now,
@@ -2242,6 +2249,37 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       case "auto_retry_end":
         return;
     }
+  }
+
+  private async handleRuntimeError(agentId: string, error: RuntimeErrorEvent): Promise<void> {
+    const descriptor = this.descriptors.get(agentId);
+    if (!descriptor) {
+      return;
+    }
+
+    const message = error.message.trim().length > 0 ? error.message.trim() : "Unknown runtime error";
+    this.logDebug("runtime:error", {
+      agentId,
+      runtime: descriptor.model.provider.includes("codex-app") ? "codex-app-server" : "pi",
+      phase: error.phase,
+      message,
+      stack: error.stack,
+      details: error.details
+    });
+
+    const text =
+      error.phase === "compaction"
+        ? `⚠️ Compaction error: ${message}. Continuing without compaction.`
+        : `⚠️ Agent error: ${message}. Message may need to be resent.`;
+
+    this.emitConversationMessage({
+      type: "conversation_message",
+      agentId,
+      role: "system",
+      text,
+      timestamp: this.now(),
+      source: "system"
+    });
   }
 
   private captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent): void {
