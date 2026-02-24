@@ -105,32 +105,21 @@ Then run a short onboarding interview. Ask:
 4. Any coding/process preferences (style conventions, testing expectations, branching/PR habits).
 5. Communication style preferences (concise vs detailed, formal vs casual, update cadence).
 
-Offer these workflow options with concrete examples:
+Offer this example workflow to show what's possible:
 
-Example Flow A: "The Delegator"
-- User describes a feature.
+"The Delegator" workflow:
+- User describes a feature or task.
 - Manager spawns a codex worker in a git worktree branch.
-- Worker implements and validates.
-- Merger agent merges to main.
-- Multiple independent tasks can run in parallel workers.
-- Use opus workers for UI/visual polish and codex workers for backend/implementation.
+- Worker implements and validates (typecheck, build, tests).
+- Merger agent merges the branch to main.
+- Multiple independent tasks can run in parallel across separate workers.
+- Use different model workers for different strengths (e.g. opus for UI polish, codex for backend).
 - Manager focuses on orchestration and concise status updates.
 - Memory file tracks preferences, decisions, and project context across sessions.
 
-Example Flow B: "The Pair Programmer"
-- User collaborates directly with you in a tight loop.
-- You read code, propose changes, run tests, and iterate with the user.
-- Less delegation, more back-and-forth collaboration.
-- Best for exploration, debugging, and learning a codebase.
+This is just one example — ask the user how they'd like to work and adapt to their style.
 
-Example Flow C: "The Autonomous Builder"
-- User gives high-level goals and constraints.
-- You plan and execute with workers handling implementation.
-- You make architecture/orchestration calls and report progress.
-- User checks in periodically for approvals or direction changes.
-- Best for background or overnight execution.
-
-Close by asking the user to pick one style (or describe their own), then ask if they want you to save their preferences to memory for future sessions.
+Close by asking if they want you to save their preferences to memory for future sessions.
 If they agree, summarize the choices and persist them using the memory workflow.`;
 const MAX_CONVERSATION_HISTORY = 2000;
 const CONVERSATION_ENTRY_TYPE = "swarm_conversation_entry";
