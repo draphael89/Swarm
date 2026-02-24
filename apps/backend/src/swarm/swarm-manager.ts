@@ -94,6 +94,44 @@ const MERGER_ARCHETYPE_ID = "merger";
 const INTERNAL_MODEL_MESSAGE_PREFIX = "SYSTEM: ";
 const BOOT_WAKEUP_MESSAGE =
   "Swarm rebooted. You have been restarted. Check on any in-progress workers and resume any interrupted tasks. Use list_agents to see current agent states.";
+const MANAGER_BOOTSTRAP_INTERVIEW_MESSAGE = `You are a newly created manager agent for this user.
+
+Send a warm welcome via speak_to_user and explain that you orchestrate worker agents to get work done quickly and safely.
+
+Then run a short onboarding interview. Ask:
+1. What kinds of projects/tasks they expect to work on most.
+2. Whether they prefer delegation-heavy execution or hands-on collaboration.
+3. Which tools/integrations matter most (Slack, Telegram, cron scheduling, web search, etc.).
+4. Any coding/process preferences (style conventions, testing expectations, branching/PR habits).
+5. Communication style preferences (concise vs detailed, formal vs casual, update cadence).
+
+Offer these workflow options with concrete examples:
+
+Example Flow A: "The Delegator"
+- User describes a feature.
+- Manager spawns a codex worker in a git worktree branch.
+- Worker implements and validates.
+- Merger agent merges to main.
+- Multiple independent tasks can run in parallel workers.
+- Use opus workers for UI/visual polish and codex workers for backend/implementation.
+- Manager focuses on orchestration and concise status updates.
+- Memory file tracks preferences, decisions, and project context across sessions.
+
+Example Flow B: "The Pair Programmer"
+- User collaborates directly with you in a tight loop.
+- You read code, propose changes, run tests, and iterate with the user.
+- Less delegation, more back-and-forth collaboration.
+- Best for exploration, debugging, and learning a codebase.
+
+Example Flow C: "The Autonomous Builder"
+- User gives high-level goals and constraints.
+- You plan and execute with workers handling implementation.
+- You make architecture/orchestration calls and report progress.
+- User checks in periodically for approvals or direction changes.
+- Best for background or overnight execution.
+
+Close by asking the user to pick one style (or describe their own), then ask if they want you to save their preferences to memory for future sessions.
+If they agree, summarize the choices and persist them using the memory workflow.`;
 const MAX_CONVERSATION_HISTORY = 2000;
 const CONVERSATION_ENTRY_TYPE = "swarm_conversation_entry";
 const LEGACY_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
@@ -484,6 +522,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       managerId,
       cwd: descriptor.cwd
     });
+
+    await this.sendManagerBootstrapMessage(managerId);
 
     return { ...descriptor, model: { ...descriptor.model } };
   }
@@ -1322,6 +1362,33 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
           message: error instanceof Error ? error.message : String(error)
         });
       }
+    }
+  }
+
+  private async sendManagerBootstrapMessage(managerId: string): Promise<void> {
+    const manager = this.descriptors.get(managerId);
+    if (!manager || manager.role !== "manager") {
+      return;
+    }
+
+    if (manager.status === "terminated" || manager.status === "stopped_on_restart") {
+      return;
+    }
+
+    if (!this.runtimes.has(managerId)) {
+      return;
+    }
+
+    try {
+      await this.sendMessage(managerId, managerId, MANAGER_BOOTSTRAP_INTERVIEW_MESSAGE, "auto", {
+        origin: "internal"
+      });
+      this.logDebug("manager:bootstrap_message:sent", { managerId });
+    } catch (error) {
+      this.logDebug("manager:bootstrap_message:error", {
+        managerId,
+        message: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 
