@@ -463,14 +463,6 @@ export function IndexPage() {
     clientRef.current?.deleteAgent(agentId)
   }
 
-  const handleReboot = useCallback(() => {
-    void requestDaemonReboot(wsUrl).catch((error) => {
-      setState((previous) => ({
-        ...previous,
-        lastError: `Failed to request reboot: ${toErrorMessage(error)}`,
-      }))
-    })
-  }, [wsUrl])
 
   const handleOpenSettingsPanel = () => {
     navigateToRoute({ view: 'settings' })
@@ -676,7 +668,6 @@ export function IndexPage() {
           onDeleteAgent={handleDeleteAgent}
           onDeleteManager={handleRequestDeleteManager}
           onOpenSettings={handleOpenSettingsPanel}
-          onReboot={handleReboot}
         />
 
         <div
@@ -954,15 +945,6 @@ function OverlayDialog({ open, title, description, onClose, children }: OverlayD
       </DialogContent>
     </Dialog>
   )
-}
-
-async function requestDaemonReboot(wsUrl: string): Promise<void> {
-  const endpoint = resolveApiEndpoint(wsUrl, '/api/reboot')
-  const response = await fetch(endpoint, { method: 'POST' })
-
-  if (!response.ok) {
-    throw new Error(`Reboot request failed with status ${response.status}`)
-  }
 }
 
 async function requestManagerCompaction(

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Monitor, Moon, Sun } from 'lucide-react'
+import { Monitor, Moon, RotateCcw, Sun } from 'lucide-react'
 import {
   Select,
   SelectContent,
@@ -7,14 +7,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Button } from '@/components/ui/button'
 import { SettingsSection, SettingsWithCTA } from './settings-row'
 import {
   applyThemePreference,
   readStoredThemePreference,
   type ThemePreference,
 } from '@/lib/theme'
+import { resolveApiEndpoint } from '@/components/settings/settings-api'
 
-export function SettingsGeneral() {
+interface SettingsGeneralProps {
+  wsUrl: string
+}
+
+export function SettingsGeneral({ wsUrl }: SettingsGeneralProps) {
   const [themePreference, setThemePreference] = useState<ThemePreference>(() =>
     readStoredThemePreference(),
   )
@@ -70,6 +76,28 @@ export function SettingsGeneral() {
               </SelectItem>
             </SelectContent>
           </Select>
+        </SettingsWithCTA>
+      </SettingsSection>
+
+      <SettingsSection
+        label="System"
+        description="Manage the swarm daemon"
+      >
+        <SettingsWithCTA
+          label="Reboot"
+          description="Restart the swarm daemon and all agents"
+        >
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const endpoint = resolveApiEndpoint(wsUrl, '/api/reboot')
+              void fetch(endpoint, { method: 'POST' }).catch(() => {})
+            }}
+          >
+            <RotateCcw className="size-3.5 mr-1.5" />
+            Reboot
+          </Button>
         </SettingsWithCTA>
       </SettingsSection>
     </div>

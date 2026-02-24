@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CircleDashed, RotateCcw, Settings, SquarePen, UserStar, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, CircleDashed, Settings, SquarePen, UserStar, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { useEffect, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -19,7 +19,6 @@ interface AgentSidebarProps {
   onDeleteAgent: (agentId: string) => void
   onDeleteManager: (managerId: string) => void
   onOpenSettings: () => void
-  onReboot: () => void
 }
 
 type AgentLiveStatus = {
@@ -277,7 +276,6 @@ export function AgentSidebar({
   onDeleteAgent,
   onDeleteManager,
   onOpenSettings,
-  onReboot,
 }: AgentSidebarProps) {
   const { managerRows, orphanWorkers } = buildManagerTreeRows(agents)
   const [collapsedManagerIds, setCollapsedManagerIds] = useState<Set<string>>(() => new Set())
@@ -523,14 +521,7 @@ export function AgentSidebar({
             <span>Settings</span>
           </button>
 
-          <button
-            type="button"
-            onClick={onReboot}
-            className="flex min-h-[44px] w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
-          >
-            <RotateCcw aria-hidden="true" className="size-4" />
-            <span>Reboot</span>
-          </button>
+
         </div>
       </div>
     </aside>
