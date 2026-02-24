@@ -91,6 +91,14 @@ class TestSwarmManager extends SwarmManager {
     return this.getSwarmContextFiles(cwd)
   }
 
+  getLoadedConversationAgentIdsForTest(): string[] {
+    const state = this as unknown as {
+      conversationEntriesByAgentId: Map<string, unknown>
+    }
+
+    return Array.from(state.conversationEntriesByAgentId.keys()).sort((left, right) => left.localeCompare(right))
+  }
+
   protected override async createRuntimeForDescriptor(
     descriptor: AgentDescriptor,
     systemPrompt: string,
@@ -101,6 +109,22 @@ class TestSwarmManager extends SwarmManager {
     this.systemPromptByAgentId.set(descriptor.agentId, systemPrompt)
     return runtime as unknown as SwarmAgentRuntime
   }
+}
+
+function appendSessionConversationMessage(sessionFile: string, agentId: string, text: string): void {
+  const sessionManager = SessionManager.open(sessionFile)
+  sessionManager.appendMessage({
+    role: 'assistant',
+    content: [{ type: 'text', text: 'seed' }],
+  } as any)
+  sessionManager.appendCustomEntry('swarm_conversation_entry', {
+    type: 'conversation_message',
+    agentId,
+    role: 'assistant',
+    text,
+    timestamp: '2026-01-01T00:00:00.000Z',
+    source: 'speak_to_user',
+  })
 }
 
 async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
@@ -1106,6 +1130,75 @@ describe('SwarmManager', () => {
     expect(worker?.status).toBe('idle')
     expect(manager.createdRuntimeIds).toEqual(['manager', 'worker-a'])
     expect(manager.runtimeByAgentId.get('worker-a')).toBeDefined()
+  })
+
+  it('skips terminated histories at boot and lazy-loads them on demand', async () => {
+    const config = await makeTempConfig()
+
+    appendSessionConversationMessage(join(config.paths.sessionsDir, 'manager.jsonl'), 'manager', 'manager-history')
+    appendSessionConversationMessage(
+      join(config.paths.sessionsDir, 'worker-active.jsonl'),
+      'worker-active',
+      'active-worker-history',
+    )
+    appendSessionConversationMessage(
+      join(config.paths.sessionsDir, 'worker-terminated.jsonl'),
+      'worker-terminated',
+      'terminated-worker-history',
+    )
+
+    const seedAgents = {
+      agents: [
+        {
+          agentId: 'manager',
+          displayName: 'Manager',
+          role: 'manager',
+          managerId: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'manager.jsonl'),
+        },
+        {
+          agentId: 'worker-active',
+          displayName: 'Worker Active',
+          role: 'worker',
+          managerId: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'worker-active.jsonl'),
+        },
+        {
+          agentId: 'worker-terminated',
+          displayName: 'Worker Terminated',
+          role: 'worker',
+          managerId: 'manager',
+          status: 'terminated',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'worker-terminated.jsonl'),
+        },
+      ],
+    }
+
+    await writeFile(config.paths.agentsStoreFile, JSON.stringify(seedAgents, null, 2), 'utf8')
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    expect(manager.createdRuntimeIds).toEqual(['manager', 'worker-active'])
+    expect(manager.getLoadedConversationAgentIdsForTest()).toEqual(['manager', 'worker-active'])
+
+    const terminatedHistory = manager.getConversationHistory('worker-terminated')
+    expect(terminatedHistory.some((entry) => entry.text === 'terminated-worker-history')).toBe(true)
+    expect(manager.getLoadedConversationAgentIdsForTest()).toEqual(['manager', 'worker-active', 'worker-terminated'])
   })
 
   it('sends a SYSTEM wake-up message to restored managers when active workers exist', async () => {

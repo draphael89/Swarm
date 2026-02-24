@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -10,12 +10,16 @@ import { fileURLToPath } from "node:url";
 const RESTART_SIGNAL = "SIGUSR1";
 const STOP_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 const FORCE_KILL_AFTER_MS = 15_000;
-const DEFAULT_COMMAND = "pnpm i && pnpm prod";
+const DEFAULT_COMMAND = "pnpm prod";
+const DEFAULT_INSTALL_COMMAND = "pnpm i";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoHash = createHash("sha1").update(repoRoot).digest("hex").slice(0, 10);
 const pidFile = path.join(os.tmpdir(), `swarm-prod-daemon-${repoHash}.pid`);
+const lockFilePath = path.join(repoRoot, "pnpm-lock.yaml");
+const lockHashFile = path.join(os.tmpdir(), `swarm-prod-daemon-lock-${repoHash}.sha1`);
 const command = process.env.SWARM_PROD_DAEMON_COMMAND?.trim() || DEFAULT_COMMAND;
+const installCommand = process.env.SWARM_PROD_DAEMON_INSTALL_COMMAND?.trim() || DEFAULT_INSTALL_COMMAND;
 
 let child = null;
 let restarting = false;
@@ -24,6 +28,89 @@ let forceKillTimer = null;
 
 function log(message) {
   console.log(`[prod-daemon] ${message}`);
+}
+
+function readFileHash(filePath) {
+  try {
+    const fileContents = fs.readFileSync(filePath);
+    return createHash("sha1").update(fileContents).digest("hex");
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function readLockHashFile() {
+  try {
+    const raw = fs.readFileSync(lockHashFile, "utf8").trim();
+    return raw.length > 0 ? raw : null;
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function writeLockHashFile(lockHash) {
+  fs.writeFileSync(lockHashFile, `${lockHash}\n`, "utf8");
+}
+
+function shouldRunInstall() {
+  const currentLockHash = readFileHash(lockFilePath);
+  if (!currentLockHash) {
+    return { runInstall: false, currentLockHash: null };
+  }
+
+  const previousLockHash = readLockHashFile();
+  if (previousLockHash === currentLockHash) {
+    return { runInstall: false, currentLockHash };
+  }
+
+  return { runInstall: true, currentLockHash };
+}
+
+function ensureDependenciesInstalled() {
+  const installDecision = shouldRunInstall();
+  if (!installDecision.currentLockHash) {
+    log("No pnpm-lock.yaml found; skipping dependency install check.");
+    return true;
+  }
+
+  if (!installDecision.runInstall) {
+    log("pnpm-lock.yaml unchanged; skipping dependency install.");
+    return true;
+  }
+
+  if (!installCommand) {
+    log("Dependency install command is empty; skipping dependency install.");
+    return true;
+  }
+
+  log(`pnpm-lock.yaml changed; running dependency install: ${installCommand}`);
+
+  const installResult = spawnSync(installCommand, {
+    cwd: repoRoot,
+    env: process.env,
+    stdio: "inherit",
+    shell: true,
+  });
+
+  if (installResult.error) {
+    log(`Dependency install failed to start: ${installResult.error.message}`);
+    return false;
+  }
+
+  if (installResult.status !== 0) {
+    const reason = installResult.signal ? `signal ${installResult.signal}` : `code ${installResult.status ?? 0}`;
+    log(`Dependency install exited with ${reason}.`);
+    return false;
+  }
+
+  writeLockHashFile(installDecision.currentLockHash);
+  return true;
 }
 
 function isChildRunning() {
@@ -126,6 +213,11 @@ function handleChildExit(code, signal) {
 
 function startChild() {
   if (isChildRunning()) {
+    return;
+  }
+
+  if (!ensureDependenciesInstalled()) {
+    log("Skipping child start because dependency install failed.");
     return;
   }
 

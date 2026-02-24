@@ -186,6 +186,7 @@ const MEMORY_MIGRATION_MARKER_CONTENT = "per-agent-memory-migration-complete\n";
 const SKILL_FRONTMATTER_BLOCK_PATTERN = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/;
 const SETTINGS_ENV_MASK = "********";
 const SETTINGS_AUTH_MASK = "********";
+const SWARM_MANAGER_MAX_EVENT_LISTENERS = 64;
 const VALID_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SETTINGS_AUTH_PROVIDER_DEFINITIONS: Array<{
   provider: SettingsAuthProviderName;
@@ -252,6 +253,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       defaultModel: resolveModelDescriptorFromPreset(this.defaultModelPreset)
     };
     this.now = options?.now ?? nowIso;
+    this.setMaxListeners(SWARM_MANAGER_MAX_EVENT_LISTENERS);
   }
 
   async boot(): Promise<void> {
@@ -313,8 +315,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   getConversationHistory(agentId: string = this.config.managerId): ConversationEntryEvent[] {
-    const history = this.conversationEntriesByAgentId.get(agentId) ?? [];
-    return history.map((entry) => ({ ...entry }));
+    let history = this.conversationEntriesByAgentId.get(agentId);
+    if (!history) {
+      const descriptor = this.descriptors.get(agentId);
+      if (descriptor && !this.shouldPreloadHistoryForDescriptor(descriptor)) {
+        history = this.loadConversationHistoryForDescriptor(descriptor);
+      }
+    }
+
+    return (history ?? []).map((entry) => ({ ...entry }));
   }
 
   async spawnAgent(callerAgentId: string, input: SpawnAgentInput): Promise<AgentDescriptor> {
@@ -1263,7 +1272,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     let shouldPersist = false;
 
     for (const descriptor of this.sortedDescriptors()) {
-      if (descriptor.status === "terminated") {
+      if (!this.shouldRestoreRuntimeForDescriptor(descriptor)) {
         continue;
       }
 
@@ -1305,6 +1314,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     ) {
       throw new Error("Primary manager runtime is not initialized");
     }
+  }
+
+  private shouldRestoreRuntimeForDescriptor(descriptor: AgentDescriptor): boolean {
+    return descriptor.status === "idle" || descriptor.status === "streaming";
   }
 
   private prepareDescriptorsForBoot(): void {
@@ -2520,11 +2533,18 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.conversationEntriesByAgentId.clear();
 
     for (const descriptor of this.descriptors.values()) {
+      if (!this.shouldPreloadHistoryForDescriptor(descriptor)) {
+        continue;
+      }
       this.loadConversationHistoryForDescriptor(descriptor);
     }
   }
 
-  private loadConversationHistoryForDescriptor(descriptor: AgentDescriptor): void {
+  private shouldPreloadHistoryForDescriptor(descriptor: AgentDescriptor): boolean {
+    return descriptor.status === "idle" || descriptor.status === "streaming";
+  }
+
+  private loadConversationHistoryForDescriptor(descriptor: AgentDescriptor): ConversationEntryEvent[] {
     const entriesForAgent: ConversationEntryEvent[] = [];
 
     try {
@@ -2564,6 +2584,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     this.conversationEntriesByAgentId.set(descriptor.agentId, entriesForAgent);
+    return entriesForAgent;
   }
 
   private async saveStore(): Promise<void> {
