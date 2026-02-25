@@ -27,7 +27,7 @@ interface SettingsLayoutProps {
 export function SettingsLayout({ activeTab, onTabChange, onBack, children }: SettingsLayoutProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
-      <header className="flex h-[52px] shrink-0 items-center border-b border-border/80 bg-card/80 px-4 backdrop-blur">
+      <header className="flex h-[62px] shrink-0 items-center border-b border-border/80 bg-card/80 px-2 backdrop-blur md:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {onBack ? (
             <Button
