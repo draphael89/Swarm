@@ -206,20 +206,7 @@ export class SwarmWebSocketServer {
 
     this.wss.on("connection", (socket) => {
       socket.on("message", (raw) => {
-        void this.handleSocketMessage(socket, raw).catch((error) => {
-          const message = error instanceof Error ? error.message : String(error);
-          const stack = error instanceof Error ? error.stack : undefined;
-          console.error("[swarm][ws] message handler failed", {
-            message,
-            stack
-          });
-
-          this.send(socket, {
-            type: "error",
-            code: "INTERNAL_ERROR",
-            message: "Failed to process websocket command due to an internal server error."
-          });
-        });
+        void this.handleSocketMessage(socket, raw);
       });
 
       socket.on("close", () => {

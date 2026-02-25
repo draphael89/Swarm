@@ -2394,10 +2394,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     const attempt = readPositiveIntegerDetail(error.details, "attempt");
     const maxAttempts = readPositiveIntegerDetail(error.details, "maxAttempts");
     const droppedPendingCount = readPositiveIntegerDetail(error.details, "droppedPendingCount");
-    const timedOutMs = readPositiveIntegerDetail(error.details, "timedOutMs");
-    const promptTimeout = readBooleanDetail(error.details, "promptTimeout");
-    const contextOverflow = readBooleanDetail(error.details, "contextOverflow");
-    const watchdogReason = readStringDetail(error.details, "reason");
 
     this.logDebug("runtime:error", {
       agentId,
@@ -2411,48 +2407,12 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     const retryLabel =
       attempt && maxAttempts && maxAttempts > 1 ? ` (attempt ${attempt}/${maxAttempts})` : "";
 
-    const droppedPendingSuffix =
-      droppedPendingCount && droppedPendingCount > 0
-        ? ` ${droppedPendingCount} queued message${droppedPendingCount === 1 ? "" : "s"} could not be delivered and were dropped. Please resend.`
-        : "";
-
-    let text: string;
-
-    switch (error.phase) {
-      case "compaction":
-        text = contextOverflow
-          ? `⚠️ Agent hit the context limit${retryLabel}: ${message}. Auto-compaction was triggered.${droppedPendingSuffix || " Please resend your last message if no reply appears."}`
-          : `⚠️ Compaction error${retryLabel}: ${message}. Continuing without compaction.${droppedPendingSuffix}`;
-        break;
-
-      case "watchdog_timeout": {
-        const reasonLabel =
-          watchdogReason === "streaming"
-            ? "streaming stalled"
-            : watchdogReason === "prompt_dispatch"
-              ? "prompt dispatch stalled"
-              : "runtime stalled";
-        const timeoutLabel = timedOutMs ? ` after ${timedOutMs}ms` : "";
-        text = `⚠️ Agent became unresponsive (${reasonLabel})${timeoutLabel} and was reset to idle. Please resend your last message.${droppedPendingSuffix}`;
-        break;
-      }
-
-      case "prompt_dispatch":
-      case "prompt_execution":
-        text = promptTimeout
-          ? `⚠️ Agent request timed out${retryLabel}: ${message}. Runtime was reset to idle. Please resend your last message.${droppedPendingSuffix}`
-          : `⚠️ Agent error${retryLabel}: ${message}. Message may need to be resent.${droppedPendingSuffix}`;
-        break;
-
-      case "prompt_start":
-      case "steer_delivery":
-      case "interrupt":
-      case "thread_resume":
-      case "startup":
-      case "runtime_exit":
-        text = `⚠️ Agent error${retryLabel}: ${message}. Message may need to be resent.${droppedPendingSuffix}`;
-        break;
-    }
+    const text =
+      error.phase === "compaction"
+        ? `⚠️ Compaction error${retryLabel}: ${message}. Continuing without compaction.`
+        : droppedPendingCount && droppedPendingCount > 0
+          ? `⚠️ Agent error${retryLabel}: ${message}. ${droppedPendingCount} queued message${droppedPendingCount === 1 ? "" : "s"} could not be delivered and were dropped. Please resend.`
+          : `⚠️ Agent error${retryLabel}: ${message}. Message may need to be resent.`;
 
     this.emitConversationMessage({
       type: "conversation_message",
@@ -3159,28 +3119,6 @@ function readPositiveIntegerDetail(details: Record<string, unknown> | undefined,
   }
 
   return value;
-}
-
-function readBooleanDetail(details: Record<string, unknown> | undefined, key: string): boolean {
-  if (!details) {
-    return false;
-  }
-
-  return details[key] === true;
-}
-
-function readStringDetail(details: Record<string, unknown> | undefined, key: string): string | undefined {
-  if (!details) {
-    return undefined;
-  }
-
-  const value = details[key];
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function extractRole(message: unknown): string | undefined {

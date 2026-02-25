@@ -20,10 +20,6 @@ export type RuntimeUserMessageInput = string | RuntimeUserMessage;
 export interface RuntimeSessionMessage {
   role: "user" | "assistant" | "system";
   content: unknown;
-  stopReason?: string;
-  errorMessage?: string;
-  provider?: string;
-  model?: string;
 }
 
 export type RuntimeSessionEvent =
@@ -54,7 +50,7 @@ export type RuntimeSessionEvent =
       isError: boolean;
     }
   | { type: "auto_compaction_start" }
-  | { type: "auto_compaction_end"; aborted?: boolean; willRetry?: boolean; errorMessage?: string }
+  | { type: "auto_compaction_end" }
   | { type: "auto_retry_start" }
   | { type: "auto_retry_end" };
 
@@ -67,9 +63,7 @@ export interface RuntimeErrorEvent {
     | "interrupt"
     | "thread_resume"
     | "startup"
-    | "runtime_exit"
-    | "prompt_execution"
-    | "watchdog_timeout";
+    | "runtime_exit";
   message: string;
   stack?: string;
   details?: Record<string, unknown>;
