@@ -18,6 +18,8 @@ interface PendingDelivery {
   mode: "steer";
 }
 
+const MAX_PROMPT_DISPATCH_ATTEMPTS = 2;
+
 export type { RuntimeImageAttachment, RuntimeUserMessage, RuntimeUserMessageInput } from "./runtime-types.js";
 
 export class AgentRuntime implements SwarmAgentRuntime {
@@ -145,10 +147,11 @@ export class AgentRuntime implements SwarmAgentRuntime {
     this.promptDispatchPending = true;
     this.ignoreNextAgentStart = false;
 
-    const images = toImageContent(message.images);
-    const run = this.sendToSession(message.text, images)
-      .catch(async (error) => {
-        await this.handlePromptDispatchError(error, message);
+    const run = this.dispatchPromptWithRetry(message)
+      .catch((error) => {
+        this.logRuntimeError("prompt_dispatch", error, {
+          stage: "dispatch_prompt_retry"
+        });
       })
       .finally(() => {
         this.promptDispatchPending = false;
@@ -156,6 +159,40 @@ export class AgentRuntime implements SwarmAgentRuntime {
       });
 
     this.inFlightPrompts.add(run);
+  }
+
+  private async dispatchPromptWithRetry(message: RuntimeUserMessage): Promise<void> {
+    const images = toImageContent(message.images);
+
+    for (let attempt = 1; attempt <= MAX_PROMPT_DISPATCH_ATTEMPTS; attempt += 1) {
+      try {
+        await this.sendToSession(message.text, images);
+        return;
+      } catch (error) {
+        const canRetry =
+          attempt < MAX_PROMPT_DISPATCH_ATTEMPTS &&
+          this.status !== "terminated" &&
+          this.status !== "streaming" &&
+          !this.session.isStreaming;
+
+        if (canRetry) {
+          this.logRuntimeError("prompt_dispatch", error, {
+            attempt,
+            maxAttempts: MAX_PROMPT_DISPATCH_ATTEMPTS,
+            willRetry: true,
+            textPreview: previewForLog(message.text),
+            imageCount: message.images?.length ?? 0
+          });
+          continue;
+        }
+
+        await this.handlePromptDispatchError(error, message, {
+          attempt,
+          maxAttempts: MAX_PROMPT_DISPATCH_ATTEMPTS
+        });
+        return;
+      }
+    }
   }
 
   private async sendToSession(text: string, images: ImageContent[]): Promise<void> {
@@ -220,15 +257,26 @@ export class AgentRuntime implements SwarmAgentRuntime {
     }
   }
 
-  private async handlePromptDispatchError(error: unknown, message: RuntimeUserMessage): Promise<void> {
+  private async handlePromptDispatchError(
+    error: unknown,
+    message: RuntimeUserMessage,
+    dispatchMeta?: { attempt: number; maxAttempts: number }
+  ): Promise<void> {
     const normalized = normalizeRuntimeError(error);
     const phase: RuntimeErrorEvent["phase"] = isLikelyCompactionError(normalized.message)
       ? "compaction"
       : "prompt_dispatch";
+    const droppedPendingCount = this.pendingDeliveries.length;
+    if (droppedPendingCount > 0) {
+      this.pendingDeliveries = [];
+    }
     const details = {
       textPreview: previewForLog(message.text),
       imageCount: message.images?.length ?? 0,
-      pendingCount: this.pendingDeliveries.length
+      pendingCount: droppedPendingCount,
+      droppedPendingCount,
+      attempt: dispatchMeta?.attempt,
+      maxAttempts: dispatchMeta?.maxAttempts
     };
 
     this.logRuntimeError(phase, error, details);
@@ -241,6 +289,10 @@ export class AgentRuntime implements SwarmAgentRuntime {
     });
 
     this.ignoreNextAgentStart = true;
+
+    if (droppedPendingCount > 0) {
+      await this.emitStatus();
+    }
 
     if (this.status !== "terminated") {
       await this.updateStatus("idle");

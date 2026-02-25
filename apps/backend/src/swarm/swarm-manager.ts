@@ -2391,6 +2391,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     const message = error.message.trim().length > 0 ? error.message.trim() : "Unknown runtime error";
+    const attempt = readPositiveIntegerDetail(error.details, "attempt");
+    const maxAttempts = readPositiveIntegerDetail(error.details, "maxAttempts");
+    const droppedPendingCount = readPositiveIntegerDetail(error.details, "droppedPendingCount");
+
     this.logDebug("runtime:error", {
       agentId,
       runtime: descriptor.model.provider.includes("codex-app") ? "codex-app-server" : "pi",
@@ -2400,10 +2404,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       details: error.details
     });
 
+    const retryLabel =
+      attempt && maxAttempts && maxAttempts > 1 ? ` (attempt ${attempt}/${maxAttempts})` : "";
+
     const text =
       error.phase === "compaction"
-        ? `⚠️ Compaction error: ${message}. Continuing without compaction.`
-        : `⚠️ Agent error: ${message}. Message may need to be resent.`;
+        ? `⚠️ Compaction error${retryLabel}: ${message}. Continuing without compaction.`
+        : droppedPendingCount && droppedPendingCount > 0
+          ? `⚠️ Agent error${retryLabel}: ${message}. ${droppedPendingCount} queued message${droppedPendingCount === 1 ? "" : "s"} could not be delivered and were dropped. Please resend.`
+          : `⚠️ Agent error${retryLabel}: ${message}. Message may need to be resent.`;
 
     this.emitConversationMessage({
       type: "conversation_message",
@@ -3097,6 +3106,19 @@ function safeJson(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function readPositiveIntegerDetail(details: Record<string, unknown> | undefined, key: string): number | undefined {
+  if (!details) {
+    return undefined;
+  }
+
+  const value = details[key];
+  if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+    return undefined;
+  }
+
+  return value;
 }
 
 function extractRole(message: unknown): string | undefined {

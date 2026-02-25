@@ -258,6 +258,108 @@ describe('AgentRuntime', () => {
     expect(agentEndCalls).toBe(1)
   })
 
+  it('retries prompt dispatch once for transient failures before succeeding', async () => {
+    const session = new FakeSession()
+    const runtimeErrors: Array<{ phase: string; message: string }> = []
+    let promptAttempts = 0
+
+    session.prompt = async (message: string): Promise<void> => {
+      session.promptCalls.push(message)
+      promptAttempts += 1
+      if (promptAttempts === 1) {
+        throw new Error('temporary provider outage')
+      }
+    }
+
+    const runtime = new AgentRuntime({
+      descriptor: makeDescriptor(),
+      session: session as any,
+      callbacks: {
+        onStatusChange: () => {},
+        onRuntimeError: (_agentId, error) => {
+          runtimeErrors.push({
+            phase: error.phase,
+            message: error.message,
+          })
+        },
+      },
+    })
+
+    const receipt = await runtime.sendMessage('retry me')
+    expect(receipt.acceptedMode).toBe('prompt')
+
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(session.promptCalls).toEqual(['retry me', 'retry me'])
+    expect(runtimeErrors).toEqual([])
+    expect(runtime.getStatus()).toBe('idle')
+  })
+
+  it('clears queued pending deliveries when prompt dispatch fails after retries', async () => {
+    const session = new FakeSession()
+    const deferred = createDeferred()
+    const pendingStatuses: number[] = []
+    const runtimeErrors: Array<{ phase: string; details?: Record<string, unknown> }> = []
+    let promptAttempts = 0
+
+    session.prompt = async (message: string): Promise<void> => {
+      session.promptCalls.push(message)
+      promptAttempts += 1
+
+      if (promptAttempts === 1) {
+        await deferred.promise
+      }
+
+      throw new Error('provider outage')
+    }
+
+    const runtime = new AgentRuntime({
+      descriptor: makeDescriptor(),
+      session: session as any,
+      callbacks: {
+        onStatusChange: (_agentId, _status, pendingCount) => {
+          pendingStatuses.push(pendingCount)
+        },
+        onRuntimeError: (_agentId, error) => {
+          runtimeErrors.push({
+            phase: error.phase,
+            details: error.details,
+          })
+        },
+      },
+    })
+
+    const first = await runtime.sendMessage('first prompt')
+    const queued = await runtime.sendMessage('queued followup')
+
+    expect(first.acceptedMode).toBe('prompt')
+    expect(queued.acceptedMode).toBe('steer')
+    expect(runtime.getPendingCount()).toBe(1)
+    expect(session.steerCalls).toEqual(['queued followup'])
+
+    deferred.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(runtime.getPendingCount()).toBe(0)
+    expect(runtimeErrors).toEqual([
+      expect.objectContaining({
+        phase: 'prompt_dispatch',
+        details: expect.objectContaining({
+          droppedPendingCount: 1,
+          attempt: 2,
+          maxAttempts: 2,
+        }),
+      }),
+    ])
+    expect(pendingStatuses).toContain(1)
+    expect(pendingStatuses).toContain(0)
+    expect(runtime.getStatus()).toBe('idle')
+  })
+
   it('reports compaction-related prompt failures with compaction phase', async () => {
     const session = new FakeSession()
     const phases: string[] = []
@@ -280,6 +382,7 @@ describe('AgentRuntime', () => {
     await runtime.sendMessage('trigger compaction failure')
     await Promise.resolve()
     await Promise.resolve()
+    await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(phases.at(-1)).toBe('compaction')
     expect(runtime.getStatus()).toBe('idle')
