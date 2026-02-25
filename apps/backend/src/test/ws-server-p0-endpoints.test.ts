@@ -1,0 +1,631 @@
+import { EventEmitter } from 'node:events'
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:net'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { getScheduleFilePath } from '../scheduler/schedule-storage.js'
+import type { AgentDescriptor, SwarmConfig } from '../swarm/types.js'
+
+const oauthMockState = vi.hoisted(() => ({
+  anthropicLogin: vi.fn(),
+  openaiLogin: vi.fn(),
+}))
+
+vi.mock('@mariozechner/pi-ai/dist/utils/oauth/anthropic.js', () => ({
+  anthropicOAuthProvider: {
+    name: 'Anthropic',
+    usesCallbackServer: false,
+    login: (callbacks: unknown) => oauthMockState.anthropicLogin(callbacks),
+  },
+}))
+
+vi.mock('@mariozechner/pi-ai/dist/utils/oauth/openai-codex.js', () => ({
+  openaiCodexOAuthProvider: {
+    name: 'OpenAI Codex',
+    usesCallbackServer: false,
+    login: (callbacks: unknown) => oauthMockState.openaiLogin(callbacks),
+  },
+}))
+
+import { SwarmWebSocketServer } from '../ws/server.js'
+
+interface SseEvent {
+  event: string
+  data: unknown
+}
+
+class FakeSwarmManager extends EventEmitter {
+  private readonly config: SwarmConfig
+  private readonly agents: AgentDescriptor[]
+
+  constructor(config: SwarmConfig, agents: AgentDescriptor[]) {
+    super()
+    this.config = config
+    this.agents = agents
+  }
+
+  getConfig(): SwarmConfig {
+    return this.config
+  }
+
+  listAgents(): AgentDescriptor[] {
+    return [...this.agents]
+  }
+
+  getAgent(agentId: string): AgentDescriptor | undefined {
+    return this.agents.find((agent) => agent.agentId === agentId)
+  }
+}
+
+function createManagerDescriptor(rootDir: string, managerId = 'manager'): AgentDescriptor {
+  return {
+    agentId: managerId,
+    displayName: 'Manager',
+    role: 'manager',
+    managerId,
+    status: 'idle',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    cwd: rootDir,
+    model: {
+      provider: 'openai-codex',
+      modelId: 'gpt-5.3-codex',
+      thinkingLevel: 'medium',
+    },
+    sessionFile: join(rootDir, 'sessions', `${managerId}.jsonl`),
+  }
+}
+
+async function getAvailablePort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve())
+  })
+
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    server.close()
+    throw new Error('Unable to allocate port')
+  }
+
+  const port = address.port
+  await new Promise<void>((resolve) => server.close(() => resolve()))
+  return port
+}
+
+async function makeTempConfig(options?: { port?: number; managerId?: string }): Promise<SwarmConfig> {
+  const port = options?.port ?? (await getAvailablePort())
+  const rootDir = await mkdtemp(join(tmpdir(), 'swarm-ws-p0-test-'))
+  const dataDir = join(rootDir, 'data')
+  const swarmDir = join(dataDir, 'swarm')
+  const sessionsDir = join(dataDir, 'sessions')
+  const uploadsDir = join(dataDir, 'uploads')
+  const authDir = join(dataDir, 'auth')
+  const agentDir = join(dataDir, 'agent')
+  const managerAgentDir = join(agentDir, 'manager')
+  const repoArchetypesDir = join(rootDir, '.swarm', 'archetypes')
+  const memoryDir = join(dataDir, 'memory')
+  const memoryFile = join(memoryDir, 'manager.md')
+  const repoMemorySkillFile = join(rootDir, '.swarm', 'skills', 'memory', 'SKILL.md')
+
+  await mkdir(swarmDir, { recursive: true })
+  await mkdir(sessionsDir, { recursive: true })
+  await mkdir(uploadsDir, { recursive: true })
+  await mkdir(authDir, { recursive: true })
+  await mkdir(memoryDir, { recursive: true })
+  await mkdir(agentDir, { recursive: true })
+  await mkdir(managerAgentDir, { recursive: true })
+  await mkdir(repoArchetypesDir, { recursive: true })
+
+  return {
+    host: '127.0.0.1',
+    port,
+    debug: false,
+    allowNonManagerSubscriptions: false,
+    managerId: options?.managerId,
+    managerDisplayName: 'Manager',
+    defaultModel: {
+      provider: 'openai-codex',
+      modelId: 'gpt-5.3-codex',
+      thinkingLevel: 'medium',
+    },
+    defaultCwd: rootDir,
+    cwdAllowlistRoots: [rootDir, join(rootDir, 'worktrees')],
+    paths: {
+      rootDir,
+      dataDir,
+      swarmDir,
+      sessionsDir,
+      uploadsDir,
+      authDir,
+      authFile: join(authDir, 'auth.json'),
+      agentDir,
+      managerAgentDir,
+      repoArchetypesDir,
+      memoryDir,
+      memoryFile,
+      repoMemorySkillFile,
+      agentsStoreFile: join(swarmDir, 'agents.json'),
+      secretsFile: join(dataDir, 'secrets.json'),
+      schedulesFile: getScheduleFilePath(dataDir, options?.managerId ?? 'manager'),
+    },
+  }
+}
+
+function createIntegrationRegistryMock() {
+  return Object.assign(new EventEmitter(), {
+    getSlackSnapshot: vi.fn(async () => ({ config: { enabled: false }, status: { state: 'disabled' } })),
+    updateSlackConfig: vi.fn(async () => ({ config: { enabled: true }, status: { state: 'connected' } })),
+    disableSlack: vi.fn(async () => ({ config: { enabled: false }, status: { state: 'disabled' } })),
+    testSlackConnection: vi.fn(async () => ({ ok: true })),
+    listSlackChannels: vi.fn(async () => [{ id: 'C123', name: 'alerts' }]),
+    getTelegramSnapshot: vi.fn(async () => ({ config: { enabled: false }, status: { state: 'disabled' } })),
+    updateTelegramConfig: vi.fn(async () => ({ config: { enabled: true }, status: { state: 'connected' } })),
+    disableTelegram: vi.fn(async () => ({ config: { enabled: false }, status: { state: 'disabled' } })),
+    testTelegramConnection: vi.fn(async () => ({ ok: true })),
+  })
+}
+
+function createGsuiteIntegrationMock() {
+  return {
+    getSnapshot: vi.fn(async () => ({ enabled: false, accountEmail: null, services: [] })),
+    updateConfig: vi.fn(async () => ({ enabled: true, accountEmail: 'ops@example.com', services: ['gmail'] })),
+    disable: vi.fn(async () => ({ enabled: false, accountEmail: null, services: [] })),
+    storeOAuthCredentials: vi.fn(async () => ({ enabled: false, accountEmail: null, services: [] })),
+    startOAuth: vi.fn(async () => ({
+      snapshot: { enabled: true, accountEmail: 'ops@example.com', services: ['gmail'] },
+      result: { authUrl: 'https://accounts.google.com/o/oauth2/auth?mock=1' },
+    })),
+    completeOAuth: vi.fn(async () => ({
+      snapshot: { enabled: true, accountEmail: 'ops@example.com', services: ['gmail'] },
+      result: { ok: true },
+    })),
+    testConnection: vi.fn(async () => ({ ok: true })),
+  }
+}
+
+async function parseJsonResponse(response: Response): Promise<{ status: number; json: Record<string, unknown> }> {
+  return {
+    status: response.status,
+    json: (await response.json()) as Record<string, unknown>,
+  }
+}
+
+async function postTranscribe(url: string, options?: { size?: number; type?: string }): Promise<Response> {
+  const byteLength = options?.size ?? 32
+  const bytes = new Uint8Array(byteLength)
+  bytes.fill(7)
+
+  const form = new FormData()
+  const file = new File([bytes], 'audio.wav', { type: options?.type ?? 'audio/wav' })
+  form.set('file', file)
+
+  return fetch(url, {
+    method: 'POST',
+    body: form,
+  })
+}
+
+function parseSseChunk(chunk: string): SseEvent | undefined {
+  const lines = chunk
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+
+  let event = 'message'
+  let dataText = ''
+
+  for (const line of lines) {
+    if (line.startsWith('event:')) {
+      event = line.slice('event:'.length).trim()
+      continue
+    }
+
+    if (line.startsWith('data:')) {
+      dataText += line.slice('data:'.length).trim()
+    }
+  }
+
+  if (!dataText) {
+    return undefined
+  }
+
+  return {
+    event,
+    data: JSON.parse(dataText) as unknown,
+  }
+}
+
+async function readSseEvents(
+  response: Response,
+  onEvent?: (event: SseEvent) => Promise<void> | void,
+): Promise<SseEvent[]> {
+  if (!response.body) {
+    throw new Error('Expected SSE response body')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const events: SseEvent[] = []
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+
+    buffer += decoder.decode(value, { stream: true })
+
+    let boundaryIndex = buffer.indexOf('\n\n')
+    while (boundaryIndex >= 0) {
+      const chunk = buffer.slice(0, boundaryIndex)
+      buffer = buffer.slice(boundaryIndex + 2)
+
+      const parsed = parseSseChunk(chunk)
+      if (parsed) {
+        events.push(parsed)
+        if (onEvent) {
+          await onEvent(parsed)
+        }
+      }
+
+      boundaryIndex = buffer.indexOf('\n\n')
+    }
+  }
+
+  return events
+}
+
+async function writeAuthKey(authFile: string, apiKey: string): Promise<void> {
+  await mkdir(dirname(authFile), { recursive: true })
+  await writeFile(
+    authFile,
+    JSON.stringify(
+      {
+        'openai-codex': {
+          type: 'api_key',
+          key: apiKey,
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  )
+}
+
+afterEach(() => {
+  oauthMockState.anthropicLogin.mockReset()
+  oauthMockState.openaiLogin.mockReset()
+  vi.restoreAllMocks()
+})
+
+describe('SwarmWebSocketServer P0 endpoints', () => {
+  it('validates /api/transcribe content type, file size, and missing API key', async () => {
+    const config = await makeTempConfig({ managerId: 'manager' })
+    const manager = new FakeSwarmManager(config, [createManagerDescriptor(config.paths.rootDir, 'manager')])
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager as unknown as never,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: false,
+    })
+
+    await server.start()
+
+    try {
+      const invalidTypeResponse = await fetch(`http://${config.host}:${config.port}/api/transcribe`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const invalidType = await parseJsonResponse(invalidTypeResponse)
+      expect(invalidType.status).toBe(400)
+      expect(invalidType.json.error).toBe('Content-Type must be multipart/form-data')
+
+      const tooLargeResponse = await postTranscribe(`http://${config.host}:${config.port}/api/transcribe`, {
+        size: 4_000_001,
+      })
+      const tooLarge = await parseJsonResponse(tooLargeResponse)
+      expect(tooLarge.status).toBe(413)
+      expect(tooLarge.json.error).toBe('Audio file too large. Max size is 4MB.')
+
+      const missingKeyResponse = await postTranscribe(`http://${config.host}:${config.port}/api/transcribe`)
+      const missingKey = await parseJsonResponse(missingKeyResponse)
+      expect(missingKey.status).toBe(400)
+      expect(missingKey.json.error).toBe('OpenAI API key required — add it in Settings.')
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('maps /api/transcribe upstream auth errors, upstream failures, and aborts', async () => {
+    const config = await makeTempConfig({ managerId: 'manager' })
+    await writeAuthKey(config.paths.authFile, 'sk-test-123')
+
+    const manager = new FakeSwarmManager(config, [createManagerDescriptor(config.paths.rootDir, 'manager')])
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager as unknown as never,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: false,
+    })
+
+    await server.start()
+
+    const localOrigin = `http://${config.host}:${config.port}`
+    const originalFetch = globalThis.fetch
+
+    try {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+
+        if (url.startsWith(localOrigin)) {
+          return originalFetch(input as any, init as any)
+        }
+
+        return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 })
+      })
+
+      const unauthorizedResponse = await postTranscribe(`${localOrigin}/api/transcribe`)
+      const unauthorized = await parseJsonResponse(unauthorizedResponse)
+      expect(unauthorized.status).toBe(401)
+      expect(unauthorized.json.error).toBe('OpenAI API key rejected — update it in Settings.')
+
+      fetchSpy.mockImplementation(async (input, init) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+
+        if (url.startsWith(localOrigin)) {
+          return originalFetch(input as any, init as any)
+        }
+
+        return new Response(JSON.stringify({ error: 'upstream failure' }), { status: 503 })
+      })
+
+      const upstreamFailureResponse = await postTranscribe(`${localOrigin}/api/transcribe`)
+      const upstreamFailure = await parseJsonResponse(upstreamFailureResponse)
+      expect(upstreamFailure.status).toBe(502)
+      expect(upstreamFailure.json.error).toBe('Transcription failed. Please try again.')
+
+      fetchSpy.mockImplementation(async (input, init) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+
+        if (url.startsWith(localOrigin)) {
+          return originalFetch(input as any, init as any)
+        }
+
+        const error = new Error('aborted')
+        Object.assign(error, { name: 'AbortError' })
+        throw error
+      })
+
+      const timeoutResponse = await postTranscribe(`${localOrigin}/api/transcribe`)
+      const timeout = await parseJsonResponse(timeoutResponse)
+      expect(timeout.status).toBe(504)
+      expect(timeout.json.error).toBe('Transcription timed out.')
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('streams OAuth login SSE events and accepts prompt responses', async () => {
+    oauthMockState.anthropicLogin.mockImplementation(async (callbacks: any) => {
+      callbacks.onProgress?.('Preparing OAuth login')
+      callbacks.onAuth?.({
+        url: 'https://auth.example.test',
+        instructions: 'Open the URL in your browser.',
+      })
+
+      const code = await callbacks.onPrompt?.({
+        message: 'Paste the one-time code',
+        placeholder: 'code-123',
+      })
+
+      callbacks.onProgress?.(`Received code: ${code}`)
+
+      return {
+        accessToken: 'oauth-access-token',
+        refreshToken: 'oauth-refresh-token',
+      }
+    })
+
+    const config = await makeTempConfig({ managerId: 'manager' })
+    const manager = new FakeSwarmManager(config, [createManagerDescriptor(config.paths.rootDir, 'manager')])
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager as unknown as never,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: false,
+    })
+
+    await server.start()
+
+    try {
+      const streamResponse = await fetch(`http://${config.host}:${config.port}/api/settings/auth/login/anthropic`, {
+        method: 'POST',
+      })
+
+      expect(streamResponse.status).toBe(200)
+      expect(streamResponse.headers.get('content-type')).toContain('text/event-stream')
+
+      let responded = false
+      const events = await readSseEvents(streamResponse, async (event) => {
+        if (event.event !== 'prompt' || responded) {
+          return
+        }
+
+        responded = true
+        const respondResponse = await fetch(
+          `http://${config.host}:${config.port}/api/settings/auth/login/anthropic/respond`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ value: 'code-from-user' }),
+          },
+        )
+
+        const payload = await parseJsonResponse(respondResponse)
+        expect(payload.status).toBe(200)
+        expect(payload.json.ok).toBe(true)
+      })
+
+      const eventNames = events.map((event) => event.event)
+      expect(eventNames).toEqual(expect.arrayContaining(['progress', 'auth_url', 'prompt', 'complete']))
+      expect(oauthMockState.anthropicLogin).toHaveBeenCalledTimes(1)
+
+      const storedAuth = JSON.parse(await readFile(config.paths.authFile, 'utf8')) as Record<string, unknown>
+      expect(storedAuth.anthropic).toMatchObject({
+        type: 'oauth',
+      })
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('validates OAuth login provider and path segments', async () => {
+    const config = await makeTempConfig({ managerId: 'manager' })
+    const manager = new FakeSwarmManager(config, [createManagerDescriptor(config.paths.rootDir, 'manager')])
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager as unknown as never,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: false,
+    })
+
+    await server.start()
+
+    try {
+      const invalidProviderResponse = await fetch(
+        `http://${config.host}:${config.port}/api/settings/auth/login/not-a-provider`,
+        {
+          method: 'POST',
+        },
+      )
+      const invalidProvider = await parseJsonResponse(invalidProviderResponse)
+      expect(invalidProvider.status).toBe(400)
+      expect(invalidProvider.json.error).toBe('Invalid OAuth provider')
+
+      const invalidPathResponse = await fetch(
+        `http://${config.host}:${config.port}/api/settings/auth/login/anthropic/extra`,
+        {
+          method: 'POST',
+        },
+      )
+      const invalidPath = await parseJsonResponse(invalidPathResponse)
+      expect(invalidPath.status).toBe(400)
+      expect(invalidPath.json.error).toBe('Invalid OAuth login path')
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('handles manager-scoped Slack/Telegram routes and validates GSuite payloads', async () => {
+    const config = await makeTempConfig({ managerId: 'manager' })
+    const manager = new FakeSwarmManager(config, [createManagerDescriptor(config.paths.rootDir, 'manager')])
+    const integrationRegistry = createIntegrationRegistryMock()
+    const gsuite = createGsuiteIntegrationMock()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager as unknown as never,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: false,
+      integrationRegistry: integrationRegistry as unknown as never,
+      gsuiteIntegration: gsuite as unknown as never,
+    })
+
+    await server.start()
+
+    try {
+      const unknownManagerResponse = await fetch(
+        `http://${config.host}:${config.port}/api/managers/ghost/integrations/slack`,
+      )
+      const unknownManager = await parseJsonResponse(unknownManagerResponse)
+      expect(unknownManager.status).toBe(404)
+      expect(unknownManager.json.error).toBe('Unknown manager: ghost')
+
+      const slackTestResponse = await fetch(
+        `http://${config.host}:${config.port}/api/managers/manager/integrations/slack/test`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ dryRun: true }),
+        },
+      )
+      const slackTest = await parseJsonResponse(slackTestResponse)
+      expect(slackTest.status).toBe(200)
+      expect(integrationRegistry.testSlackConnection).toHaveBeenCalledWith('manager', { dryRun: true })
+
+      const telegramWrongMethodResponse = await fetch(
+        `http://${config.host}:${config.port}/api/managers/manager/integrations/telegram`,
+        {
+          method: 'PATCH',
+        },
+      )
+      const telegramWrongMethod = await parseJsonResponse(telegramWrongMethodResponse)
+      expect(telegramWrongMethod.status).toBe(405)
+      expect(telegramWrongMethod.json.error).toBe('Method Not Allowed')
+
+      const invalidGsuiteBodyResponse = await fetch(
+        `http://${config.host}:${config.port}/api/integrations/gsuite/oauth/credentials`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({}),
+        },
+      )
+      const invalidGsuiteBody = await parseJsonResponse(invalidGsuiteBodyResponse)
+      expect(invalidGsuiteBody.status).toBe(400)
+      expect(invalidGsuiteBody.json.error).toBe('oauthClientJson must be a non-empty string')
+
+      const startOAuthResponse = await fetch(`http://${config.host}:${config.port}/api/integrations/gsuite/oauth/start`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          email: '  ops@example.com ',
+          services: ['Gmail', 'calendar', ''],
+          forceConsent: true,
+        }),
+      })
+      const startOAuth = await parseJsonResponse(startOAuthResponse)
+      expect(startOAuth.status).toBe(200)
+      expect(gsuite.startOAuth).toHaveBeenCalledWith({
+        email: 'ops@example.com',
+        services: ['gmail', 'calendar'],
+        forceConsent: true,
+      })
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('requires explicit manager id for legacy Slack route when no default manager exists', async () => {
+    const config = await makeTempConfig({ managerId: undefined })
+    const manager = new FakeSwarmManager(config, [])
+    const integrationRegistry = createIntegrationRegistryMock()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager as unknown as never,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: false,
+      integrationRegistry: integrationRegistry as unknown as never,
+    })
+
+    await server.start()
+
+    try {
+      const response = await fetch(`http://${config.host}:${config.port}/api/integrations/slack`)
+      const payload = await parseJsonResponse(response)
+      expect(payload.status).toBe(400)
+      expect(payload.json.error).toBe('managerId is required. Use /api/managers/:managerId/integrations/slack.')
+    } finally {
+      await server.stop()
+    }
+  })
+})
