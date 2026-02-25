@@ -18,6 +18,13 @@ export interface AgentDescriptor {
     thinkingLevel: string
   }
   sessionFile: string
+  contextUsage?: AgentContextUsage
+}
+
+export interface AgentContextUsage {
+  tokens: number
+  contextWindow: number
+  percent: number
 }
 
 export type DeliveryMode = 'auto' | 'followUp' | 'steer'
@@ -183,7 +190,13 @@ export type ServerEvent =
     }
   | ConversationMessageEvent
   | ConversationLogEvent
-  | { type: 'agent_status'; agentId: string; status: AgentStatus; pendingCount: number }
+  | {
+      type: 'agent_status'
+      agentId: string
+      status: AgentStatus
+      pendingCount: number
+      contextUsage?: AgentContextUsage
+    }
   | { type: 'agents_snapshot'; agents: AgentDescriptor[] }
   | ManagerCreatedEvent
   | ManagerDeletedEvent

@@ -1,4 +1,5 @@
 import type {
+  AgentContextUsage,
   AgentDescriptor,
   AgentStatus,
   RequestedDeliveryMode,
@@ -70,7 +71,12 @@ export interface RuntimeErrorEvent {
 }
 
 export interface SwarmRuntimeCallbacks {
-  onStatusChange: (agentId: string, status: AgentStatus, pendingCount: number) => void | Promise<void>;
+  onStatusChange: (
+    agentId: string,
+    status: AgentStatus,
+    pendingCount: number,
+    contextUsage?: AgentContextUsage
+  ) => void | Promise<void>;
   onSessionEvent?: (agentId: string, event: RuntimeSessionEvent) => void | Promise<void>;
   onAgentEnd?: (agentId: string) => void | Promise<void>;
   onRuntimeError?: (agentId: string, error: RuntimeErrorEvent) => void | Promise<void>;
@@ -81,6 +87,7 @@ export interface SwarmAgentRuntime {
 
   getStatus(): AgentStatus;
   getPendingCount(): number;
+  getContextUsage(): AgentContextUsage | undefined;
 
   sendMessage(
     input: RuntimeUserMessageInput,

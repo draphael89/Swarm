@@ -1,4 +1,5 @@
 import type {
+  AgentContextUsage,
   AgentDescriptor,
   ConversationAttachment,
   ConversationEntryEvent,
@@ -52,6 +53,7 @@ export type ServerEvent =
       agentId: string;
       status: "idle" | "streaming" | "terminated" | "stopped_on_restart";
       pendingCount: number;
+      contextUsage?: AgentContextUsage;
     }
   | { type: "agents_snapshot"; agents: AgentDescriptor[] }
   | { type: "manager_created"; manager: AgentDescriptor; requestId?: string }

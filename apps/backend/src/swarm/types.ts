@@ -14,6 +14,12 @@ export interface AgentModelDescriptor {
   thinkingLevel: string;
 }
 
+export interface AgentContextUsage {
+  tokens: number;
+  contextWindow: number;
+  percent: number;
+}
+
 export interface AgentDescriptor {
   agentId: string;
   displayName: string;
@@ -26,6 +32,7 @@ export interface AgentDescriptor {
   cwd: string;
   model: AgentModelDescriptor;
   sessionFile: string;
+  contextUsage?: AgentContextUsage;
 }
 
 export interface AgentsStoreFile {
@@ -187,6 +194,7 @@ export interface AgentStatusEvent {
   agentId: string;
   status: AgentStatus;
   pendingCount: number;
+  contextUsage?: AgentContextUsage;
 }
 
 export interface AgentsSnapshotEvent {

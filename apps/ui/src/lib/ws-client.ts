@@ -1,6 +1,7 @@
 import { chooseFallbackAgentId } from './agent-hierarchy'
 import {
   MANAGER_MODEL_PRESETS,
+  type AgentContextUsage,
   type AgentDescriptor,
   type AgentStatus,
   type ClientCommand,
@@ -24,7 +25,7 @@ export interface ManagerWsState {
   subscribedAgentId: string | null
   messages: ConversationEntry[]
   agents: AgentDescriptor[]
-  statuses: Record<string, { status: AgentStatus; pendingCount: number }>
+  statuses: Record<string, { status: AgentStatus; pendingCount: number; contextUsage?: AgentContextUsage }>
   lastError: string | null
   slackStatus: SlackStatusEvent | null
   telegramStatus: TelegramStatusEvent | null
@@ -488,6 +489,7 @@ export class ManagerWsClient {
           [event.agentId]: {
             status: event.status,
             pendingCount: event.pendingCount,
+            contextUsage: event.contextUsage,
           },
         }
         this.updateState({ statuses })
@@ -571,7 +573,17 @@ export class ManagerWsClient {
   private applyAgentsSnapshot(agents: AgentDescriptor[]): void {
     const liveAgentIds = new Set(agents.map((agent) => agent.agentId))
     const statuses = Object.fromEntries(
-      Object.entries(this.state.statuses).filter(([agentId]) => liveAgentIds.has(agentId)),
+      agents.map((agent) => {
+        const previous = this.state.statuses[agent.agentId]
+        return [
+          agent.agentId,
+          {
+            status: previous?.status ?? agent.status,
+            pendingCount: previous?.pendingCount ?? 0,
+            contextUsage: agent.contextUsage,
+          },
+        ]
+      }),
     )
 
     const fallbackTarget = chooseFallbackAgentId(

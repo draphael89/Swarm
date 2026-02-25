@@ -4,12 +4,12 @@ import { useEffect, useState } from 'react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { buildManagerTreeRows } from '@/lib/agent-hierarchy'
 import { cn } from '@/lib/utils'
-import type { AgentDescriptor, AgentStatus, ManagerModelPreset } from '@/lib/ws-types'
+import type { AgentContextUsage, AgentDescriptor, AgentStatus, ManagerModelPreset } from '@/lib/ws-types'
 
 interface AgentSidebarProps {
   connected: boolean
   agents: AgentDescriptor[]
-  statuses: Record<string, { status: AgentStatus; pendingCount: number }>
+  statuses: Record<string, { status: AgentStatus; pendingCount: number; contextUsage?: AgentContextUsage }>
   selectedAgentId: string | null
   isSettingsActive: boolean
   isMobileOpen?: boolean
@@ -28,7 +28,7 @@ type AgentLiveStatus = {
 
 function getAgentLiveStatus(
   agent: AgentDescriptor,
-  statuses: Record<string, { status: AgentStatus; pendingCount: number }>,
+  statuses: Record<string, { status: AgentStatus; pendingCount: number; contextUsage?: AgentContextUsage }>,
 ): AgentLiveStatus {
   const live = statuses[agent.agentId]
   return {

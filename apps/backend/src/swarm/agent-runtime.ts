@@ -10,7 +10,13 @@ import type {
   SwarmAgentRuntime,
   SwarmRuntimeCallbacks
 } from "./runtime-types.js";
-import type { AgentDescriptor, AgentStatus, RequestedDeliveryMode, SendMessageReceipt } from "./types.js";
+import type {
+  AgentContextUsage,
+  AgentDescriptor,
+  AgentStatus,
+  RequestedDeliveryMode,
+  SendMessageReceipt
+} from "./types.js";
 
 interface PendingDelivery {
   deliveryId: string;
@@ -19,6 +25,7 @@ interface PendingDelivery {
 }
 
 const MAX_PROMPT_DISPATCH_ATTEMPTS = 2;
+const STREAMING_STATUS_EMIT_THROTTLE_MS = 1_000;
 
 export type { RuntimeImageAttachment, RuntimeUserMessage, RuntimeUserMessageInput } from "./runtime-types.js";
 
@@ -34,6 +41,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
   private readonly inFlightPrompts = new Set<Promise<void>>();
   private promptDispatchPending = false;
   private ignoreNextAgentStart = false;
+  private lastStreamingStatusEmitAtMs = 0;
 
   constructor(options: {
     descriptor: AgentDescriptor;
@@ -58,6 +66,10 @@ export class AgentRuntime implements SwarmAgentRuntime {
 
   getPendingCount(): number {
     return this.pendingDeliveries.length;
+  }
+
+  getContextUsage(): AgentContextUsage | undefined {
+    return normalizeAgentContextUsage(this.session.getContextUsage?.());
   }
 
   isStreaming(): boolean {
@@ -248,6 +260,11 @@ export class AgentRuntime implements SwarmAgentRuntime {
       return;
     }
 
+    if (event.type === "message_update" && event.message.role !== "user") {
+      await this.emitStreamingStatusUpdateThrottled();
+      return;
+    }
+
     if (event.type === "message_start" && event.message.role === "user") {
       const key = extractMessageKeyFromContent(event.message.content);
       if (key !== undefined) {
@@ -339,11 +356,31 @@ export class AgentRuntime implements SwarmAgentRuntime {
     this.status = status;
     this.descriptor.status = status;
     this.descriptor.updatedAt = this.now();
+    this.lastStreamingStatusEmitAtMs = status === "streaming" ? Date.now() : 0;
+    await this.emitStatus();
+  }
+
+  private async emitStreamingStatusUpdateThrottled(): Promise<void> {
+    if (this.status !== "streaming") {
+      return;
+    }
+
+    const nowMs = Date.now();
+    if (nowMs - this.lastStreamingStatusEmitAtMs < STREAMING_STATUS_EMIT_THROTTLE_MS) {
+      return;
+    }
+
+    this.lastStreamingStatusEmitAtMs = nowMs;
     await this.emitStatus();
   }
 
   private async emitStatus(): Promise<void> {
-    await this.callbacks.onStatusChange(this.descriptor.agentId, this.status, this.pendingDeliveries.length);
+    await this.callbacks.onStatusChange(
+      this.descriptor.agentId,
+      this.status,
+      this.pendingDeliveries.length,
+      this.getContextUsage()
+    );
   }
 
   private async reportRuntimeError(error: RuntimeErrorEvent): Promise<void> {
@@ -390,6 +427,40 @@ function normalizeRuntimeUserMessage(input: RuntimeUserMessageInput): RuntimeUse
   return {
     text,
     images: normalizeRuntimeImageAttachments(input.images)
+  };
+}
+
+function normalizeAgentContextUsage(
+  usage:
+    | {
+        tokens: number | null;
+        contextWindow: number;
+        percent: number | null;
+      }
+    | undefined
+): AgentContextUsage | undefined {
+  if (!usage) {
+    return undefined;
+  }
+
+  if (typeof usage.contextWindow !== "number" || !Number.isFinite(usage.contextWindow) || usage.contextWindow <= 0) {
+    return undefined;
+  }
+
+  if (typeof usage.tokens !== "number" || !Number.isFinite(usage.tokens) || usage.tokens < 0) {
+    return undefined;
+  }
+
+  const contextWindow = Math.max(1, Math.round(usage.contextWindow));
+  const tokens = Math.round(usage.tokens);
+  const percentFromTokens = (tokens / contextWindow) * 100;
+  const rawPercent = typeof usage.percent === "number" && Number.isFinite(usage.percent) ? usage.percent : percentFromTokens;
+  const percent = Math.max(0, Math.min(100, rawPercent));
+
+  return {
+    tokens,
+    contextWindow,
+    percent
   };
 }
 
