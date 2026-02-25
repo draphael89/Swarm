@@ -19,7 +19,7 @@ export const Route = createRootRoute({
           'Run manager + worker AI agents locally with streaming chat, artifacts, schedules, and channel integrations.',
       },
       { property: 'og:type', content: 'website' },
-      { name: 'theme-color', content: '#07090f' },
+      { name: 'theme-color', content: '#F8F7F3' },
     ],
     links: [
       { rel: 'stylesheet', href: appCss },
@@ -32,7 +32,7 @@ export const Route = createRootRoute({
       },
       {
         rel: 'stylesheet',
-        href: 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap',
+        href: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400;1,6..72,500&display=swap',
       },
     ],
   }),
