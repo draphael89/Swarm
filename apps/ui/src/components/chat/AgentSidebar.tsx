@@ -278,7 +278,9 @@ export function AgentSidebar({
   onOpenSettings,
 }: AgentSidebarProps) {
   const { managerRows, orphanWorkers } = buildManagerTreeRows(agents)
-  const [collapsedManagerIds, setCollapsedManagerIds] = useState<Set<string>>(() => new Set())
+  const [collapsedManagerIds, setCollapsedManagerIds] = useState<Set<string>>(
+    () => new Set(managerRows.map(({ manager }) => manager.agentId)),
+  )
 
   useEffect(() => {
     const managerIds = new Set(managerRows.map(({ manager }) => manager.agentId))
