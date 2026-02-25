@@ -15,7 +15,13 @@ import type {
   SwarmAgentRuntime,
   SwarmRuntimeCallbacks
 } from "./runtime-types.js";
-import type { AgentDescriptor, AgentStatus, RequestedDeliveryMode, SendMessageReceipt } from "./types.js";
+import type {
+  AgentContextUsage,
+  AgentDescriptor,
+  AgentStatus,
+  RequestedDeliveryMode,
+  SendMessageReceipt
+} from "./types.js";
 
 const CODEX_RUNTIME_STATE_ENTRY_TYPE = "swarm_codex_runtime_state";
 const CODEX_SANDBOX_MODE = "danger-full-access";
@@ -148,6 +154,10 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
 
   getPendingCount(): number {
     return this.pendingDeliveries.length;
+  }
+
+  getContextUsage(): AgentContextUsage | undefined {
+    return undefined;
   }
 
   async sendMessage(
@@ -748,7 +758,12 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
   }
 
   private async emitStatus(): Promise<void> {
-    await this.callbacks.onStatusChange(this.descriptor.agentId, this.status, this.pendingDeliveries.length);
+    await this.callbacks.onStatusChange(
+      this.descriptor.agentId,
+      this.status,
+      this.pendingDeliveries.length,
+      this.getContextUsage()
+    );
   }
 
   private async emitSessionEvent(event: RuntimeSessionEvent): Promise<void> {

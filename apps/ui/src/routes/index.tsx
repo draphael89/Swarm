@@ -33,6 +33,7 @@ import { collectArtifactsFromMessages } from '@/lib/collect-artifacts'
 import { ManagerWsClient, type ManagerWsState } from '@/lib/ws-client'
 import {
   MANAGER_MODEL_PRESETS,
+  type AgentContextUsage,
   type AgentDescriptor,
   type ConversationAttachment,
   type ConversationEntry,
@@ -211,6 +212,28 @@ function estimateUsedTokens(messages: ConversationEntry[]): number {
   return Math.ceil(totalChars / CHARS_PER_TOKEN_ESTIMATE)
 }
 
+function toContextWindowUsage(
+  contextUsage: AgentContextUsage | undefined,
+): { usedTokens: number; contextWindow: number } | null {
+  if (!contextUsage) {
+    return null
+  }
+
+  if (
+    !Number.isFinite(contextUsage.tokens) ||
+    contextUsage.tokens < 0 ||
+    !Number.isFinite(contextUsage.contextWindow) ||
+    contextUsage.contextWindow <= 0
+  ) {
+    return null
+  }
+
+  return {
+    usedTokens: Math.round(contextUsage.tokens),
+    contextWindow: Math.max(1, Math.round(contextUsage.contextWindow)),
+  }
+}
+
 function isAssistantResponseSignal(entry: ConversationEntry): boolean {
   if (entry.type === 'conversation_message') {
     return entry.role === 'assistant' || entry.role === 'system'
@@ -329,10 +352,27 @@ export function IndexPage() {
   }, [activeAgentId, state.agents, state.statuses])
 
   const contextWindow = useMemo(() => contextWindowForAgent(activeAgent), [activeAgent])
-  const usedTokens = useMemo(() => estimateUsedTokens(state.messages), [state.messages])
   const contextWindowUsage = useMemo(
-    () => (contextWindow ? { usedTokens, contextWindow } : null),
-    [contextWindow, usedTokens],
+    () => {
+      const liveFromStatus =
+        activeAgentId !== null ? toContextWindowUsage(state.statuses[activeAgentId]?.contextUsage) : null
+      if (liveFromStatus) {
+        return liveFromStatus
+      }
+
+      const liveFromDescriptor = toContextWindowUsage(activeAgent?.contextUsage)
+      if (liveFromDescriptor) {
+        return liveFromDescriptor
+      }
+
+      if (!contextWindow) {
+        return null
+      }
+
+      const estimatedUsedTokens = estimateUsedTokens(state.messages)
+      return { usedTokens: estimatedUsedTokens, contextWindow }
+    },
+    [activeAgent, activeAgentId, contextWindow, state.messages, state.statuses],
   )
 
   const isAwaitingResponseStart =

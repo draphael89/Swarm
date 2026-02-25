@@ -52,6 +52,7 @@ import type {
 import { buildSwarmTools, type SwarmToolHost } from "./swarm-tools.js";
 import type {
   AcceptedDeliveryMode,
+  AgentContextUsage,
   AgentDescriptor,
   AgentModelDescriptor,
   AgentStatus,
@@ -257,6 +258,77 @@ function createEmptyArchetypePromptRegistry(): ArchetypePromptRegistry {
   };
 }
 
+function cloneContextUsage(contextUsage: AgentContextUsage | undefined): AgentContextUsage | undefined {
+  if (!contextUsage) {
+    return undefined;
+  }
+
+  return {
+    tokens: contextUsage.tokens,
+    contextWindow: contextUsage.contextWindow,
+    percent: contextUsage.percent
+  };
+}
+
+function cloneDescriptor(descriptor: AgentDescriptor): AgentDescriptor {
+  return {
+    ...descriptor,
+    model: { ...descriptor.model },
+    contextUsage: cloneContextUsage(descriptor.contextUsage)
+  };
+}
+
+function normalizeContextUsage(contextUsage: AgentContextUsage | undefined): AgentContextUsage | undefined {
+  if (!contextUsage) {
+    return undefined;
+  }
+
+  if (
+    typeof contextUsage.tokens !== "number" ||
+    !Number.isFinite(contextUsage.tokens) ||
+    contextUsage.tokens < 0
+  ) {
+    return undefined;
+  }
+
+  if (
+    typeof contextUsage.contextWindow !== "number" ||
+    !Number.isFinite(contextUsage.contextWindow) ||
+    contextUsage.contextWindow <= 0
+  ) {
+    return undefined;
+  }
+
+  if (typeof contextUsage.percent !== "number" || !Number.isFinite(contextUsage.percent)) {
+    return undefined;
+  }
+
+  return {
+    tokens: Math.round(contextUsage.tokens),
+    contextWindow: Math.max(1, Math.round(contextUsage.contextWindow)),
+    percent: Math.max(0, Math.min(100, contextUsage.percent))
+  };
+}
+
+function areContextUsagesEqual(
+  left: AgentContextUsage | undefined,
+  right: AgentContextUsage | undefined
+): boolean {
+  if (!left && !right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return (
+    left.tokens === right.tokens &&
+    left.contextWindow === right.contextWindow &&
+    left.percent === right.percent
+  );
+}
+
 export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private readonly config: SwarmConfig;
   private readonly now: () => string;
@@ -339,7 +411,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   listAgents(): AgentDescriptor[] {
-    return this.sortedDescriptors().map((descriptor) => ({ ...descriptor, model: { ...descriptor.model } }));
+    return this.sortedDescriptors().map((descriptor) => cloneDescriptor(descriptor));
   }
 
   getConversationHistory(agentId?: string): ConversationEntryEvent[] {
@@ -409,14 +481,17 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     const runtime = await this.createRuntimeForDescriptor(descriptor, runtimeSystemPrompt);
     this.runtimes.set(agentId, runtime);
 
-    this.emitStatus(agentId, descriptor.status, runtime.getPendingCount());
+    const contextUsage = runtime.getContextUsage();
+    descriptor.contextUsage = contextUsage;
+
+    this.emitStatus(agentId, descriptor.status, runtime.getPendingCount(), contextUsage);
     this.emitAgentsSnapshot();
 
     if (input.initialMessage && input.initialMessage.trim().length > 0) {
       await this.sendMessage(callerAgentId, agentId, input.initialMessage, "auto", { origin: "internal" });
     }
 
-    return { ...descriptor, model: { ...descriptor.model } };
+    return cloneDescriptor(descriptor);
   }
 
   async killAgent(callerAgentId: string, targetAgentId: string): Promise<void> {
@@ -503,7 +578,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.runtimes.set(managerId, runtime);
     await this.saveStore();
 
-    this.emitStatus(managerId, descriptor.status, runtime.getPendingCount());
+    const contextUsage = runtime.getContextUsage();
+    descriptor.contextUsage = contextUsage;
+
+    this.emitStatus(managerId, descriptor.status, runtime.getPendingCount(), contextUsage);
     this.emitAgentsSnapshot();
 
     this.logDebug("manager:create", {
@@ -514,7 +592,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     await this.sendManagerBootstrapMessage(managerId);
 
-    return { ...descriptor, model: { ...descriptor.model } };
+    return cloneDescriptor(descriptor);
   }
 
   async deleteManager(
@@ -566,7 +644,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       return undefined;
     }
 
-    return { ...descriptor, model: { ...descriptor.model } };
+    return cloneDescriptor(descriptor);
   }
 
   async listDirectories(path?: string): Promise<DirectoryListingResult> {
@@ -1002,6 +1080,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     await this.deleteManagerSessionFile(managerDescriptor.sessionFile);
 
     managerDescriptor.status = "idle";
+    managerDescriptor.contextUsage = undefined;
     managerDescriptor.updatedAt = this.now();
     this.descriptors.set(managerId, managerDescriptor);
     await this.saveStore();
@@ -1012,8 +1091,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     );
     this.runtimes.set(managerId, managerRuntime);
 
+    const contextUsage = managerRuntime.getContextUsage();
+    managerDescriptor.contextUsage = contextUsage;
+
     this.emitConversationReset(managerId, reason);
-    this.emitStatus(managerId, managerDescriptor.status, managerRuntime.getPendingCount());
+    this.emitStatus(managerId, managerDescriptor.status, managerRuntime.getPendingCount(), contextUsage);
     this.emitAgentsSnapshot();
 
     this.logDebug("manager:reset:ready", {
@@ -1395,7 +1477,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       try {
         const runtime = await this.createRuntimeForDescriptor(descriptor, systemPrompt);
         this.runtimes.set(descriptor.agentId, runtime);
-        this.emitStatus(descriptor.agentId, descriptor.status, runtime.getPendingCount());
+        const contextUsage = runtime.getContextUsage();
+        descriptor.contextUsage = contextUsage;
+        this.emitStatus(descriptor.agentId, descriptor.status, runtime.getPendingCount(), contextUsage);
       } catch (error) {
         if (
           descriptor.role === "manager" &&
@@ -1406,6 +1490,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         }
 
         descriptor.status = "stopped_on_restart";
+        descriptor.contextUsage = undefined;
         descriptor.updatedAt = this.now();
         this.descriptors.set(descriptor.agentId, descriptor);
         shouldPersist = true;
@@ -1464,6 +1549,12 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         touched = true;
       }
 
+      const normalizedContextUsage = normalizeContextUsage(descriptor.contextUsage);
+      if (!areContextUsagesEqual(descriptor.contextUsage, normalizedContextUsage)) {
+        descriptor.contextUsage = normalizedContextUsage;
+        touched = true;
+      }
+
       if (descriptor.role === "manager") {
         if (descriptor.managerId !== descriptor.agentId) {
           descriptor.managerId = descriptor.agentId;
@@ -1492,6 +1583,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         }
       }
 
+      if (descriptor.status === "terminated" && descriptor.contextUsage) {
+        descriptor.contextUsage = undefined;
+        touched = true;
+      }
+
       if (touched) {
         descriptor.updatedAt = now;
       }
@@ -1513,6 +1609,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         }
 
         primaryManager.model = this.normalizePersistedModelDescriptor(primaryManager.model);
+        primaryManager.contextUsage = normalizeContextUsage(primaryManager.contextUsage);
       }
     }
 
@@ -1767,6 +1864,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     descriptor.status = "terminated";
+    descriptor.contextUsage = undefined;
     descriptor.updatedAt = this.now();
     this.descriptors.set(descriptor.agentId, descriptor);
 
@@ -2174,8 +2272,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       descriptor,
       session: session as AgentSession,
       callbacks: {
-        onStatusChange: async (agentId, status, pendingCount) => {
-          await this.handleRuntimeStatus(agentId, status, pendingCount);
+        onStatusChange: async (agentId, status, pendingCount, contextUsage) => {
+          await this.handleRuntimeStatus(agentId, status, pendingCount, contextUsage);
         },
         onSessionEvent: async (agentId, event) => {
           await this.handleRuntimeSessionEvent(agentId, event);
@@ -2216,8 +2314,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     const runtime = await CodexAgentRuntime.create({
       descriptor,
       callbacks: {
-        onStatusChange: async (agentId, status, pendingCount) => {
-          await this.handleRuntimeStatus(agentId, status, pendingCount);
+        onStatusChange: async (agentId, status, pendingCount, contextUsage) => {
+          await this.handleRuntimeStatus(agentId, status, pendingCount, contextUsage);
         },
         onSessionEvent: async (agentId, event) => {
           await this.handleRuntimeSessionEvent(agentId, event);
@@ -2306,23 +2404,42 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private async handleRuntimeStatus(
     agentId: string,
     status: AgentStatus,
-    pendingCount: number
+    pendingCount: number,
+    contextUsage?: AgentContextUsage
   ): Promise<void> {
     const descriptor = this.descriptors.get(agentId);
     if (!descriptor) return;
 
+    const normalizedContextUsage = normalizeContextUsage(contextUsage);
+    let shouldPersist = false;
+
+    if (!areContextUsagesEqual(descriptor.contextUsage, normalizedContextUsage)) {
+      descriptor.contextUsage = normalizedContextUsage;
+    }
+
     if (descriptor.status !== status) {
       descriptor.status = status;
       descriptor.updatedAt = this.now();
-      this.descriptors.set(agentId, descriptor);
+      shouldPersist = true;
+    }
+
+    if ((status === "terminated" || status === "stopped_on_restart") && descriptor.contextUsage) {
+      descriptor.contextUsage = undefined;
+      shouldPersist = true;
+    }
+
+    this.descriptors.set(agentId, descriptor);
+
+    if (shouldPersist) {
       await this.saveStore();
     }
 
-    this.emitStatus(agentId, status, pendingCount);
+    this.emitStatus(agentId, status, pendingCount, descriptor.contextUsage);
     this.logDebug("runtime:status", {
       agentId,
       status,
-      pendingCount
+      pendingCount,
+      contextUsage: descriptor.contextUsage
     });
   }
 
@@ -2538,13 +2655,19 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
   }
 
-
-  private emitStatus(agentId: string, status: AgentStatus, pendingCount: number): void {
+  private emitStatus(
+    agentId: string,
+    status: AgentStatus,
+    pendingCount: number,
+    contextUsage?: AgentContextUsage
+  ): void {
+    const resolvedContextUsage = normalizeContextUsage(contextUsage ?? this.descriptors.get(agentId)?.contextUsage);
     const payload: AgentStatusEvent = {
       type: "agent_status",
       agentId,
       status,
-      pendingCount
+      pendingCount,
+      ...(resolvedContextUsage ? { contextUsage: resolvedContextUsage } : {})
     };
 
     this.emit("agent_status", payload satisfies ServerEvent);
