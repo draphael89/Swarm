@@ -326,11 +326,11 @@ export const MarkdownMessage = memo(function MarkdownMessage({
             },
             table({ children }) {
               return (
-                <ScrollArea className={cn('my-4 w-full', isDocument && 'my-5')}>
+                <div className={cn('my-4 w-full overflow-x-auto', isDocument && 'my-5')}>
                   <table className="w-full border-collapse text-sm">
                     {children}
                   </table>
-                </ScrollArea>
+                </div>
               )
             },
             th({ children }) {
