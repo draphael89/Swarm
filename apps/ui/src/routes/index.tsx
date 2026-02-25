@@ -211,6 +211,22 @@ function estimateUsedTokens(messages: ConversationEntry[]): number {
   return Math.ceil(totalChars / CHARS_PER_TOKEN_ESTIMATE)
 }
 
+function isAssistantResponseSignal(entry: ConversationEntry): boolean {
+  if (entry.type === 'conversation_message') {
+    return entry.role === 'assistant' || entry.role === 'system'
+  }
+
+  return (
+    entry.role === 'assistant' &&
+    (entry.kind === 'message_start' || entry.kind === 'message_end')
+  )
+}
+
+interface PendingResponseStart {
+  agentId: string
+  messageCount: number
+}
+
 export function IndexPage() {
   const wsUrl = import.meta.env.VITE_SWARM_WS_URL ?? resolveDefaultWsUrl()
   const clientRef = useRef<ManagerWsClient | null>(null)
@@ -257,6 +273,7 @@ export function IndexPage() {
   const [channelView, setChannelView] = useState<ChannelView>('web')
   const [isCompactingManager, setIsCompactingManager] = useState(false)
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false)
+  const [pendingResponseStart, setPendingResponseStart] = useState<PendingResponseStart | null>(null)
   const dragDepthRef = useRef(0)
 
   useEffect(() => {
@@ -318,7 +335,9 @@ export function IndexPage() {
     [contextWindow, usedTokens],
   )
 
-  const isLoading = activeAgentStatus === 'streaming'
+  const isAwaitingResponseStart =
+    pendingResponseStart !== null && pendingResponseStart.agentId === activeAgentId
+  const isLoading = activeAgentStatus === 'streaming' || isAwaitingResponseStart
 
   const visibleMessages = useMemo(() => {
     if (channelView === 'all') {
@@ -394,6 +413,35 @@ export function IndexPage() {
     state.targetAgentId,
   ])
 
+  useEffect(() => {
+    if (!pendingResponseStart) {
+      return
+    }
+
+    if (!activeAgentId || pendingResponseStart.agentId !== activeAgentId) {
+      setPendingResponseStart(null)
+      return
+    }
+
+    if (activeAgentStatus === 'streaming') {
+      setPendingResponseStart(null)
+      return
+    }
+
+    if (state.messages.length < pendingResponseStart.messageCount) {
+      setPendingResponseStart(null)
+      return
+    }
+
+    const hasAssistantResponse = state.messages
+      .slice(pendingResponseStart.messageCount)
+      .some(isAssistantResponseSignal)
+
+    if (hasAssistantResponse) {
+      setPendingResponseStart(null)
+    }
+  }, [activeAgentId, activeAgentStatus, pendingResponseStart, state.messages])
+
   const handleCompactManager = useCallback(
     async (customInstructions?: string) => {
       if (!isActiveManager || !activeAgentId) return
@@ -429,6 +477,11 @@ export function IndexPage() {
       void handleCompactManager(compactCommand.customInstructions)
       return
     }
+
+    setPendingResponseStart({
+      agentId: activeAgentId,
+      messageCount: state.messages.length,
+    })
 
     clientRef.current?.sendUserMessage(text, {
       agentId: activeAgentId,
