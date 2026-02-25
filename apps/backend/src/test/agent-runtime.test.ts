@@ -4,15 +4,18 @@ import type { AgentDescriptor } from '../swarm/types.js'
 
 class FakeSession {
   isStreaming = false
+  isCompacting = false
   promptCalls: string[] = []
   promptImageCounts: number[] = []
   followUpCalls: string[] = []
   steerCalls: string[] = []
   steerImageCounts: number[] = []
   userMessageCalls: Array<string | Array<{ type: string }>> = []
+  compactCalls = 0
   abortCalls = 0
   disposeCalls = 0
   listener: ((event: any) => void) | undefined
+  contextUsage: { tokens?: number; contextWindow?: number; percent?: number } | undefined
 
   async prompt(message: string, options?: { images?: Array<{ type: string }> }): Promise<void> {
     this.promptCalls.push(message)
@@ -30,6 +33,14 @@ class FakeSession {
 
   async sendUserMessage(content: string | Array<{ type: string }>): Promise<void> {
     this.userMessageCalls.push(content)
+  }
+
+  async compact(): Promise<void> {
+    this.compactCalls += 1
+  }
+
+  getContextUsage(): { tokens?: number; contextWindow?: number; percent?: number } | undefined {
+    return this.contextUsage
   }
 
   async abort(): Promise<void> {
@@ -78,6 +89,12 @@ function createDeferred(): { promise: Promise<void>; resolve: () => void } {
   })
 
   return { promise, resolve }
+}
+
+async function flushAsyncWork(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 describe('AgentRuntime', () => {
@@ -242,9 +259,7 @@ describe('AgentRuntime', () => {
     const receipt = await runtime.sendMessage('trigger failure')
     expect(receipt.acceptedMode).toBe('prompt')
 
-    await Promise.resolve()
-    await Promise.resolve()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await flushAsyncWork()
 
     expect(runtimeErrors).toEqual([
       expect.objectContaining({
@@ -288,9 +303,7 @@ describe('AgentRuntime', () => {
     const receipt = await runtime.sendMessage('retry me')
     expect(receipt.acceptedMode).toBe('prompt')
 
-    await Promise.resolve()
-    await Promise.resolve()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await flushAsyncWork()
 
     expect(session.promptCalls).toEqual(['retry me', 'retry me'])
     expect(runtimeErrors).toEqual([])
@@ -340,9 +353,7 @@ describe('AgentRuntime', () => {
     expect(session.steerCalls).toEqual(['queued followup'])
 
     deferred.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await flushAsyncWork()
 
     expect(runtime.getPendingCount()).toBe(0)
     expect(runtimeErrors).toEqual([
@@ -380,12 +391,129 @@ describe('AgentRuntime', () => {
     })
 
     await runtime.sendMessage('trigger compaction failure')
-    await Promise.resolve()
-    await Promise.resolve()
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    await flushAsyncWork()
 
     expect(phases.at(-1)).toBe('compaction')
     expect(runtime.getStatus()).toBe('idle')
+  })
+
+  it('runs proactive compaction before prompt dispatch when context usage exceeds threshold', async () => {
+    const session = new FakeSession()
+    session.contextUsage = {
+      tokens: 171_000,
+      contextWindow: 200_000,
+      percent: 0.855,
+    }
+
+    const runtime = new AgentRuntime({
+      descriptor: makeDescriptor(),
+      session: session as any,
+      callbacks: {
+        onStatusChange: () => {},
+      },
+    })
+
+    const receipt = await runtime.sendMessage('needs compaction')
+    expect(receipt.acceptedMode).toBe('prompt')
+
+    await flushAsyncWork()
+
+    expect(session.compactCalls).toBe(1)
+    expect(session.promptCalls).toEqual(['needs compaction'])
+  })
+
+  it('surfaces assistant message_end errors when provider reports a context overflow', async () => {
+    const session = new FakeSession()
+    const runtimeErrors: Array<{ phase: string; message: string; details?: Record<string, unknown> }> = []
+
+    new AgentRuntime({
+      descriptor: makeDescriptor(),
+      session: session as any,
+      callbacks: {
+        onStatusChange: () => {},
+        onRuntimeError: (_agentId, error) => {
+          runtimeErrors.push({
+            phase: error.phase,
+            message: error.message,
+            details: error.details,
+          })
+        },
+      },
+    })
+
+    session.emit({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: '' }],
+        stopReason: 'error',
+        errorMessage: 'prompt is too long: 180201 tokens > 180000 maximum',
+        provider: 'anthropic',
+        model: 'claude-sonnet',
+      },
+    })
+
+    await flushAsyncWork()
+
+    expect(runtimeErrors).toEqual([
+      expect.objectContaining({
+        phase: 'compaction',
+        message: 'prompt is too long: 180201 tokens > 180000 maximum',
+        details: expect.objectContaining({
+          source: 'assistant_message_end',
+          contextOverflow: true,
+        }),
+      }),
+    ])
+  })
+
+  it('resets stalled streaming sessions via watchdog timeout and surfaces an error', async () => {
+    const session = new FakeSession()
+    const statuses: string[] = []
+    const runtimeErrors: Array<{ phase: string; details?: Record<string, unknown> }> = []
+    let agentEndCalls = 0
+
+    const runtime = new AgentRuntime({
+      descriptor: makeDescriptor(),
+      session: session as any,
+      callbacks: {
+        onStatusChange: (_agentId, status) => {
+          statuses.push(status)
+        },
+        onRuntimeError: (_agentId, error) => {
+          runtimeErrors.push({
+            phase: error.phase,
+            details: error.details,
+          })
+        },
+        onAgentEnd: () => {
+          agentEndCalls += 1
+        },
+      },
+    })
+
+    session.emit({ type: 'agent_start' })
+    await flushAsyncWork()
+
+    ;(runtime as any).streamingInactivityTimeoutMs = 1
+    ;(runtime as any).lastEventAtMs = Date.now() - 5
+
+    await (runtime as any).runHealthCheck()
+    await flushAsyncWork()
+
+    expect(runtime.getStatus()).toBe('idle')
+    expect(statuses).toContain('streaming')
+    expect(statuses).toContain('idle')
+    expect(runtimeErrors).toEqual([
+      expect.objectContaining({
+        phase: 'watchdog_timeout',
+        details: expect.objectContaining({
+          reason: 'streaming',
+        }),
+      }),
+    ])
+    expect(session.abortCalls).toBe(1)
+    expect(agentEndCalls).toBe(1)
   })
 
   it('terminates by aborting active session and marking status terminated', async () => {
