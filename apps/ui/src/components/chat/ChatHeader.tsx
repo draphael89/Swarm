@@ -1,5 +1,6 @@
 import { Loader2, Menu, Minimize2, PanelRight, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { ContextWindowIndicator } from '@/components/chat/ContextWindowIndicator'
 import { cn } from '@/lib/utils'
 import type { AgentStatus } from '@/lib/ws-types'
@@ -10,6 +11,7 @@ interface ChatHeaderProps {
   connected: boolean
   activeAgentId: string | null
   activeAgentLabel: string
+  activeAgentArchetypeId?: string | null
   activeAgentStatus: AgentStatus | null
   channelView: ChannelView
   onChannelViewChange: (view: ChannelView) => void
@@ -69,6 +71,7 @@ export function ChatHeader({
   connected,
   activeAgentId,
   activeAgentLabel,
+  activeAgentArchetypeId,
   activeAgentStatus,
   channelView,
   onChannelViewChange,
@@ -84,6 +87,7 @@ export function ChatHeader({
 }: ChatHeaderProps) {
   const isStreaming = connected && activeAgentStatus === 'streaming'
   const statusLabel = connected ? formatAgentStatus(activeAgentStatus) : 'Reconnecting'
+  const archetypeLabel = activeAgentArchetypeId?.trim()
 
   return (
     <header className="sticky top-0 z-10 flex h-[62px] w-full shrink-0 items-center justify-between gap-2 overflow-hidden border-b border-border/80 bg-card/80 px-2 backdrop-blur md:px-4">
@@ -128,6 +132,15 @@ export function ChatHeader({
           >
             {activeAgentLabel}
           </h1>
+          {archetypeLabel ? (
+            <Badge
+              variant="outline"
+              className="h-5 max-w-32 shrink-0 border-border/60 bg-muted/40 px-1.5 text-[10px] font-medium text-muted-foreground"
+              title={archetypeLabel}
+            >
+              <span className="truncate">{archetypeLabel}</span>
+            </Badge>
+          ) : null}
           <span aria-hidden="true" className="shrink-0 text-muted-foreground">
             ·
           </span>

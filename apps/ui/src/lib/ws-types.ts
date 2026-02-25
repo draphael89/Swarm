@@ -8,6 +8,7 @@ export interface AgentDescriptor {
   managerId: string
   displayName: string
   role: 'manager' | 'worker'
+  archetypeId?: string
   status: AgentStatus
   createdAt: string
   updatedAt: string

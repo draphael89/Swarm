@@ -794,6 +794,7 @@ export function IndexPage() {
                   connected={state.connected}
                   activeAgentId={activeAgentId}
                   activeAgentLabel={activeAgentLabel}
+                  activeAgentArchetypeId={activeAgent?.archetypeId}
                   activeAgentStatus={activeAgentStatus}
                   channelView={channelView}
                   onChannelViewChange={setChannelView}
