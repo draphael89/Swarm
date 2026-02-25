@@ -127,6 +127,28 @@ function appendSessionConversationMessage(sessionFile: string, agentId: string, 
   })
 }
 
+function seedManagerDescriptorForRuntimeEventTests(manager: TestSwarmManager, config: SwarmConfig): void {
+  const createdAt = '2026-01-01T00:00:00.000Z'
+  const state = manager as unknown as {
+    descriptors: Map<string, AgentDescriptor>
+    conversationEntriesByAgentId: Map<string, unknown[]>
+  }
+
+  state.descriptors.set('manager', {
+    agentId: 'manager',
+    displayName: 'Manager',
+    role: 'manager',
+    managerId: 'manager',
+    status: 'idle',
+    createdAt,
+    updatedAt: createdAt,
+    cwd: config.defaultCwd,
+    model: config.defaultModel,
+    sessionFile: join(config.paths.sessionsDir, 'manager.jsonl'),
+  })
+  state.conversationEntriesByAgentId.set('manager', [])
+}
+
 async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
   const root = await mkdtemp(join(tmpdir(), 'swarm-manager-test-'))
   const dataDir = join(root, 'data')
@@ -667,6 +689,142 @@ describe('SwarmManager', () => {
     expect(managerRuntime).toBeDefined()
     expect(managerRuntime?.sendCalls.at(-1)?.delivery).toBe('steer')
     expect(managerRuntime?.sendCalls.at(-1)?.message).toBe('[sourceContext] {"channel":"web"}\n\ninterrupt current plan')
+  })
+
+  it('surfaces manager assistant overflow turns as system conversation messages', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    seedManagerDescriptorForRuntimeEventTests(manager, config)
+
+    await (manager as any).handleRuntimeSessionEvent('manager', {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage:
+          '400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 180186 tokens > 180000 maximum"},"request_id":"req_test"}',
+      },
+    })
+
+    const history = manager.getConversationHistory('manager')
+    const systemEvent = [...history]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.type === 'conversation_message' &&
+          entry.role === 'system' &&
+          entry.source === 'system' &&
+          entry.text.includes('Manager reply failed'),
+      )
+
+    expect(systemEvent).toBeDefined()
+    if (systemEvent?.type === 'conversation_message') {
+      expect(systemEvent.text).toContain('prompt is too long: 180186 tokens > 180000 maximum')
+      expect(systemEvent.text).toContain('Try compacting the conversation to free up context space.')
+    }
+  })
+
+  it('surfaces non-overflow manager runtime errors without overflow wording', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    seedManagerDescriptorForRuntimeEventTests(manager, config)
+
+    await (manager as any).handleRuntimeSessionEvent('manager', {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [],
+        stopReason: 'error',
+        errorMessage: 'Rate limit exceeded for requests per minute',
+      },
+    })
+
+    const history = manager.getConversationHistory('manager')
+    const systemEvent = [...history]
+      .reverse()
+      .find(
+        (entry) =>
+          entry.type === 'conversation_message' &&
+          entry.role === 'system' &&
+          entry.source === 'system' &&
+          entry.text.includes('Manager reply failed'),
+      )
+
+    expect(systemEvent).toBeDefined()
+    if (systemEvent?.type === 'conversation_message') {
+      expect(systemEvent.text).toContain('Rate limit exceeded for requests per minute')
+      expect(systemEvent.text).not.toContain('prompt exceeded the model context window')
+      expect(systemEvent.text).not.toContain('Try compacting the conversation to free up context space.')
+    }
+  })
+
+  it('handles undefined/null/empty/malformed errorMessage payloads without crashing', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    seedManagerDescriptorForRuntimeEventTests(manager, config)
+
+    const malformedErrorMessages: unknown[] = [undefined, null, '', { code: 'invalid_request_error' }]
+
+    for (const errorMessage of malformedErrorMessages) {
+      await expect(
+        (manager as any).handleRuntimeSessionEvent('manager', {
+          type: 'message_end',
+          message: {
+            role: 'assistant',
+            content: [],
+            stopReason: 'error',
+            errorMessage,
+          },
+        }),
+      ).resolves.toBeUndefined()
+    }
+
+    const history = manager.getConversationHistory('manager')
+    const systemErrorEvents = history.filter(
+      (entry) =>
+        entry.type === 'conversation_message' &&
+        entry.role === 'system' &&
+        entry.source === 'system' &&
+        entry.text.includes('Manager reply failed'),
+    )
+    expect(systemErrorEvents).toHaveLength(malformedErrorMessages.length)
+  })
+
+  it('does not surface normal manager assistant turns as conversation messages', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    seedManagerDescriptorForRuntimeEventTests(manager, config)
+
+    await (manager as any).handleRuntimeSessionEvent('manager', {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'normal hidden manager assistant turn' }],
+        stopReason: 'stop',
+      },
+    })
+
+    const history = manager.getConversationHistory('manager')
+    expect(history).toHaveLength(0)
+  })
+
+  it('does not surface non-error manager turns that mention token limits', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    seedManagerDescriptorForRuntimeEventTests(manager, config)
+
+    await (manager as any).handleRuntimeSessionEvent('manager', {
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'We should keep the summary short to avoid token limit issues.' }],
+        stopReason: 'stop',
+      },
+    })
+
+    const history = manager.getConversationHistory('manager')
+    expect(history).toHaveLength(0)
   })
 
   it('handles /compact as a manager slash command without forwarding it as a user prompt', async () => {

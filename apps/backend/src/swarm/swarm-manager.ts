@@ -214,6 +214,8 @@ const SKILL_FRONTMATTER_BLOCK_PATTERN = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?
 const SETTINGS_ENV_MASK = "********";
 const SETTINGS_AUTH_MASK = "********";
 const SWARM_MANAGER_MAX_EVENT_LISTENERS = 64;
+const MANAGER_ERROR_CONTEXT_HINT = "Try compacting the conversation to free up context space.";
+const MANAGER_ERROR_GENERIC_HINT = "Please retry. If this persists, check provider auth and rate limits.";
 const VALID_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SETTINGS_AUTH_PROVIDER_DEFINITIONS: Array<{
   provider: SettingsAuthProviderName;
@@ -2469,9 +2471,43 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
   }
 
+  private captureManagerRuntimeErrorConversationEvent(agentId: string, event: RuntimeSessionEvent): void {
+    if (event.type !== "message_end") {
+      return;
+    }
+
+    const role = extractRole(event.message);
+    if (role !== "assistant") {
+      return;
+    }
+
+    const stopReason = extractMessageStopReason(event.message);
+    const hasStructuredErrorMessage = hasMessageErrorMessageField(event.message);
+    if (stopReason !== "error" && !hasStructuredErrorMessage) {
+      return;
+    }
+
+    const messageText = extractMessageText(event.message);
+    const normalizedErrorMessage = normalizeProviderErrorMessage(extractMessageErrorMessage(event.message) ?? messageText);
+    const isContextOverflow = isStrictContextOverflowMessage(normalizedErrorMessage);
+
+    this.emitConversationMessage({
+      type: "conversation_message",
+      agentId,
+      role: "system",
+      text: buildManagerErrorConversationText({
+        errorMessage: normalizedErrorMessage,
+        isContextOverflow
+      }),
+      timestamp: this.now(),
+      source: "system"
+    });
+  }
+
   private captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent): void {
     const descriptor = this.descriptors.get(agentId);
     if (descriptor?.role === "manager") {
+      this.captureManagerRuntimeErrorConversationEvent(agentId, event);
       return;
     }
 
@@ -3170,6 +3206,99 @@ function readPositiveIntegerDetail(details: Record<string, unknown> | undefined,
   }
 
   return value;
+}
+
+function extractMessageStopReason(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") return undefined;
+  const stopReason = (message as { stopReason?: unknown }).stopReason;
+  return typeof stopReason === "string" ? stopReason : undefined;
+}
+
+function extractMessageErrorMessage(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") return undefined;
+  const errorMessage = (message as { errorMessage?: unknown }).errorMessage;
+  if (typeof errorMessage !== "string") {
+    return undefined;
+  }
+
+  const trimmed = errorMessage.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function hasMessageErrorMessageField(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+
+  return Object.prototype.hasOwnProperty.call(message, "errorMessage");
+}
+
+function normalizeProviderErrorMessage(errorMessage: string | undefined): string | undefined {
+  if (!errorMessage) {
+    return undefined;
+  }
+
+  const trimmed = errorMessage.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
+  const jsonStart = trimmed.indexOf("{");
+  if (jsonStart >= 0) {
+    const jsonCandidate = trimmed.slice(jsonStart);
+    try {
+      const parsed = JSON.parse(jsonCandidate) as { message?: unknown; error?: { message?: unknown } };
+      const nestedMessage = parseErrorMessageCandidate(parsed.error?.message) ?? parseErrorMessageCandidate(parsed.message);
+      if (nestedMessage) {
+        return nestedMessage;
+      }
+    } catch {
+      // fall through to regex and plain-text handling.
+    }
+  }
+
+  const overflowMatch = /prompt is too long:[^"}\n]+/i.exec(trimmed);
+  if (overflowMatch?.[0]) {
+    return overflowMatch[0];
+  }
+
+  return trimmed.length > 240 ? previewForLog(trimmed, 240) : trimmed;
+}
+
+function parseErrorMessageCandidate(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const normalized = value.replace(/\s+/g, " ").trim().replace(/[.!?]+$/, "");
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function isStrictContextOverflowMessage(message: string | undefined): boolean {
+  if (!message) {
+    return false;
+  }
+
+  return /\bprompt is too long\b/i.test(message) || /\bmaximum context length\b/i.test(message);
+}
+
+function buildManagerErrorConversationText(options: {
+  errorMessage?: string;
+  isContextOverflow: boolean;
+}): string {
+  if (options.isContextOverflow) {
+    if (options.errorMessage) {
+      return `⚠️ Manager reply failed because the prompt exceeded the model context window (${options.errorMessage}). ${MANAGER_ERROR_CONTEXT_HINT}`;
+    }
+
+    return `⚠️ Manager reply failed because the prompt exceeded the model context window. ${MANAGER_ERROR_CONTEXT_HINT}`;
+  }
+
+  if (options.errorMessage) {
+    return `⚠️ Manager reply failed: ${options.errorMessage}. ${MANAGER_ERROR_GENERIC_HINT}`;
+  }
+
+  return `⚠️ Manager reply failed. ${MANAGER_ERROR_GENERIC_HINT}`;
 }
 
 function extractRole(message: unknown): string | undefined {
