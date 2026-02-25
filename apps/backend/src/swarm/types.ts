@@ -88,11 +88,11 @@ export interface SwarmPaths {
   managerAgentDir: string;
   repoArchetypesDir: string;
   memoryDir: string;
-  memoryFile: string;
+  memoryFile?: string;
   repoMemorySkillFile: string;
   agentsStoreFile: string;
   secretsFile: string;
-  schedulesFile: string;
+  schedulesFile?: string;
 }
 
 export interface SkillEnvRequirement {
@@ -105,7 +105,7 @@ export interface SkillEnvRequirement {
   maskedValue?: string;
 }
 
-export type SettingsAuthProviderName = "anthropic" | "openai";
+export type SettingsAuthProviderName = "anthropic" | "openai-codex";
 
 export interface SettingsAuthProvider {
   provider: SettingsAuthProviderName;

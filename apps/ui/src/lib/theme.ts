@@ -74,26 +74,13 @@ function attachSystemThemeListener(): void {
   }
 
   applyCurrentSystemTheme()
-
-  if (typeof mediaQuery.addEventListener === 'function') {
-    const handleChange = (): void => {
-      applyCurrentSystemTheme()
-    }
-
-    mediaQuery.addEventListener('change', handleChange)
-    removeSystemThemeListener = () => {
-      mediaQuery.removeEventListener('change', handleChange)
-    }
-    return
-  }
-
-  const legacyHandleChange = (): void => {
+  const handleChange = (): void => {
     applyCurrentSystemTheme()
   }
 
-  mediaQuery.addListener(legacyHandleChange)
+  mediaQuery.addEventListener('change', handleChange)
   removeSystemThemeListener = () => {
-    mediaQuery.removeListener(legacyHandleChange)
+    mediaQuery.removeEventListener('change', handleChange)
   }
 }
 

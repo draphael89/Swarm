@@ -5,7 +5,7 @@ import { createConfig } from "./config.js";
 import { GsuiteIntegrationService } from "./integrations/gsuite/gsuite-integration.js";
 import { IntegrationRegistryService } from "./integrations/registry.js";
 import { CronSchedulerService } from "./scheduler/cron-scheduler-service.js";
-import { getScheduleFilePath, migrateLegacyGlobalSchedulesIfNeeded } from "./scheduler/schedule-storage.js";
+import { getScheduleFilePath } from "./scheduler/schedule-storage.js";
 import { SwarmManager } from "./swarm/swarm-manager.js";
 import type { AgentDescriptor } from "./swarm/types.js";
 import { SwarmWebSocketServer } from "./ws/server.js";
@@ -19,11 +19,6 @@ async function main(): Promise<void> {
 
   const swarmManager = new SwarmManager(config);
   await swarmManager.boot();
-
-  await migrateLegacyGlobalSchedulesIfNeeded({
-    dataDir: config.paths.dataDir,
-    defaultManagerId: config.managerId
-  });
 
   const schedulersByManagerId = new Map<string, CronSchedulerService>();
   let schedulerLifecycle: Promise<void> = Promise.resolve();

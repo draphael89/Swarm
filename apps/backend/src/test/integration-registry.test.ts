@@ -1,10 +1,10 @@
 import { EventEmitter } from 'node:events'
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getLegacySlackConfigPath, getSlackConfigPath } from '../integrations/slack/slack-config.js'
-import { getLegacyTelegramConfigPath, getTelegramConfigPath } from '../integrations/telegram/telegram-config.js'
+import { getSlackConfigPath } from '../integrations/slack/slack-config.js'
+import { getTelegramConfigPath } from '../integrations/telegram/telegram-config.js'
 
 const mockState = vi.hoisted(() => ({
   slackInstances: [] as any[],
@@ -153,13 +153,8 @@ afterEach(() => {
 })
 
 describe('IntegrationRegistryService', () => {
-  it('migrates legacy global config files to the default manager profile and marks migration', async () => {
+  it('starts manager-scoped integration profiles for configured managers', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'swarm-registry-test-'))
-    const legacySlackPath = getLegacySlackConfigPath(dataDir)
-    const legacyTelegramPath = getLegacyTelegramConfigPath(dataDir)
-
-    await writeJsonFile(legacySlackPath, { legacy: 'slack' })
-    await writeJsonFile(legacyTelegramPath, { legacy: 'telegram' })
 
     const registry = new IntegrationRegistryService({
       swarmManager: createFakeSwarmManager({
@@ -170,14 +165,6 @@ describe('IntegrationRegistryService', () => {
     })
 
     await registry.start()
-
-    const migratedSlack = JSON.parse(await readFile(getSlackConfigPath(dataDir, 'primary-manager'), 'utf8'))
-    const migratedTelegram = JSON.parse(await readFile(getTelegramConfigPath(dataDir, 'primary-manager'), 'utf8'))
-    const marker = await readFile(join(dataDir, 'integrations', '.migrated'), 'utf8')
-
-    expect(migratedSlack).toEqual({ legacy: 'slack' })
-    expect(migratedTelegram).toEqual({ legacy: 'telegram' })
-    expect(marker).toContain('migrated legacy global integration config')
 
     expect(mockState.slackInstances.map((instance) => instance.managerId)).toEqual(['primary-manager'])
     expect(mockState.telegramInstances.map((instance) => instance.managerId)).toEqual(['primary-manager'])

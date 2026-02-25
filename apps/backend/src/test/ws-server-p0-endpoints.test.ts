@@ -604,7 +604,7 @@ describe('SwarmWebSocketServer P0 endpoints', () => {
     }
   })
 
-  it('requires explicit manager id for legacy Slack route when no default manager exists', async () => {
+  it('does not expose legacy Slack integration routes', async () => {
     const config = await makeTempConfig({ managerId: undefined })
     const manager = new FakeSwarmManager(config, [])
     const integrationRegistry = createIntegrationRegistryMock()
@@ -621,9 +621,7 @@ describe('SwarmWebSocketServer P0 endpoints', () => {
 
     try {
       const response = await fetch(`http://${config.host}:${config.port}/api/integrations/slack`)
-      const payload = await parseJsonResponse(response)
-      expect(payload.status).toBe(400)
-      expect(payload.json.error).toBe('managerId is required. Use /api/managers/:managerId/integrations/slack.')
+      expect(response.status).toBe(404)
     } finally {
       await server.stop()
     }

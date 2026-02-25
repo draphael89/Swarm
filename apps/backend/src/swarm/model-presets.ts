@@ -24,8 +24,6 @@ const MODEL_PRESET_DESCRIPTORS: Record<SwarmModelPreset, AgentModelDescriptor> =
 };
 
 const VALID_SWARM_MODEL_PRESET_VALUES = new Set<string>(SWARM_MODEL_PRESETS);
-const OPUS_MODEL_ID_ALIASES = new Set(["claude-opus-4-6", "claude-opus-4.6"]);
-const CODEX_APP_MODEL_ID_ALIASES = new Set(["default", "codex-app", "codex-app-server"]);
 
 export function describeSwarmModelPresets(): string {
   return SWARM_MODEL_PRESETS.join("|");
@@ -70,11 +68,11 @@ export function inferSwarmModelPresetFromDescriptor(
     return "pi-codex";
   }
 
-  if (provider === "anthropic" && OPUS_MODEL_ID_ALIASES.has(modelId)) {
+  if (provider === "anthropic" && modelId === "claude-opus-4-6") {
     return "pi-opus";
   }
 
-  if (provider === "openai-codex-app-server" && CODEX_APP_MODEL_ID_ALIASES.has(modelId)) {
+  if (provider === "openai-codex-app-server" && modelId === "default") {
     return "codex-app";
   }
 

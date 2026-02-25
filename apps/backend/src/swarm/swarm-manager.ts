@@ -21,11 +21,7 @@ import {
 } from "./archetypes/archetype-prompt-registry.js";
 import { AgentRuntime } from "./agent-runtime.js";
 import { CodexAgentRuntime } from "./codex-agent-runtime.js";
-import {
-  getAgentMemoryPath as getAgentMemoryPathForDataDir,
-  getLegacyMemoryPath,
-  getMemoryMigrationMarkerPath
-} from "./memory-paths.js";
+import { getAgentMemoryPath as getAgentMemoryPathForDataDir } from "./memory-paths.js";
 import {
   listDirectories,
   normalizeAllowlistRoots,
@@ -122,7 +118,6 @@ Close by asking if they want you to save their preferences to memory for future 
 If they agree, summarize the choices and persist them using the memory workflow.`;
 const MAX_CONVERSATION_HISTORY = 2000;
 const CONVERSATION_ENTRY_TYPE = "swarm_conversation_entry";
-const LEGACY_CONVERSATION_ENTRY_TYPE = "swarm_conversation_message";
 const SWARM_CONTEXT_FILE_NAME = "SWARM.md";
 const REPO_BRAVE_SEARCH_SKILL_RELATIVE_PATH = ".swarm/skills/brave-search/SKILL.md";
 const REPO_CRON_SCHEDULING_SKILL_RELATIVE_PATH = ".swarm/skills/cron-scheduling/SKILL.md";
@@ -209,7 +204,6 @@ const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
 ## Open Follow-ups
 - (none yet)
 `;
-const MEMORY_MIGRATION_MARKER_CONTENT = "per-agent-memory-migration-complete\n";
 const SKILL_FRONTMATTER_BLOCK_PATTERN = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/;
 const SETTINGS_ENV_MASK = "********";
 const SETTINGS_AUTH_MASK = "********";
@@ -220,17 +214,14 @@ const VALID_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SETTINGS_AUTH_PROVIDER_DEFINITIONS: Array<{
   provider: SettingsAuthProviderName;
   storageProvider: string;
-  aliases: string[];
 }> = [
   {
     provider: "anthropic",
-    storageProvider: "anthropic",
-    aliases: ["anthropic"]
+    storageProvider: "anthropic"
   },
   {
-    provider: "openai",
-    storageProvider: "openai-codex",
-    aliases: ["openai", "openai-codex"]
+    provider: "openai-codex",
+    storageProvider: "openai-codex"
   }
 ];
 
@@ -386,7 +377,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       this.descriptors.set(descriptor.agentId, descriptor);
     }
 
-    this.prepareDescriptorsForBoot();
     await this.ensureMemoryFilesForBoot();
     await this.saveStore();
 
@@ -1453,117 +1443,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
   private shouldRestoreRuntimeForDescriptor(descriptor: AgentDescriptor): boolean {
     return descriptor.status === "idle" || descriptor.status === "streaming";
-  }
-
-  private prepareDescriptorsForBoot(): void {
-    const now = this.now();
-
-    for (const descriptor of this.descriptors.values()) {
-      let touched = false;
-
-      descriptor.sessionFile = join(this.config.paths.sessionsDir, `${descriptor.agentId}.jsonl`);
-
-      if (!descriptor.cwd) {
-        descriptor.cwd = this.config.defaultCwd;
-        touched = true;
-      }
-
-      const normalizedModel = this.normalizePersistedModelDescriptor(descriptor.model);
-      if (
-        !descriptor.model ||
-        descriptor.model.provider !== normalizedModel.provider ||
-        descriptor.model.modelId !== normalizedModel.modelId ||
-        descriptor.model.thinkingLevel !== normalizedModel.thinkingLevel
-      ) {
-        descriptor.model = normalizedModel;
-        touched = true;
-      }
-
-      const normalizedContextUsage = normalizeContextUsage(descriptor.contextUsage);
-      if (!areContextUsagesEqual(descriptor.contextUsage, normalizedContextUsage)) {
-        descriptor.contextUsage = normalizedContextUsage;
-        touched = true;
-      }
-
-      if (descriptor.role === "manager") {
-        if (descriptor.managerId !== descriptor.agentId) {
-          descriptor.managerId = descriptor.agentId;
-          touched = true;
-        }
-
-        if (descriptor.archetypeId !== MANAGER_ARCHETYPE_ID) {
-          descriptor.archetypeId = MANAGER_ARCHETYPE_ID;
-          touched = true;
-        }
-
-        if (descriptor.status !== "terminated" && descriptor.status !== "idle") {
-          descriptor.status = "idle";
-          touched = true;
-        }
-      } else {
-        const maybeManagerId = normalizeOptionalAgentId(descriptor.managerId);
-        if (!maybeManagerId) {
-          descriptor.managerId = "";
-          touched = true;
-        }
-
-        if (descriptor.status !== "terminated" && descriptor.status !== "idle") {
-          descriptor.status = "idle";
-          touched = true;
-        }
-      }
-
-      if (descriptor.status === "terminated" && descriptor.contextUsage) {
-        descriptor.contextUsage = undefined;
-        touched = true;
-      }
-
-      if (touched) {
-        descriptor.updatedAt = now;
-      }
-    }
-
-    const configuredManagerId = this.getConfiguredManagerId();
-    if (configuredManagerId) {
-      const primaryManager = this.descriptors.get(configuredManagerId);
-      if (primaryManager && primaryManager.role === "manager") {
-        primaryManager.role = "manager";
-        primaryManager.managerId = primaryManager.agentId;
-        primaryManager.archetypeId = MANAGER_ARCHETYPE_ID;
-        primaryManager.status = "idle";
-        primaryManager.sessionFile = join(this.config.paths.sessionsDir, `${primaryManager.agentId}.jsonl`);
-        primaryManager.updatedAt = now;
-
-        if (!primaryManager.cwd) {
-          primaryManager.cwd = this.config.defaultCwd;
-        }
-
-        primaryManager.model = this.normalizePersistedModelDescriptor(primaryManager.model);
-        primaryManager.contextUsage = normalizeContextUsage(primaryManager.contextUsage);
-      }
-    }
-
-    const liveManagerIds = new Set(
-      Array.from(this.descriptors.values())
-        .filter((descriptor) => descriptor.role === "manager" && descriptor.status !== "terminated")
-        .map((descriptor) => descriptor.agentId)
-    );
-    const fallbackManagerId =
-      configuredManagerId && liveManagerIds.has(configuredManagerId)
-        ? configuredManagerId
-        : liveManagerIds.values().next().value;
-
-    for (const descriptor of this.descriptors.values()) {
-      if (descriptor.role !== "worker") {
-        continue;
-      }
-
-      const managerId = normalizeOptionalAgentId(descriptor.managerId);
-      if (fallbackManagerId && (!managerId || !liveManagerIds.has(managerId))) {
-        descriptor.managerId = fallbackManagerId;
-        descriptor.updatedAt = now;
-      }
-    }
   }
 
   private getBootLogManagerDescriptor(): AgentDescriptor | undefined {
@@ -2686,25 +2565,12 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   private async ensureMemoryFilesForBoot(): Promise<void> {
+    const memoryAgentIds = new Set<string>();
     const configuredManagerId = this.getConfiguredManagerId();
-    const managerIds = Array.from(
-      new Set(
-        Array.from(this.descriptors.values())
-          .filter((descriptor) => descriptor.role === "manager")
-          .map((descriptor) => normalizeOptionalAgentId(descriptor.agentId))
-          .filter((managerId): managerId is string => Boolean(managerId))
-      )
-    );
-
-    if (configuredManagerId && !managerIds.includes(configuredManagerId)) {
-      managerIds.push(configuredManagerId);
+    if (configuredManagerId) {
+      memoryAgentIds.add(configuredManagerId);
     }
 
-    if (managerIds.length > 0) {
-      await this.migrateLegacyMemoryFileIfNeeded(managerIds);
-    }
-
-    const memoryAgentIds = new Set<string>(managerIds);
     for (const descriptor of this.descriptors.values()) {
       memoryAgentIds.add(descriptor.agentId);
       if (descriptor.role === "worker") {
@@ -2714,51 +2580,6 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     for (const agentId of memoryAgentIds) {
       await this.ensureAgentMemoryFile(agentId);
-    }
-  }
-
-  private async migrateLegacyMemoryFileIfNeeded(managerIds: string[]): Promise<void> {
-    const legacyMemoryFilePath = getLegacyMemoryPath(this.config.paths.dataDir);
-    if (!existsSync(legacyMemoryFilePath)) {
-      return;
-    }
-
-    const migrationMarkerPath = getMemoryMigrationMarkerPath(this.config.paths.dataDir);
-    if (existsSync(migrationMarkerPath)) {
-      return;
-    }
-
-    const existingMemoryFiles = await this.listMemoryMarkdownFiles();
-    if (existingMemoryFiles.length > 0) {
-      return;
-    }
-
-    const memoryContent = await readFile(legacyMemoryFilePath, "utf8");
-
-    for (const managerId of managerIds) {
-      const managerMemoryPath = this.getAgentMemoryPath(managerId);
-      if (existsSync(managerMemoryPath)) {
-        continue;
-      }
-
-      await mkdir(dirname(managerMemoryPath), { recursive: true });
-      await writeFile(managerMemoryPath, memoryContent, "utf8");
-    }
-
-    await writeFile(migrationMarkerPath, MEMORY_MIGRATION_MARKER_CONTENT, "utf8");
-  }
-
-  private async listMemoryMarkdownFiles(): Promise<string[]> {
-    try {
-      const entries = await readdir(this.config.paths.memoryDir, { withFileTypes: true });
-      return entries
-        .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".md"))
-        .map((entry) => entry.name);
-    } catch (error) {
-      if (isEnoentError(error)) {
-        return [];
-      }
-      throw error;
     }
   }
 
@@ -2796,8 +2617,24 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       if (!Array.isArray(parsed.agents)) {
         return { agents: [] };
       }
+
+      const validAgents: AgentDescriptor[] = [];
+      for (const [index, candidate] of parsed.agents.entries()) {
+        const validated = validateAgentDescriptor(candidate);
+        if (typeof validated === "string") {
+          const maybeAgentId = extractDescriptorAgentId(candidate);
+          const descriptorHint = maybeAgentId ? `agentId=${maybeAgentId}` : `index=${index}`;
+          console.warn(
+            `[swarm] Skipping invalid descriptor (${descriptorHint}) in ${this.config.paths.agentsStoreFile}: ${validated}`
+          );
+          continue;
+        }
+
+        validAgents.push(validated);
+      }
+
       return {
-        agents: parsed.agents
+        agents: validAgents
       };
     } catch {
       return { agents: [] };
@@ -2831,10 +2668,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
           continue;
         }
 
-        if (
-          entry.customType !== CONVERSATION_ENTRY_TYPE &&
-          entry.customType !== LEGACY_CONVERSATION_ENTRY_TYPE
-        ) {
+        if (entry.customType !== CONVERSATION_ENTRY_TYPE) {
           continue;
         }
         if (!isConversationEntryEvent(entry.data)) {
@@ -2873,6 +2707,90 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     await writeFile(tmp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
     await rename(tmp, target);
   }
+}
+
+const VALID_PERSISTED_AGENT_ROLES = new Set(["manager", "worker"]);
+const VALID_PERSISTED_AGENT_STATUSES = new Set(["idle", "streaming", "terminated", "stopped_on_restart"]);
+
+function validateAgentDescriptor(value: unknown): AgentDescriptor | string {
+  if (!isRecord(value)) {
+    return "descriptor must be an object";
+  }
+
+  if (!isNonEmptyString(value.agentId)) {
+    return "agentId must be a non-empty string";
+  }
+
+  if (typeof value.displayName !== "string") {
+    return "displayName must be a string";
+  }
+
+  if (!isNonEmptyString(value.role) || !VALID_PERSISTED_AGENT_ROLES.has(value.role)) {
+    return "role must be one of manager|worker";
+  }
+
+  if (!isNonEmptyString(value.managerId)) {
+    return "managerId must be a non-empty string";
+  }
+
+  if (!isNonEmptyString(value.status) || !VALID_PERSISTED_AGENT_STATUSES.has(value.status)) {
+    return "status must be one of idle|streaming|terminated|stopped_on_restart";
+  }
+
+  if (!isNonEmptyString(value.createdAt)) {
+    return "createdAt must be a non-empty string";
+  }
+
+  if (!isNonEmptyString(value.updatedAt)) {
+    return "updatedAt must be a non-empty string";
+  }
+
+  if (!isNonEmptyString(value.cwd)) {
+    return "cwd must be a non-empty string";
+  }
+
+  if (!isNonEmptyString(value.sessionFile)) {
+    return "sessionFile must be a non-empty string";
+  }
+
+  const model = value.model;
+  if (!isRecord(model)) {
+    return "model must be an object";
+  }
+
+  if (!isNonEmptyString(model.provider)) {
+    return "model.provider must be a non-empty string";
+  }
+
+  if (!isNonEmptyString(model.modelId)) {
+    return "model.modelId must be a non-empty string";
+  }
+
+  if (!isNonEmptyString(model.thinkingLevel)) {
+    return "model.thinkingLevel must be a non-empty string";
+  }
+
+  if (value.archetypeId !== undefined && typeof value.archetypeId !== "string") {
+    return "archetypeId must be a string when provided";
+  }
+
+  return value as unknown as AgentDescriptor;
+}
+
+function extractDescriptorAgentId(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  return isNonEmptyString(value.agentId) ? value.agentId.trim() : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function isEnoentError(error: unknown): boolean {
@@ -2915,17 +2833,21 @@ function resolveSettingsAuthProvider(
   provider: string
 ): { provider: SettingsAuthProviderName; storageProvider: string } | undefined {
   const normalizedProvider = provider.trim().toLowerCase();
-
-  for (const definition of SETTINGS_AUTH_PROVIDER_DEFINITIONS) {
-    if (definition.aliases.includes(normalizedProvider)) {
-      return {
-        provider: definition.provider,
-        storageProvider: definition.storageProvider
-      };
-    }
+  if (!normalizedProvider) {
+    return undefined;
   }
 
-  return undefined;
+  const definition = SETTINGS_AUTH_PROVIDER_DEFINITIONS.find(
+    (entry) => entry.provider === normalizedProvider
+  );
+  if (!definition) {
+    return undefined;
+  }
+
+  return {
+    provider: definition.provider,
+    storageProvider: definition.storageProvider
+  };
 }
 
 function resolveAuthCredentialType(

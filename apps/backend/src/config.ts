@@ -26,7 +26,6 @@ export function createConfig(): SwarmConfig {
   const dataDirEnv = process.env.SWARM_DATA_DIR?.trim();
   const dataDir = dataDirEnv ? resolveDataDir(rootDir, dataDirEnv) : defaultDataDir;
   const managerId = normalizeOptionalManagerId(process.env.SWARM_MANAGER_ID);
-  const legacyDefaultManagerId = managerId ?? "manager";
   const swarmDir = resolve(dataDir, "swarm");
   const sessionsDir = resolve(dataDir, "sessions");
   const uploadsDir = resolve(dataDir, "uploads");
@@ -42,7 +41,7 @@ export function createConfig(): SwarmConfig {
   const managerAgentDir = resolve(agentDir, "manager");
   const repoArchetypesDir = resolve(rootDir, ".swarm", "archetypes");
   const memoryDir = getMemoryDirPath(dataDir);
-  const memoryFile = getAgentMemoryPath(dataDir, legacyDefaultManagerId);
+  const memoryFile = managerId ? getAgentMemoryPath(dataDir, managerId) : undefined;
   const repoMemorySkillFile = resolve(rootDir, ".swarm", "skills", "memory", "SKILL.md");
   const secretsFile = resolve(dataDir, "secrets.json");
   const defaultCwd = process.env.SWARM_DEFAULT_CWD ? resolve(process.env.SWARM_DEFAULT_CWD) : rootDir;
@@ -89,7 +88,7 @@ export function createConfig(): SwarmConfig {
       repoMemorySkillFile,
       agentsStoreFile: resolve(swarmDir, "agents.json"),
       secretsFile,
-      schedulesFile: getScheduleFilePath(dataDir, legacyDefaultManagerId)
+      schedulesFile: managerId ? getScheduleFilePath(dataDir, managerId) : undefined
     }
   };
 }

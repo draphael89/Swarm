@@ -37,9 +37,6 @@ function getAgentLiveStatus(
   }
 }
 
-const OPUS_MODEL_ID_ALIASES = new Set(['claude-opus-4-6', 'claude-opus-4.6'])
-const CODEX_APP_MODEL_ID_ALIASES = new Set(['default', 'codex-app', 'codex-app-server'])
-
 function inferModelPreset(agent: AgentDescriptor): ManagerModelPreset | undefined {
   const provider = agent.model.provider.trim().toLowerCase()
   const modelId = agent.model.modelId.trim().toLowerCase()
@@ -48,11 +45,11 @@ function inferModelPreset(agent: AgentDescriptor): ManagerModelPreset | undefine
     return 'pi-codex'
   }
 
-  if (provider === 'anthropic' && OPUS_MODEL_ID_ALIASES.has(modelId)) {
+  if (provider === 'anthropic' && modelId === 'claude-opus-4-6') {
     return 'pi-opus'
   }
 
-  if (provider === 'openai-codex-app-server' && CODEX_APP_MODEL_ID_ALIASES.has(modelId)) {
+  if (provider === 'openai-codex-app-server' && modelId === 'default') {
     return 'codex-app'
   }
 

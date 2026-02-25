@@ -246,7 +246,7 @@ describe('SwarmManager', () => {
 
     await manager.boot()
 
-    const memory = await readFile(config.paths.memoryFile, 'utf8')
+    const memory = await readFile(config.paths.memoryFile!, 'utf8')
     expect(memory).toContain('# Swarm Memory')
     expect(memory).toContain('## User Preferences')
   })
@@ -258,19 +258,19 @@ describe('SwarmManager', () => {
     await firstBoot.boot()
 
     const persistedMemory = '# Swarm Memory\n\n## Project Facts\n- remember me\n'
-    await writeFile(config.paths.memoryFile, persistedMemory, 'utf8')
+    await writeFile(config.paths.memoryFile!, persistedMemory, 'utf8')
 
     const secondBoot = new TestSwarmManager(config)
     await secondBoot.boot()
 
-    const memory = await readFile(config.paths.memoryFile, 'utf8')
+    const memory = await readFile(config.paths.memoryFile!, 'utf8')
     expect(memory).toBe(persistedMemory)
 
     const resources = await secondBoot.getMemoryRuntimeResourcesForTest()
     expect(resources.memoryContextFile.content).toBe(persistedMemory)
   })
 
-  it('migrates legacy global MEMORY.md into manager memory on first boot', async () => {
+  it('does not migrate legacy global MEMORY.md into manager memory on boot', async () => {
     const config = await makeTempConfig()
     const legacyMemoryFile = join(config.paths.dataDir, 'MEMORY.md')
     const legacyContent = '# Swarm Memory\n\n## Project Facts\n- migrated legacy memory\n'
@@ -280,11 +280,13 @@ describe('SwarmManager', () => {
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    const managerMemory = await readFile(config.paths.memoryFile, 'utf8')
-    expect(managerMemory).toBe(legacyContent)
+    const managerMemory = await readFile(config.paths.memoryFile!, 'utf8')
+    expect(managerMemory).toContain('# Swarm Memory')
+    expect(managerMemory).not.toBe(legacyContent)
 
-    const markerContent = await readFile(join(config.paths.memoryDir, '.migrated'), 'utf8')
-    expect(markerContent).toContain('per-agent-memory-migration-complete')
+    await expect(readFile(join(config.paths.memoryDir, '.migrated'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 
   it('workers load their owning manager memory file', async () => {
@@ -295,11 +297,11 @@ describe('SwarmManager', () => {
     const worker = await manager.spawnAgent('manager', { agentId: 'Memory Worker' })
     const workerMemoryFile = join(config.paths.memoryDir, `${worker.agentId}.md`)
 
-    await writeFile(config.paths.memoryFile, '# Swarm Memory\n\n## Decisions\n- manager memory\n', 'utf8')
+    await writeFile(config.paths.memoryFile!, '# Swarm Memory\n\n## Decisions\n- manager memory\n', 'utf8')
     await writeFile(workerMemoryFile, '# Swarm Memory\n\n## Decisions\n- worker memory\n', 'utf8')
 
     const resources = await manager.getMemoryRuntimeResourcesForTest(worker.agentId)
-    expect(resources.memoryContextFile.path).toBe(config.paths.memoryFile)
+    expect(resources.memoryContextFile.path).toBe(config.paths.memoryFile!)
     expect(resources.memoryContextFile.content).toContain('manager memory')
     expect(resources.memoryContextFile.content).not.toContain('worker memory')
   })
@@ -367,10 +369,10 @@ describe('SwarmManager', () => {
     await manager.boot()
 
     const persistedMemory = '# Swarm Memory\n\n## Project Facts\n- release train: friday\n'
-    await writeFile(config.paths.memoryFile, persistedMemory, 'utf8')
+    await writeFile(config.paths.memoryFile!, persistedMemory, 'utf8')
 
     const resources = await manager.getMemoryRuntimeResourcesForTest()
-    expect(resources.memoryContextFile.path).toBe(config.paths.memoryFile)
+    expect(resources.memoryContextFile.path).toBe(config.paths.memoryFile!)
     expect(resources.memoryContextFile.content).toBe(persistedMemory)
     expect(resources.additionalSkillPaths).toHaveLength(6)
 
@@ -1480,7 +1482,7 @@ describe('SwarmManager', () => {
     expect(rebooted.getConversationHistory('manager')).toHaveLength(0)
   })
 
-  it('migrates legacy descriptors missing managerId on boot', async () => {
+  it('skips invalid persisted descriptors instead of failing boot', async () => {
     const config = await makeTempConfig()
 
     const seedAgents = {
@@ -1489,6 +1491,7 @@ describe('SwarmManager', () => {
           agentId: 'manager',
           displayName: 'Manager',
           role: 'manager',
+          managerId: 'manager',
           status: 'idle',
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
@@ -1497,29 +1500,37 @@ describe('SwarmManager', () => {
           sessionFile: join(config.paths.sessionsDir, 'manager.jsonl'),
         },
         {
-          agentId: 'legacy-worker',
-          displayName: 'Legacy Worker',
+          agentId: 'broken-worker',
+          displayName: 'Broken Worker',
           role: 'worker',
+          managerId: 'manager',
           status: 'idle',
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
           cwd: config.defaultCwd,
-          model: config.defaultModel,
-          sessionFile: join(config.paths.sessionsDir, 'legacy-worker.jsonl'),
+          sessionFile: join(config.paths.sessionsDir, 'broken-worker.jsonl'),
         },
       ],
     }
 
     await writeFile(config.paths.agentsStoreFile, JSON.stringify(seedAgents, null, 2), 'utf8')
 
-    const manager = new TestSwarmManager(config)
-    await manager.boot()
+    const originalWarn = console.warn
+    const warnings: string[] = []
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((entry) => String(entry)).join(' '))
+    }
 
-    const restoredManager = manager.listAgents().find((agent) => agent.agentId === 'manager')
-    const restoredWorker = manager.listAgents().find((agent) => agent.agentId === 'legacy-worker')
+    try {
+      const manager = new TestSwarmManager(config)
+      await manager.boot()
 
-    expect(restoredManager?.managerId).toBe('manager')
-    expect(restoredWorker?.managerId).toBe('manager')
+      const agentIds = manager.listAgents().map((agent) => agent.agentId)
+      expect(agentIds).toEqual(['manager'])
+      expect(warnings.some((entry) => entry.includes('Skipping invalid descriptor'))).toBe(true)
+    } finally {
+      console.warn = originalWarn
+    }
   })
 
   it('creates secondary managers and deletes them with owned worker cascade', async () => {

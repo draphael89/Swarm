@@ -29,22 +29,11 @@ import type { ConversationAttachment } from "../swarm/types.js";
 const REBOOT_ENDPOINT_PATH = "/api/reboot";
 const READ_FILE_ENDPOINT_PATH = "/api/read-file";
 const TRANSCRIBE_ENDPOINT_PATH = "/api/transcribe";
-const SCHEDULES_ENDPOINT_PATH = "/api/schedules";
 const MANAGER_SCHEDULES_ENDPOINT_PATTERN = /^\/api\/managers\/([^/]+)\/schedules$/;
 const AGENT_COMPACT_ENDPOINT_PATTERN = /^\/api\/agents\/([^/]+)\/compact$/;
 const SETTINGS_ENV_ENDPOINT_PATH = "/api/settings/env";
 const SETTINGS_AUTH_ENDPOINT_PATH = "/api/settings/auth";
 const SETTINGS_AUTH_LOGIN_ENDPOINT_PATH = "/api/settings/auth/login";
-const SETTINGS_SLACK_INTEGRATION_ENDPOINT_PATH = "/api/settings/slack";
-const SETTINGS_SLACK_INTEGRATION_TEST_ENDPOINT_PATH = "/api/settings/slack/test";
-const SETTINGS_SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH = "/api/settings/slack/channels";
-const SETTINGS_TELEGRAM_INTEGRATION_ENDPOINT_PATH = "/api/settings/telegram";
-const SETTINGS_TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH = "/api/settings/telegram/test";
-const SLACK_INTEGRATION_ENDPOINT_PATH = "/api/integrations/slack";
-const SLACK_INTEGRATION_TEST_ENDPOINT_PATH = "/api/integrations/slack/test";
-const SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH = "/api/integrations/slack/channels";
-const TELEGRAM_INTEGRATION_ENDPOINT_PATH = "/api/integrations/telegram";
-const TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH = "/api/integrations/telegram/test";
 const MANAGER_SLACK_INTEGRATION_ENDPOINT_PATTERN = /^\/api\/managers\/([^/]+)\/integrations\/slack$/;
 const MANAGER_SLACK_INTEGRATION_TEST_ENDPOINT_PATTERN =
   /^\/api\/managers\/([^/]+)\/integrations\/slack\/test$/;
@@ -115,12 +104,6 @@ interface SettingsAuthLoginFlow {
   abortController: AbortController;
   closed: boolean;
 }
-
-const SETTINGS_AUTH_LOGIN_PROVIDER_ALIASES: Record<string, OAuthLoginProviderId> = {
-  anthropic: "anthropic",
-  openai: "openai-codex",
-  "openai-codex": "openai-codex"
-};
 
 const SETTINGS_AUTH_LOGIN_PROVIDERS: Record<OAuthLoginProviderId, OAuthProviderInterface> = {
   anthropic: anthropicOAuthProvider,
@@ -296,20 +279,9 @@ export class SwarmWebSocketServer {
         return;
       }
 
-      const schedulesRoute = resolveSchedulesRoute(
-        requestUrl.pathname,
-        this.resolveLegacyDefaultManagerId()
-      );
+      const schedulesRoute = resolveSchedulesRoute(requestUrl.pathname);
       if (schedulesRoute) {
         await this.handleSchedulesHttpRequest(request, response, schedulesRoute);
-        return;
-      }
-
-      if (requestUrl.pathname === SCHEDULES_ENDPOINT_PATH) {
-        this.applyCorsHeaders(request, response, "GET, OPTIONS");
-        this.sendJson(response, 400, {
-          error: "managerId is required. Use /api/managers/:managerId/schedules."
-        });
         return;
       }
 
@@ -667,16 +639,8 @@ export class SwarmWebSocketServer {
 
   private resolveOpenAiApiKey(): string | undefined {
     const authStorage = AuthStorage.create(this.swarmManager.getConfig().paths.authFile);
-
-    for (const providerId of ["openai", "openai-codex"]) {
-      const credential = authStorage.get(providerId);
-      const token = extractAuthCredentialToken(credential as AuthCredential | undefined);
-      if (token) {
-        return token;
-      }
-    }
-
-    return undefined;
+    const credential = authStorage.get("openai-codex");
+    return extractAuthCredentialToken(credential as AuthCredential | undefined);
   }
 
   private async handleSchedulesHttpRequest(
@@ -702,7 +666,7 @@ export class SwarmWebSocketServer {
 
     this.applyCorsHeaders(request, response, methods);
 
-    if (route.scope === "manager" && !this.isManagerAgent(route.managerId)) {
+    if (!this.isManagerAgent(route.managerId)) {
       this.sendJson(response, 404, { error: `Unknown manager: ${route.managerId}` });
       return;
     }
@@ -1166,15 +1130,8 @@ export class SwarmWebSocketServer {
       return;
     }
 
-    const legacyDefaultManagerId = this.resolveLegacyDefaultManagerId();
-    const route = resolveSlackIntegrationRoute(requestUrl.pathname, legacyDefaultManagerId);
+    const route = resolveSlackIntegrationRoute(requestUrl.pathname);
     if (!route) {
-      if (isLegacySlackIntegrationPath(requestUrl.pathname) && !legacyDefaultManagerId) {
-        this.sendJson(response, 400, {
-          error: "managerId is required. Use /api/managers/:managerId/integrations/slack."
-        });
-        return;
-      }
       response.setHeader("Allow", methods);
       this.sendJson(response, 405, { error: "Method Not Allowed" });
       return;
@@ -1214,9 +1171,7 @@ export class SwarmWebSocketServer {
     }
 
     if (route.action === "channels" && request.method === "GET") {
-      const includePrivate = parseOptionalBoolean(
-        requestUrl.searchParams.get("includePrivateChannels") ?? requestUrl.searchParams.get("includePrivate")
-      );
+      const includePrivate = parseOptionalBoolean(requestUrl.searchParams.get("includePrivateChannels"));
 
       const channels = await this.integrationRegistry.listSlackChannels(route.managerId, {
         includePrivateChannels: includePrivate
@@ -1251,15 +1206,8 @@ export class SwarmWebSocketServer {
       return;
     }
 
-    const legacyDefaultManagerId = this.resolveLegacyDefaultManagerId();
-    const route = resolveTelegramIntegrationRoute(requestUrl.pathname, legacyDefaultManagerId);
+    const route = resolveTelegramIntegrationRoute(requestUrl.pathname);
     if (!route) {
-      if (isLegacyTelegramIntegrationPath(requestUrl.pathname) && !legacyDefaultManagerId) {
-        this.sendJson(response, 400, {
-          error: "managerId is required. Use /api/managers/:managerId/integrations/telegram."
-        });
-        return;
-      }
       response.setHeader("Allow", methods);
       this.sendJson(response, 405, { error: "Method Not Allowed" });
       return;
@@ -1858,16 +1806,6 @@ export class SwarmWebSocketServer {
 
     const normalized = managerId.trim();
     return normalized.length > 0 ? normalized : undefined;
-  }
-
-  private resolveLegacyDefaultManagerId(): string | undefined {
-    const configuredManagerId = this.resolveConfiguredManagerId();
-    if (configuredManagerId && this.isManagerAgent(configuredManagerId)) {
-      return configuredManagerId;
-    }
-
-    const firstManager = this.swarmManager.listAgents().find((agent) => agent.role === "manager");
-    return firstManager?.agentId;
   }
 
   private hasRunningManagers(): boolean {
@@ -2559,7 +2497,6 @@ type SlackIntegrationRoute = {
 
 type SchedulesRoute = {
   managerId: string;
-  scope: "legacy" | "manager";
 };
 
 type TelegramIntegrationRoute = {
@@ -2569,7 +2506,6 @@ type TelegramIntegrationRoute = {
 
 function isSlackIntegrationPath(pathname: string): boolean {
   return (
-    isLegacySlackIntegrationPath(pathname) ||
     MANAGER_SLACK_INTEGRATION_ENDPOINT_PATTERN.test(pathname) ||
     MANAGER_SLACK_INTEGRATION_TEST_ENDPOINT_PATTERN.test(pathname) ||
     MANAGER_SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATTERN.test(pathname)
@@ -2578,44 +2514,16 @@ function isSlackIntegrationPath(pathname: string): boolean {
 
 function isTelegramIntegrationPath(pathname: string): boolean {
   return (
-    isLegacyTelegramIntegrationPath(pathname) ||
     MANAGER_TELEGRAM_INTEGRATION_ENDPOINT_PATTERN.test(pathname) ||
     MANAGER_TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATTERN.test(pathname)
   );
 }
 
 function isSchedulesPath(pathname: string): boolean {
-  return pathname === SCHEDULES_ENDPOINT_PATH || MANAGER_SCHEDULES_ENDPOINT_PATTERN.test(pathname);
+  return MANAGER_SCHEDULES_ENDPOINT_PATTERN.test(pathname);
 }
 
-function isLegacySlackIntegrationPath(pathname: string): boolean {
-  return (
-    pathname === SLACK_INTEGRATION_ENDPOINT_PATH ||
-    pathname === SLACK_INTEGRATION_TEST_ENDPOINT_PATH ||
-    pathname === SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH ||
-    pathname === SETTINGS_SLACK_INTEGRATION_ENDPOINT_PATH ||
-    pathname === SETTINGS_SLACK_INTEGRATION_TEST_ENDPOINT_PATH ||
-    pathname === SETTINGS_SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH
-  );
-}
-
-function isLegacyTelegramIntegrationPath(pathname: string): boolean {
-  return (
-    pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH ||
-    pathname === TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH ||
-    pathname === SETTINGS_TELEGRAM_INTEGRATION_ENDPOINT_PATH ||
-    pathname === SETTINGS_TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH
-  );
-}
-
-function resolveSchedulesRoute(pathname: string, defaultManagerId?: string): SchedulesRoute | null {
-  if (pathname === SCHEDULES_ENDPOINT_PATH) {
-    if (!defaultManagerId) {
-      return null;
-    }
-    return { managerId: defaultManagerId, scope: "legacy" };
-  }
-
+function resolveSchedulesRoute(pathname: string): SchedulesRoute | null {
   const managerMatch = pathname.match(MANAGER_SCHEDULES_ENDPOINT_PATTERN);
   if (!managerMatch) {
     return null;
@@ -2626,42 +2534,10 @@ function resolveSchedulesRoute(pathname: string, defaultManagerId?: string): Sch
     return null;
   }
 
-  return { managerId, scope: "manager" };
+  return { managerId };
 }
 
-function resolveSlackIntegrationRoute(
-  pathname: string,
-  defaultManagerId?: string
-): SlackIntegrationRoute | null {
-  if (
-    pathname === SLACK_INTEGRATION_ENDPOINT_PATH ||
-    pathname === SETTINGS_SLACK_INTEGRATION_ENDPOINT_PATH
-  ) {
-    if (!defaultManagerId) {
-      return null;
-    }
-    return { managerId: defaultManagerId, action: "config" };
-  }
-
-  if (
-    pathname === SLACK_INTEGRATION_TEST_ENDPOINT_PATH ||
-    pathname === SETTINGS_SLACK_INTEGRATION_TEST_ENDPOINT_PATH
-  ) {
-    if (!defaultManagerId) {
-      return null;
-    }
-    return { managerId: defaultManagerId, action: "test" };
-  }
-
-  if (
-    pathname === SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH ||
-    pathname === SETTINGS_SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATH
-  ) {
-    if (!defaultManagerId) {
-      return null;
-    }
-    return { managerId: defaultManagerId, action: "channels" };
-  }
+function resolveSlackIntegrationRoute(pathname: string): SlackIntegrationRoute | null {
 
   const configMatch = pathname.match(MANAGER_SLACK_INTEGRATION_ENDPOINT_PATTERN);
   if (configMatch) {
@@ -2696,29 +2572,7 @@ function resolveSlackIntegrationRoute(
   return null;
 }
 
-function resolveTelegramIntegrationRoute(
-  pathname: string,
-  defaultManagerId?: string
-): TelegramIntegrationRoute | null {
-  if (
-    pathname === TELEGRAM_INTEGRATION_ENDPOINT_PATH ||
-    pathname === SETTINGS_TELEGRAM_INTEGRATION_ENDPOINT_PATH
-  ) {
-    if (!defaultManagerId) {
-      return null;
-    }
-    return { managerId: defaultManagerId, action: "config" };
-  }
-
-  if (
-    pathname === TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH ||
-    pathname === SETTINGS_TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATH
-  ) {
-    if (!defaultManagerId) {
-      return null;
-    }
-    return { managerId: defaultManagerId, action: "test" };
-  }
+function resolveTelegramIntegrationRoute(pathname: string): TelegramIntegrationRoute | null {
 
   const configMatch = pathname.match(MANAGER_TELEGRAM_INTEGRATION_ENDPOINT_PATTERN);
   if (configMatch) {
@@ -2758,11 +2612,11 @@ function decodePathSegment(rawSegment: string | undefined): string | undefined {
 
 function resolveSettingsAuthLoginProviderId(rawProvider: string): OAuthLoginProviderId | undefined {
   const normalized = rawProvider.trim().toLowerCase();
-  if (!normalized) {
-    return undefined;
+  if (normalized === "anthropic" || normalized === "openai-codex") {
+    return normalized;
   }
 
-  return SETTINGS_AUTH_LOGIN_PROVIDER_ALIASES[normalized];
+  return undefined;
 }
 
 function resolveReadFileContentType(path: string): string {

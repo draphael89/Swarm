@@ -109,7 +109,7 @@ async function hasConfiguredOpenAiKey(endpoint: string): Promise<boolean> {
         typeof provider.provider === 'string' ? provider.provider.trim().toLowerCase() : ''
       const configured = provider.configured === true
 
-      return configured && (providerId === 'openai' || providerId === 'openai-codex')
+      return configured && providerId === 'openai-codex'
     })
   } catch {
     return false

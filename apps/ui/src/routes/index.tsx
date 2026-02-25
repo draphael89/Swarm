@@ -48,8 +48,6 @@ const DEFAULT_MANAGER_MODEL: ManagerModelPreset = 'pi-codex'
 const DEFAULT_DEV_WS_URL = 'ws://127.0.0.1:47187'
 const DEFAULT_MANAGER_AGENT_ID = 'opus-manager'
 const CHARS_PER_TOKEN_ESTIMATE = 4
-const OPUS_MODEL_ID_ALIASES = new Set(['claude-opus-4-6', 'claude-opus-4.6'])
-const CODEX_APP_MODEL_ID_ALIASES = new Set(['default', 'codex-app', 'codex-app-server'])
 const CONTEXT_WINDOW_BY_PRESET: Record<ManagerModelPreset, number> = {
   'pi-opus': 200_000,
   'pi-codex': 1_048_576,
@@ -175,11 +173,11 @@ function inferModelPreset(agent: AgentDescriptor): ManagerModelPreset | undefine
     return 'pi-codex'
   }
 
-  if (provider === 'anthropic' && OPUS_MODEL_ID_ALIASES.has(modelId)) {
+  if (provider === 'anthropic' && modelId === 'claude-opus-4-6') {
     return 'pi-opus'
   }
 
-  if (provider === 'openai-codex-app-server' && CODEX_APP_MODEL_ID_ALIASES.has(modelId)) {
+  if (provider === 'openai-codex-app-server' && modelId === 'default') {
     return 'codex-app'
   }
 

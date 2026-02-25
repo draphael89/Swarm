@@ -73,7 +73,7 @@ export function createIdleSettingsAuthOAuthFlowState(): SettingsAuthOAuthFlowSta
 
 function normalizeSettingsAuthProviderId(value: unknown): SettingsAuthProviderId | undefined {
   if (value === 'anthropic') return 'anthropic'
-  if (value === 'openai' || value === 'openai-codex') return 'openai-codex'
+  if (value === 'openai-codex') return 'openai-codex'
   return undefined
 }
 

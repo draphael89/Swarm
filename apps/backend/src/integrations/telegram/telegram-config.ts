@@ -17,16 +17,13 @@ const MAX_POLL_TIMEOUT_SECONDS = 60;
 const MIN_POLL_LIMIT = 1;
 const MAX_POLL_LIMIT = 100;
 
-export function getLegacyTelegramConfigPath(dataDir: string): string {
-  return resolve(dataDir, INTEGRATIONS_DIR_NAME, TELEGRAM_CONFIG_FILE_NAME);
-}
-
 export function getTelegramConfigPath(dataDir: string, managerId: string): string {
+  const normalizedManagerId = normalizeManagerId(managerId);
   return resolve(
     dataDir,
     INTEGRATIONS_DIR_NAME,
     INTEGRATIONS_MANAGERS_DIR_NAME,
-    managerId,
+    normalizedManagerId,
     TELEGRAM_CONFIG_FILE_NAME
   );
 }
@@ -72,7 +69,7 @@ export async function loadTelegramConfig(options: {
   try {
     const raw = await readFile(configPath, "utf8");
     const parsed = JSON.parse(raw) as unknown;
-    return mergeTelegramConfig(defaults, parsed);
+    return parseTelegramConfig(parsed);
   } catch (error) {
     if (isEnoentError(error)) {
       return defaults;
@@ -80,6 +77,10 @@ export async function loadTelegramConfig(options: {
 
     if (isSyntaxError(error)) {
       throw new Error(`Invalid Telegram config JSON at ${configPath}`);
+    }
+
+    if (error instanceof Error) {
+      throw new Error(`Invalid Telegram config at ${configPath}: ${error.message}`);
     }
 
     throw error;
@@ -174,6 +175,80 @@ export function maskTelegramConfig(config: TelegramIntegrationConfig): TelegramI
   };
 }
 
+function parseTelegramConfig(value: unknown): TelegramIntegrationConfig {
+  const root = requireRecord(value, "Telegram config must be an object");
+  const polling = requireRecord(root.polling, "Telegram config.polling must be an object");
+  const delivery = requireRecord(root.delivery, "Telegram config.delivery must be an object");
+  const attachments = requireRecord(root.attachments, "Telegram config.attachments must be an object");
+
+  return {
+    profileId: requireNonEmptyString(
+      root.profileId,
+      "Telegram config.profileId must be a non-empty string"
+    ),
+    enabled: requireBoolean(root.enabled, "Telegram config.enabled must be a boolean"),
+    mode: requireConnectionMode(root.mode),
+    botToken: requireString(root.botToken, "Telegram config.botToken must be a string"),
+    allowedUserIds: requireStringArray(
+      root.allowedUserIds,
+      "Telegram config.allowedUserIds must be an array of strings"
+    ),
+    polling: {
+      timeoutSeconds: normalizeInteger(
+        requireNumber(
+          polling.timeoutSeconds,
+          "Telegram config.polling.timeoutSeconds must be a number"
+        ),
+        25,
+        MIN_POLL_TIMEOUT_SECONDS,
+        MAX_POLL_TIMEOUT_SECONDS
+      ),
+      limit: normalizeInteger(
+        requireNumber(polling.limit, "Telegram config.polling.limit must be a number"),
+        100,
+        MIN_POLL_LIMIT,
+        MAX_POLL_LIMIT
+      ),
+      dropPendingUpdatesOnStart: requireBoolean(
+        polling.dropPendingUpdatesOnStart,
+        "Telegram config.polling.dropPendingUpdatesOnStart must be a boolean"
+      )
+    },
+    delivery: {
+      parseMode: requireParseMode(delivery.parseMode),
+      disableLinkPreview: requireBoolean(
+        delivery.disableLinkPreview,
+        "Telegram config.delivery.disableLinkPreview must be a boolean"
+      ),
+      replyToInboundMessageByDefault: requireBoolean(
+        delivery.replyToInboundMessageByDefault,
+        "Telegram config.delivery.replyToInboundMessageByDefault must be a boolean"
+      )
+    },
+    attachments: {
+      maxFileBytes: normalizeFileSize(
+        requireNumber(
+          attachments.maxFileBytes,
+          "Telegram config.attachments.maxFileBytes must be a number"
+        ),
+        DEFAULT_MAX_FILE_BYTES
+      ),
+      allowImages: requireBoolean(
+        attachments.allowImages,
+        "Telegram config.attachments.allowImages must be a boolean"
+      ),
+      allowText: requireBoolean(
+        attachments.allowText,
+        "Telegram config.attachments.allowText must be a boolean"
+      ),
+      allowBinary: requireBoolean(
+        attachments.allowBinary,
+        "Telegram config.attachments.allowBinary must be a boolean"
+      )
+    }
+  };
+}
+
 function normalizeParseMode(value: unknown, fallback: TelegramParseMode): TelegramParseMode {
   return value === "HTML" ? "HTML" : fallback;
 }
@@ -191,29 +266,20 @@ function normalizeStringArray(value: unknown, fallback: string[]): string[] {
   const normalized: string[] = [];
 
   for (const entry of value) {
-    const normalizedEntry = normalizeArrayEntry(entry);
-    if (!normalizedEntry || seen.has(normalizedEntry)) {
+    if (typeof entry !== "string") {
       continue;
     }
 
-    seen.add(normalizedEntry);
-    normalized.push(normalizedEntry);
+    const trimmed = entry.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      continue;
+    }
+
+    seen.add(trimmed);
+    normalized.push(trimmed);
   }
 
   return normalized;
-}
-
-function normalizeArrayEntry(value: unknown): string | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(Math.trunc(value));
-  }
-
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed || undefined;
 }
 
 function normalizeInteger(value: unknown, fallback: number, min: number, max: number): number {
@@ -247,16 +313,7 @@ function normalizeToken(value: unknown, fallback: string): string {
     return fallback;
   }
 
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  if (isMaskedToken(trimmed)) {
-    return fallback;
-  }
-
-  return trimmed;
+  return value.trim();
 }
 
 function normalizeProfileId(value: unknown, fallback: string): string {
@@ -283,7 +340,11 @@ function maskToken(value: string): string {
 
 function normalizeManagerId(value: string): string {
   const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : "manager";
+  if (!trimmed) {
+    throw new Error("managerId is required");
+  }
+
+  return trimmed;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -294,8 +355,69 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function isMaskedToken(value: string): boolean {
-  return value === "********" || value.includes("…") || /^\*+$/.test(value);
+function requireRecord(value: unknown, message: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(message);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function requireBoolean(value: unknown, message: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new Error(message);
+  }
+
+  return value;
+}
+
+function requireNumber(value: unknown, message: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(message);
+  }
+
+  return value;
+}
+
+function requireString(value: unknown, message: string): string {
+  if (typeof value !== "string") {
+    throw new Error(message);
+  }
+
+  return value.trim();
+}
+
+function requireNonEmptyString(value: unknown, message: string): string {
+  const parsed = requireString(value, message);
+  if (!parsed) {
+    throw new Error(message);
+  }
+
+  return parsed;
+}
+
+function requireStringArray(value: unknown, message: string): string[] {
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new Error(message);
+  }
+
+  return normalizeStringArray(value, []);
+}
+
+function requireConnectionMode(value: unknown): "polling" {
+  if (value !== "polling") {
+    throw new Error('Telegram config.mode must be "polling"');
+  }
+
+  return value;
+}
+
+function requireParseMode(value: unknown): TelegramParseMode {
+  if (value !== "HTML") {
+    throw new Error('Telegram config.delivery.parseMode must be "HTML"');
+  }
+
+  return value;
 }
 
 function isEnoentError(error: unknown): boolean {

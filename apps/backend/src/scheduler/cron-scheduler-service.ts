@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, dirname } from "node:path";
-import * as cronParser from "cron-parser";
+import { CronExpressionParser } from "cron-parser";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
@@ -477,61 +477,11 @@ function isValidTimezone(timezone: string): boolean {
 }
 
 function computeNextFireAt(cron: string, timezone: string, afterDate: Date): string {
-  const iterator = parseCronExpression(cron, {
+  const iterator = CronExpressionParser.parse(cron, {
     currentDate: afterDate,
     tz: timezone
   });
-  return cronResultToDate(iterator.next()).toISOString();
-}
-
-function parseCronExpression(
-  cron: string,
-  options: Record<string, unknown>
-): { next: () => unknown } {
-  const parser = cronParser as unknown as {
-    CronExpressionParser?: { parse?: (expression: string, inputOptions: Record<string, unknown>) => unknown };
-    parseExpression?: (expression: string, inputOptions: Record<string, unknown>) => unknown;
-    default?: { parseExpression?: (expression: string, inputOptions: Record<string, unknown>) => unknown };
-  };
-
-  if (parser.CronExpressionParser?.parse) {
-    return parser.CronExpressionParser.parse(cron, options) as { next: () => unknown };
-  }
-
-  if (parser.parseExpression) {
-    return parser.parseExpression(cron, options) as { next: () => unknown };
-  }
-
-  if (parser.default?.parseExpression) {
-    return parser.default.parseExpression(cron, options) as { next: () => unknown };
-  }
-
-  throw new Error("cron-parser parse API unavailable");
-}
-
-function cronResultToDate(value: unknown): Date {
-  if (value instanceof Date) {
-    return value;
-  }
-
-  if (!value || typeof value !== "object") {
-    throw new Error("Unsupported cron next() result format");
-  }
-
-  const withToDate = value as { toDate?: () => unknown };
-  if (typeof withToDate.toDate === "function") {
-    const asDate = withToDate.toDate();
-    if (asDate instanceof Date) {
-      return asDate;
-    }
-  }
-
-  const withToIsoString = value as { toISOString?: () => string };
-  if (typeof withToIsoString.toISOString === "function") {
-    return new Date(withToIsoString.toISOString());
-  }
-
-  throw new Error("Unsupported cron next() result format");
+  return iterator.next().toDate().toISOString();
 }
 
 function areSchedulesEqual(left: ScheduledTask, right: ScheduledTask): boolean {

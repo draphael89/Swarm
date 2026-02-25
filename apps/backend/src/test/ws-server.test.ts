@@ -420,7 +420,7 @@ describe('SwarmWebSocketServer', () => {
     }
   })
 
-  it('returns schedules through GET /api/schedules', async () => {
+  it('returns schedules through GET /api/managers/:managerId/schedules', async () => {
     const port = await getAvailablePort()
     const config = await makeTempConfig(port)
 
@@ -435,10 +435,10 @@ describe('SwarmWebSocketServer', () => {
     })
 
     await server.start()
-    await mkdir(dirname(config.paths.schedulesFile), { recursive: true })
+    await mkdir(dirname(config.paths.schedulesFile!), { recursive: true })
 
     await writeFile(
-      config.paths.schedulesFile,
+      config.paths.schedulesFile!,
       JSON.stringify(
         {
           schedules: [
@@ -465,7 +465,7 @@ describe('SwarmWebSocketServer', () => {
     )
 
     try {
-      const response = await fetch(`http://${config.host}:${config.port}/api/schedules`)
+      const response = await fetch(`http://${config.host}:${config.port}/api/managers/manager/schedules`)
       expect(response.status).toBe(200)
 
       const payload = (await response.json()) as {
@@ -622,7 +622,7 @@ describe('SwarmWebSocketServer', () => {
     await server.start()
 
     try {
-      const response = await fetch(`http://${config.host}:${config.port}/api/schedules`)
+      const response = await fetch(`http://${config.host}:${config.port}/api/managers/manager/schedules`)
       expect(response.status).toBe(200)
 
       const payload = (await response.json()) as { schedules: unknown[] }
@@ -753,7 +753,7 @@ describe('SwarmWebSocketServer', () => {
       expect(initialPayload.providers).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ provider: 'anthropic', configured: false }),
-          expect.objectContaining({ provider: 'openai', configured: false }),
+          expect.objectContaining({ provider: 'openai-codex', configured: false }),
         ]),
       )
 
@@ -764,7 +764,7 @@ describe('SwarmWebSocketServer', () => {
         },
         body: JSON.stringify({
           anthropic: 'sk-ant-test-1234',
-          openai: 'sk-openai-test-5678',
+          'openai-codex': 'sk-openai-test-5678',
         }),
       })
 
@@ -774,7 +774,7 @@ describe('SwarmWebSocketServer', () => {
       }
 
       const anthropic = updatedPayload.providers.find((entry) => entry.provider === 'anthropic')
-      const openai = updatedPayload.providers.find((entry) => entry.provider === 'openai')
+      const openai = updatedPayload.providers.find((entry) => entry.provider === 'openai-codex')
 
       expect(anthropic?.configured).toBe(true)
       expect(anthropic?.maskedValue).toBe('********1234')
@@ -795,7 +795,7 @@ describe('SwarmWebSocketServer', () => {
       })
       expect(storedAuth['openai-codex'].key ?? storedAuth['openai-codex'].access).toBe('sk-openai-test-5678')
 
-      const deleteResponse = await fetch(`http://${config.host}:${config.port}/api/settings/auth/openai`, {
+      const deleteResponse = await fetch(`http://${config.host}:${config.port}/api/settings/auth/openai-codex`, {
         method: 'DELETE',
       })
       expect(deleteResponse.status).toBe(200)
@@ -803,7 +803,7 @@ describe('SwarmWebSocketServer', () => {
       const afterDeletePayload = (await deleteResponse.json()) as {
         providers: Array<{ provider: string; configured: boolean }>
       }
-      expect(afterDeletePayload.providers.find((entry) => entry.provider === 'openai')?.configured).toBe(false)
+      expect(afterDeletePayload.providers.find((entry) => entry.provider === 'openai-codex')?.configured).toBe(false)
 
       const afterDeleteAuth = JSON.parse(await readFile(config.paths.authFile, 'utf8')) as Record<string, unknown>
       expect(afterDeleteAuth['openai-codex']).toBeUndefined()

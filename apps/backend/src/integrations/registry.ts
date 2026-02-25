@@ -1,19 +1,11 @@
 import { EventEmitter } from "node:events";
-import { access, copyFile, mkdir, readdir, writeFile } from "node:fs/promises";
-import { constants, type Dirent } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { readdir } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { resolve } from "node:path";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
-import {
-  getLegacySlackConfigPath,
-  getSlackConfigPath
-} from "./slack/slack-config.js";
 import { SlackIntegrationService } from "./slack/slack-integration.js";
 import type { SlackStatusEvent } from "./slack/slack-status.js";
 import type { SlackChannelDescriptor, SlackConnectionTestResult, SlackIntegrationConfigPublic } from "./slack/slack-types.js";
-import {
-  getLegacyTelegramConfigPath,
-  getTelegramConfigPath
-} from "./telegram/telegram-config.js";
 import { TelegramIntegrationService } from "./telegram/telegram-integration.js";
 import type { TelegramStatusEvent } from "./telegram/telegram-status.js";
 import type {
@@ -25,8 +17,6 @@ type IntegrationProvider = "slack" | "telegram";
 
 const INTEGRATIONS_DIR_NAME = "integrations";
 const INTEGRATIONS_MANAGERS_DIR_NAME = "managers";
-const MIGRATION_MARKER_FILE_NAME = ".migrated";
-const LEGACY_DEFAULT_MANAGER_ID = "manager";
 
 export class IntegrationRegistryService extends EventEmitter {
   private readonly swarmManager: SwarmManager;
@@ -65,7 +55,6 @@ export class IntegrationRegistryService extends EventEmitter {
       }
 
       this.started = true;
-      await this.migrateLegacyGlobalConfigsIfNeeded();
 
       const managerIds = await this.discoverKnownManagerIds();
       for (const managerId of managerIds) {
@@ -333,69 +322,6 @@ export class IntegrationRegistryService extends EventEmitter {
 
     return managerIds;
   }
-
-  private async migrateLegacyGlobalConfigsIfNeeded(): Promise<void> {
-    const migrationMarkerPath = getMigrationMarkerPath(this.dataDir);
-    if (await pathExists(migrationMarkerPath)) {
-      return;
-    }
-
-    if (await this.hasAnyManagerScopedProfile()) {
-      return;
-    }
-
-    const legacySlackPath = getLegacySlackConfigPath(this.dataDir);
-    const legacyTelegramPath = getLegacyTelegramConfigPath(this.dataDir);
-    const hasLegacySlack = await pathExists(legacySlackPath);
-    const hasLegacyTelegram = await pathExists(legacyTelegramPath);
-
-    if (!hasLegacySlack && !hasLegacyTelegram) {
-      return;
-    }
-
-    const defaultManagerId =
-      this.defaultManagerId ??
-      this.swarmManager.listAgents().find((descriptor) => descriptor.role === "manager")?.agentId ??
-      LEGACY_DEFAULT_MANAGER_ID;
-    const normalizedDefaultManagerId = normalizeManagerId(defaultManagerId);
-    if (hasLegacySlack) {
-      await copyFileToManagerProfile({
-        sourcePath: legacySlackPath,
-        destinationPath: getSlackConfigPath(this.dataDir, normalizedDefaultManagerId)
-      });
-    }
-
-    if (hasLegacyTelegram) {
-      await copyFileToManagerProfile({
-        sourcePath: legacyTelegramPath,
-        destinationPath: getTelegramConfigPath(this.dataDir, normalizedDefaultManagerId)
-      });
-    }
-
-    await mkdir(dirname(migrationMarkerPath), { recursive: true });
-    await writeFile(
-      migrationMarkerPath,
-      `${new Date().toISOString()} migrated legacy global integration config\n`,
-      "utf8"
-    );
-  }
-
-  private async hasAnyManagerScopedProfile(): Promise<boolean> {
-    const managerIds = await this.loadManagerIdsFromDisk();
-
-    for (const managerId of managerIds) {
-      if (await pathExists(getSlackConfigPath(this.dataDir, managerId))) {
-        return true;
-      }
-
-      if (await pathExists(getTelegramConfigPath(this.dataDir, managerId))) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
   private async runExclusive<T>(action: () => Promise<T>): Promise<T> {
     const next = this.lifecycle.then(action, action);
     this.lifecycle = next.then(
@@ -404,23 +330,6 @@ export class IntegrationRegistryService extends EventEmitter {
     );
     return next;
   }
-}
-
-async function copyFileToManagerProfile(options: {
-  sourcePath: string;
-  destinationPath: string;
-}): Promise<void> {
-  await mkdir(dirname(options.destinationPath), { recursive: true });
-
-  if (await pathExists(options.destinationPath)) {
-    return;
-  }
-
-  await copyFile(options.sourcePath, options.destinationPath);
-}
-
-function getMigrationMarkerPath(dataDir: string): string {
-  return resolve(dataDir, INTEGRATIONS_DIR_NAME, MIGRATION_MARKER_FILE_NAME);
 }
 
 function normalizeManagerId(value: string): string {
@@ -439,19 +348,6 @@ function normalizeOptionalManagerId(value: string | undefined): string | undefin
 
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path, constants.F_OK);
-    return true;
-  } catch (error) {
-    if (isEnoentError(error)) {
-      return false;
-    }
-
-    throw error;
-  }
 }
 
 function isEnoentError(error: unknown): boolean {
