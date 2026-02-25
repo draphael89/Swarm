@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useMemo, useState } from 'react'
+import { isValidElement, memo, useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import { AlertCircle, ChevronRight, FileCode2, FileText, ZoomIn } from 'lucide-react'
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -189,7 +189,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
               return <hr className={cn('my-6 border-border/50', isDocument && 'my-8')} />
             },
             a({ children, href }) {
-              const artifact = parseArtifactReference(href)
+              const artifact = parseArtifactReference(href, { title: extractLinkText(children) })
               if (artifact && onArtifactClick) {
                 return <ArtifactReferenceCard artifact={artifact} onClick={onArtifactClick} />
               }
@@ -417,7 +417,9 @@ function ArtifactReferenceCard({
       </span>
 
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] font-semibold text-foreground">{artifact.fileName}</span>
+        <span className="block truncate text-[13px] font-semibold text-foreground">
+          {artifact.title ?? artifact.fileName}
+        </span>
         <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">{artifact.path}</span>
       </span>
 
@@ -426,6 +428,28 @@ function ArtifactReferenceCard({
       </span>
     </Button>
   )
+}
+
+function extractLinkText(children: ReactNode): string | undefined {
+  const text = flattenText(children).trim()
+  return text || undefined
+}
+
+function flattenText(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') {
+    return String(node)
+  }
+
+  if (Array.isArray(node)) {
+    return node.map((child) => flattenText(child)).join('')
+  }
+
+  if (isValidElement(node)) {
+    const props = node.props as { children?: ReactNode }
+    return flattenText(props.children)
+  }
+
+  return ''
 }
 
 function MermaidDiagram({

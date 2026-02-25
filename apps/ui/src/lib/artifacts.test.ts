@@ -33,6 +33,35 @@ describe('artifacts helpers', () => {
     })
   })
 
+  it('parses local file paths into artifact references', () => {
+    const artifact = parseArtifactReference('docs/plans/terminal-support.md')
+
+    expect(artifact).toEqual({
+      path: 'docs/plans/terminal-support.md',
+      fileName: 'terminal-support.md',
+      href: 'docs/plans/terminal-support.md',
+    })
+  })
+
+  it('uses markdown link text as a display title when provided', () => {
+    const artifact = parseArtifactReference('./docs/plans/terminal-support.md', {
+      title: 'Terminal Support Plan',
+    })
+
+    expect(artifact).toEqual({
+      path: './docs/plans/terminal-support.md',
+      fileName: 'terminal-support.md',
+      href: './docs/plans/terminal-support.md',
+      title: 'Terminal Support Plan',
+    })
+  })
+
+  it('does not treat external links as artifacts', () => {
+    expect(parseArtifactReference('https://example.com/docs/plan.md')).toBeNull()
+    expect(parseArtifactReference('mailto:test@example.com')).toBeNull()
+    expect(parseArtifactReference('example.com/docs/plan.md')).toBeNull()
+  })
+
   it('builds artifact href helpers', () => {
     expect(toSwarmFileHref('/tmp/my notes.md')).toBe('swarm-file:///tmp/my%20notes.md')
     expect(toVscodeInsidersHref('/tmp/my notes.md')).toBe('vscode-insiders://file/tmp/my%20notes.md')

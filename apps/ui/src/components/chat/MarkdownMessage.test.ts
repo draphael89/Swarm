@@ -53,4 +53,19 @@ describe('MarkdownMessage', () => {
     expect(html).toContain('README.md')
     expect(html).toContain('/Users/example/worktrees/swarm/README.md')
   })
+
+  it('renders local markdown file links as artifact cards using link text as title', () => {
+    const content = '[Terminal Support Plan](docs/plans/terminal-support.md)'
+
+    const html = renderToStaticMarkup(
+      createElement(MarkdownMessage, {
+        content,
+        onArtifactClick: () => {},
+      }),
+    )
+
+    expect(html).toContain('data-artifact-card="true"')
+    expect(html).toContain('Terminal Support Plan')
+    expect(html).toContain('docs/plans/terminal-support.md')
+  })
 })

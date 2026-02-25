@@ -4,7 +4,7 @@ import type { ConversationEntry } from './ws-types'
 const ARTIFACT_SHORTCODE_PATTERN = /\[artifact:([^\]\n]+)\]/gi
 const SWARM_FILE_PATTERN = /swarm-file:\/\/[^\s)>\]"']+/gi
 const VSCODE_FILE_PATTERN = /vscode(?:-insiders)?:\/\/file\/[^\s)>\]"']+/gi
-const MARKDOWN_LINK_HREF_PATTERN = /\]\(([^)]+)\)/g
+const MARKDOWN_LINK_PATTERN = /\[([^\]\n]+)\]\(([^)]+)\)/g
 
 /**
  * Collect all unique artifact references from a list of conversation entries.
@@ -47,11 +47,17 @@ export function collectArtifactsFromMessages(messages: ConversationEntry[]): Art
       }
     }
 
-    // Extract from markdown link hrefs [text](href)
-    for (const match of text.matchAll(MARKDOWN_LINK_HREF_PATTERN)) {
-      const href = match[1]?.trim()
+    // Extract from markdown links [text](href)
+    for (const match of text.matchAll(MARKDOWN_LINK_PATTERN)) {
+      const matchIndex = match.index ?? 0
+      if (matchIndex > 0 && text[matchIndex - 1] === '!') {
+        continue
+      }
+
+      const linkText = match[1]?.trim()
+      const href = parseMarkdownLinkHref(match[2] ?? '')
       if (!href) continue
-      const ref = parseArtifactReference(href)
+      const ref = parseArtifactReference(href, { title: linkText })
       if (ref && !seen.has(ref.path)) {
         seen.set(ref.path, ref)
       }
@@ -83,4 +89,22 @@ export function categorizeArtifact(fileName: string): ArtifactCategory {
   if (DATA_EXTENSIONS.has(ext)) return 'data'
   if (CODE_EXTENSIONS.has(ext)) return 'code'
   return 'other'
+}
+
+function parseMarkdownLinkHref(rawHref: string): string {
+  const trimmedHref = rawHref.trim()
+  if (!trimmedHref) {
+    return ''
+  }
+
+  if (trimmedHref.startsWith('<') && trimmedHref.endsWith('>')) {
+    return trimmedHref.slice(1, -1).trim()
+  }
+
+  const titleSeparatorIndex = trimmedHref.search(/\s+(?:"|')/)
+  if (titleSeparatorIndex > 0) {
+    return trimmedHref.slice(0, titleSeparatorIndex).trim()
+  }
+
+  return trimmedHref
 }

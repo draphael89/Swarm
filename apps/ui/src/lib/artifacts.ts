@@ -2,12 +2,21 @@ export interface ArtifactReference {
   path: string
   fileName: string
   href: string
+  title?: string
 }
 
 const ARTIFACT_SHORTCODE_PATTERN = /\[artifact:([^\]\n]+)\]/gi
 const SWARM_FILE_PREFIX = 'swarm-file://'
 const VSCODE_FILE_LINK_PATTERN = /^vscode(?:-insiders)?:\/\/file\/+/i
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-zA-Z]:[\\/]/
+const URL_SCHEME_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:/
+const ARTIFACT_LINK_TEXT_PATTERN = /^artifact:/i
+const LOCAL_FILE_PREFIX_PATTERN = /^(\/|\.\/|\.\.\/)/
+const LIKELY_DOMAIN_PATH_PATTERN = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+\//i
+
+interface ParseArtifactReferenceOptions {
+  title?: string | null
+}
 
 export function normalizeArtifactShortcodes(content: string): string {
   return content.replace(ARTIFACT_SHORTCODE_PATTERN, (match, rawPath) => {
@@ -20,7 +29,10 @@ export function normalizeArtifactShortcodes(content: string): string {
   })
 }
 
-export function parseArtifactReference(href: string | undefined): ArtifactReference | null {
+export function parseArtifactReference(
+  href: string | undefined,
+  options?: ParseArtifactReferenceOptions,
+): ArtifactReference | null {
   if (!href) {
     return null
   }
@@ -30,6 +42,7 @@ export function parseArtifactReference(href: string | undefined): ArtifactRefere
     return null
   }
 
+  const title = normalizeArtifactTitle(options?.title)
   const lowered = trimmed.toLowerCase()
 
   if (lowered.startsWith(SWARM_FILE_PREFIX)) {
@@ -39,7 +52,7 @@ export function parseArtifactReference(href: string | undefined): ArtifactRefere
       return null
     }
 
-    return createArtifactReference(decodedPath, trimmed)
+    return createArtifactReference(decodedPath, trimmed, title)
   }
 
   if (VSCODE_FILE_LINK_PATTERN.test(trimmed)) {
@@ -54,10 +67,20 @@ export function parseArtifactReference(href: string | undefined): ArtifactRefere
         ? decodedPath
         : `/${decodedPath}`
 
-    return createArtifactReference(normalizedPath, trimmed)
+    return createArtifactReference(normalizedPath, trimmed, title)
   }
 
-  return null
+  if (!isLocalFilePath(trimmed)) {
+    return null
+  }
+
+  const rawPath = trimmed.split(/[?#]/, 1)[0]
+  const decodedPath = safeDecodeURIComponent(rawPath)
+  if (!decodedPath) {
+    return null
+  }
+
+  return createArtifactReference(decodedPath, trimmed, title)
 }
 
 export function toSwarmFileHref(path: string): string {
@@ -83,13 +106,14 @@ export function toVscodeInsidersHref(path: string): string {
   return `vscode-insiders://file${encodeURI(prefixedPath)}`
 }
 
-function createArtifactReference(path: string, href: string): ArtifactReference {
+function createArtifactReference(path: string, href: string, title?: string): ArtifactReference {
   const trimmedPath = path.trim()
 
   return {
     path: trimmedPath,
     fileName: fileNameFromPath(trimmedPath),
     href,
+    ...(title ? { title } : {}),
   }
 }
 
@@ -109,4 +133,57 @@ function fileNameFromPath(path: string): string {
 
   const segments = withoutTrailingSlash.split(/[\\/]/)
   return segments[segments.length - 1] || withoutTrailingSlash
+}
+
+function normalizeArtifactTitle(title: string | null | undefined): string | undefined {
+  const trimmedTitle = title?.trim()
+  if (!trimmedTitle) {
+    return undefined
+  }
+
+  if (ARTIFACT_LINK_TEXT_PATTERN.test(trimmedTitle)) {
+    return undefined
+  }
+
+  return trimmedTitle
+}
+
+function isLocalFilePath(href: string): boolean {
+  const rawPath = href.split(/[?#]/, 1)[0]?.trim()
+  if (!rawPath) {
+    return false
+  }
+
+  if (rawPath.startsWith('//')) {
+    return false
+  }
+
+  if (URL_SCHEME_PATTERN.test(rawPath) && !WINDOWS_ABSOLUTE_PATH_PATTERN.test(rawPath)) {
+    return false
+  }
+
+  if (!hasFileExtension(rawPath)) {
+    return false
+  }
+
+  if (LOCAL_FILE_PREFIX_PATTERN.test(rawPath) || WINDOWS_ABSOLUTE_PATH_PATTERN.test(rawPath)) {
+    return true
+  }
+
+  if (LIKELY_DOMAIN_PATH_PATTERN.test(rawPath)) {
+    return false
+  }
+
+  return rawPath.includes('/') || rawPath.includes('\\')
+}
+
+function hasFileExtension(path: string): boolean {
+  const fileName = fileNameFromPath(path)
+  const lastDotIndex = fileName.lastIndexOf('.')
+  if (lastDotIndex < 0 || lastDotIndex === fileName.length - 1) {
+    return false
+  }
+
+  const extension = fileName.slice(lastDotIndex + 1)
+  return /^[a-z0-9][a-z0-9_-]*$/i.test(extension)
 }
