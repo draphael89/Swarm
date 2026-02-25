@@ -396,7 +396,9 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     const managerDescriptor = this.getBootLogManagerDescriptor();
     this.emitAgentsSnapshot();
-    await this.sendBootWakeupMessages(wakeupManagerIds);
+    // Wake-up messages disabled — they consume context and the manager
+    // can check agent state on its own when the user sends a message.
+    // await this.sendBootWakeupMessages(wakeupManagerIds);
 
     this.logDebug("boot:ready", {
       managerId: managerDescriptor?.agentId,
