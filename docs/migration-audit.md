@@ -16,12 +16,12 @@ Date: 2026-02-25
 - Lifecycle: one-time opportunistic migration (runs on boot, no marker file; guarded by file existence).
 - Risk of removal: existing local users who only have legacy Pi auth would stop auto-migrating and would need to re-authenticate or manually copy credentials.
 
-### 2) Legacy default manager ID path fallback in config
-- Location: `apps/backend/src/config.ts:29`, `apps/backend/src/config.ts:45`, `apps/backend/src/config.ts:92`
-- From -> To: if `SWARM_MANAGER_ID` is unset, code still resolves manager-scoped memory/schedules paths using legacy ID `"manager"`.
-- Added: `2f01b96` (2026-02-24)
-- Lifecycle: ongoing compatibility shim.
-- Risk of removal: installs without explicit manager ID may resolve different paths and fail to find prior data.
+### 2) Legacy default manager ID path fallback in config (removed)
+- Location: removed from `apps/backend/src/config.ts` in `remove-env-knobs`.
+- From -> To: config no longer accepts an env-driven default manager ID and no longer pre-resolves manager-scoped memory/schedules paths in base config.
+- Added: `2f01b96` (2026-02-24), removed in `remove-env-knobs` (2026-02-26)
+- Lifecycle: retired compatibility shim.
+- Risk of removal: installs relying on a forced single-manager ID now rely on discovered manager IDs.
 
 ### 3) Schedule storage migration (global -> manager-scoped)
 - Location: `apps/backend/src/scheduler/schedule-storage.ts:7-9`, `apps/backend/src/scheduler/schedule-storage.ts:28-33`, `apps/backend/src/scheduler/schedule-storage.ts:72-105`, `apps/backend/src/index.ts:23-26`

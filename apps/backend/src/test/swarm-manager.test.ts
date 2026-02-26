@@ -257,7 +257,7 @@ describe('SwarmManager', () => {
     })
   })
 
-  it('bootstraps manager memory file in SWARM_DATA_DIR/memory when missing', async () => {
+  it('bootstraps manager memory file in dataDir/memory when missing', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
 

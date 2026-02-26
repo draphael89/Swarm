@@ -129,23 +129,17 @@ In production preview mode, UI runs on `47289` and targets backend on `47287`.
 
 - `SWARM_HOST` (default `127.0.0.1`)
 - `SWARM_PORT` (default `47187`)
-- `SWARM_DATA_DIR` (default `~/.swarm-dev` in dev, `~/.swarm` in production)
-- `SWARM_AUTH_FILE`
-- `SWARM_ROOT_DIR`
-- `SWARM_DEFAULT_CWD`
-- `SWARM_CWD_ALLOWLIST_ROOTS`
-- `SWARM_MODEL_PROVIDER`, `SWARM_MODEL_ID`, `SWARM_THINKING_LEVEL`
 - `VITE_SWARM_WS_URL`
 
 ### Persistent Data
 
-Under `SWARM_DATA_DIR`, the backend persists:
+Swarm backend state is stored under `~/.swarm` (fixed path):
 
 - `swarm/agents.json`
 - `sessions/*.jsonl`
 - `uploads/*`
 - `auth/auth.json`
-- `MEMORY.md`
+- `memory/*.md`
 - `secrets.json`
 - `integrations/managers/<manager-id>/slack.json`
 - `integrations/managers/<manager-id>/telegram.json`

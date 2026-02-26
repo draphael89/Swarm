@@ -50,37 +50,28 @@ async function withEnv(overrides: Partial<Record<(typeof MANAGED_ENV_KEYS)[numbe
 }
 
 describe('createConfig', () => {
-  it('defaults dev data dir to ~/.swarm-dev', async () => {
+  it('uses fixed defaults for non-host/port config', async () => {
     await withEnv({}, () => {
       const config = createConfig()
 
-      expect(config.paths.dataDir).toBe(resolve(homedir(), '.swarm-dev'))
-      expect(config.paths.swarmDir).toBe(resolve(homedir(), '.swarm-dev', 'swarm'))
-      expect(config.paths.sessionsDir).toBe(resolve(homedir(), '.swarm-dev', 'sessions'))
-      expect(config.paths.uploadsDir).toBe(resolve(homedir(), '.swarm-dev', 'uploads'))
-      expect(config.paths.authDir).toBe(resolve(homedir(), '.swarm-dev', 'auth'))
-      expect(config.paths.authFile).toBe(resolve(homedir(), '.swarm-dev', 'auth', 'auth.json'))
-      expect(config.paths.managerAgentDir).toBe(resolve(homedir(), '.swarm-dev', 'agent', 'manager'))
-      expect(config.paths.repoArchetypesDir).toBe(resolve(config.paths.rootDir, '.swarm', 'archetypes'))
-      expect(config.paths.memoryDir).toBe(resolve(homedir(), '.swarm-dev', 'memory'))
-      expect(config.paths.memoryFile).toBeUndefined()
-      expect(config.paths.repoMemorySkillFile).toBe(resolve(config.paths.rootDir, '.swarm', 'skills', 'memory', 'SKILL.md'))
-      expect(config.paths.secretsFile).toBe(resolve(homedir(), '.swarm-dev', 'secrets.json'))
-      expect(config.paths.schedulesFile).toBeUndefined()
+      expect(config.host).toBe('127.0.0.1')
+      expect(config.port).toBe(47187)
+      expect(config.debug).toBe(true)
+      expect(config.allowNonManagerSubscriptions).toBe(true)
       expect(config.managerId).toBeUndefined()
-      expect(config.cwdAllowlistRoots).toContain(config.paths.rootDir)
-      expect(config.cwdAllowlistRoots).toContain(resolve(homedir(), 'worktrees'))
-    })
-  })
-
-  it('defaults production data dir to ~/.swarm', async () => {
-    await withEnv({ NODE_ENV: 'production' }, () => {
-      const config = createConfig()
+      expect(config.defaultModel).toEqual({
+        provider: 'openai-codex',
+        modelId: 'gpt-5.3-codex',
+        thinkingLevel: 'xhigh',
+      })
 
       expect(config.paths.dataDir).toBe(resolve(homedir(), '.swarm'))
-      expect(config.paths.managerAgentDir).toBe(resolve(homedir(), '.swarm', 'agent', 'manager'))
+      expect(config.paths.swarmDir).toBe(resolve(homedir(), '.swarm', 'swarm'))
+      expect(config.paths.sessionsDir).toBe(resolve(homedir(), '.swarm', 'sessions'))
       expect(config.paths.uploadsDir).toBe(resolve(homedir(), '.swarm', 'uploads'))
+      expect(config.paths.authDir).toBe(resolve(homedir(), '.swarm', 'auth'))
       expect(config.paths.authFile).toBe(resolve(homedir(), '.swarm', 'auth', 'auth.json'))
+      expect(config.paths.managerAgentDir).toBe(resolve(homedir(), '.swarm', 'agent', 'manager'))
       expect(config.paths.repoArchetypesDir).toBe(resolve(config.paths.rootDir, '.swarm', 'archetypes'))
       expect(config.paths.memoryDir).toBe(resolve(homedir(), '.swarm', 'memory'))
       expect(config.paths.memoryFile).toBeUndefined()
@@ -88,48 +79,53 @@ describe('createConfig', () => {
       expect(config.paths.agentsStoreFile).toBe(resolve(homedir(), '.swarm', 'swarm', 'agents.json'))
       expect(config.paths.secretsFile).toBe(resolve(homedir(), '.swarm', 'secrets.json'))
       expect(config.paths.schedulesFile).toBeUndefined()
+
+      expect(config.defaultCwd).toBe(config.paths.rootDir)
+      expect(config.cwdAllowlistRoots).toContain(config.paths.rootDir)
+      expect(config.cwdAllowlistRoots).toContain(resolve(homedir(), 'worktrees'))
     })
   })
 
-  it('respects SWARM_DATA_DIR override for relative paths', async () => {
-    await withEnv({ SWARM_ROOT_DIR: '/tmp/swarm-root', SWARM_DATA_DIR: 'custom-data' }, () => {
+  it('respects SWARM_HOST and SWARM_PORT', async () => {
+    await withEnv({ SWARM_HOST: '0.0.0.0', SWARM_PORT: '9999' }, () => {
       const config = createConfig()
-
-      expect(config.paths.dataDir).toBe('/tmp/swarm-root/custom-data')
+      expect(config.host).toBe('0.0.0.0')
+      expect(config.port).toBe(9999)
     })
   })
 
-  it('respects SWARM_DATA_DIR override for absolute paths', async () => {
-    await withEnv({ SWARM_DATA_DIR: '/tmp/swarm-absolute' }, () => {
-      const config = createConfig()
+  it('ignores removed SWARM_* env vars', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'development',
+        SWARM_ROOT_DIR: '/tmp/swarm-root',
+        SWARM_DATA_DIR: '/tmp/swarm-data',
+        SWARM_AUTH_FILE: '/tmp/swarm-auth/auth.json',
+        SWARM_DEBUG: 'false',
+        SWARM_ALLOW_NON_MANAGER_SUBSCRIPTIONS: 'false',
+        SWARM_MANAGER_ID: 'opus-manager',
+        SWARM_DEFAULT_CWD: '/tmp/swarm-cwd',
+        SWARM_MODEL_PROVIDER: 'anthropic',
+        SWARM_MODEL_ID: 'claude-opus-4-6',
+        SWARM_THINKING_LEVEL: 'low',
+        SWARM_CWD_ALLOWLIST_ROOTS: '/tmp/swarm-allowlist',
+      },
+      () => {
+        const config = createConfig()
 
-      expect(config.paths.dataDir).toBe('/tmp/swarm-absolute')
-    })
-  })
-
-  it('expands SWARM_DATA_DIR when using ~', async () => {
-    await withEnv({ SWARM_DATA_DIR: '~/.swarm-custom' }, () => {
-      const config = createConfig()
-
-      expect(config.paths.dataDir).toBe(resolve(homedir(), '.swarm-custom'))
-    })
-  })
-
-  it('extends cwd allowlist roots from SWARM_CWD_ALLOWLIST_ROOTS', async () => {
-    await withEnv({ SWARM_CWD_ALLOWLIST_ROOTS: './sandbox,/tmp/custom-root' }, () => {
-      const config = createConfig()
-
-      expect(config.cwdAllowlistRoots).toContain(resolve(config.paths.rootDir, 'sandbox'))
-      expect(config.cwdAllowlistRoots).toContain(resolve('/tmp/custom-root'))
-    })
-  })
-
-  it('respects SWARM_MANAGER_ID when provided', async () => {
-    await withEnv({ SWARM_MANAGER_ID: 'opus-manager' }, () => {
-      const config = createConfig()
-      expect(config.managerId).toBe('opus-manager')
-      expect(config.paths.memoryFile).toBe(resolve(homedir(), '.swarm-dev', 'memory', 'opus-manager.md'))
-      expect(config.paths.schedulesFile).toBe(resolve(homedir(), '.swarm-dev', 'schedules', 'opus-manager.json'))
-    })
+        expect(config.paths.dataDir).toBe(resolve(homedir(), '.swarm'))
+        expect(config.paths.authFile).toBe(resolve(homedir(), '.swarm', 'auth', 'auth.json'))
+        expect(config.debug).toBe(true)
+        expect(config.allowNonManagerSubscriptions).toBe(true)
+        expect(config.managerId).toBeUndefined()
+        expect(config.defaultCwd).toBe(config.paths.rootDir)
+        expect(config.defaultModel).toEqual({
+          provider: 'openai-codex',
+          modelId: 'gpt-5.3-codex',
+          thinkingLevel: 'xhigh',
+        })
+        expect(config.cwdAllowlistRoots).not.toContain('/tmp/swarm-allowlist')
+      }
+    )
   })
 })
