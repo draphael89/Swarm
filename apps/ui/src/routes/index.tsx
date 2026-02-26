@@ -247,6 +247,52 @@ function isAssistantResponseSignal(entry: ConversationEntry): boolean {
   return false
 }
 
+function toEpochMillis(timestamp: string): number {
+  const parsed = Date.parse(timestamp)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function mergeConversationAndActivityMessages(
+  messages: ConversationEntry[],
+  activityMessages: ConversationEntry[],
+): ConversationEntry[] {
+  if (activityMessages.length === 0) {
+    return messages
+  }
+
+  if (messages.length === 0) {
+    return activityMessages
+  }
+
+  const merged: ConversationEntry[] = []
+  let conversationIndex = 0
+  let activityIndex = 0
+
+  while (conversationIndex < messages.length && activityIndex < activityMessages.length) {
+    const conversationMessage = messages[conversationIndex]
+    const activityMessage = activityMessages[activityIndex]
+
+    if (toEpochMillis(conversationMessage.timestamp) <= toEpochMillis(activityMessage.timestamp)) {
+      merged.push(conversationMessage)
+      conversationIndex += 1
+      continue
+    }
+
+    merged.push(activityMessage)
+    activityIndex += 1
+  }
+
+  if (conversationIndex < messages.length) {
+    merged.push(...messages.slice(conversationIndex))
+  }
+
+  if (activityIndex < activityMessages.length) {
+    merged.push(...activityMessages.slice(activityIndex))
+  }
+
+  return merged
+}
+
 interface PendingResponseStart {
   agentId: string
   messageCount: number
@@ -264,6 +310,7 @@ export function IndexPage() {
     targetAgentId: null,
     subscribedAgentId: null,
     messages: [],
+    activityMessages: [],
     agents: [],
     statuses: {},
     lastError: null,
@@ -384,29 +431,29 @@ export function IndexPage() {
   const canStopAllAgents =
     isActiveManager && (activeAgentStatus === 'idle' || activeAgentStatus === 'streaming')
 
+  const allMessages = useMemo(
+    () => mergeConversationAndActivityMessages(state.messages, state.activityMessages),
+    [state.activityMessages, state.messages],
+  )
+
   const visibleMessages = useMemo(() => {
     if (channelView === 'all') {
-      return state.messages
+      return allMessages
     }
 
-    // In web view, filter out activity-feed entries and cap to 500
     const filtered = state.messages.filter((entry) => {
-      if (entry.type === 'agent_message' || entry.type === 'agent_tool_call') {
-        return false
-      }
-
       if (entry.type !== 'conversation_message') {
         return true
       }
 
       return (entry.sourceContext?.channel ?? 'web') === 'web'
     })
-    return filtered.slice(-500)
-  }, [channelView, state.messages])
+    return filtered
+  }, [allMessages, channelView, state.messages])
 
   const collectedArtifacts = useMemo(
-    () => collectArtifactsFromMessages(state.messages),
-    [state.messages],
+    () => collectArtifactsFromMessages(allMessages),
+    [allMessages],
   )
 
   const navigateToRoute = useCallback(

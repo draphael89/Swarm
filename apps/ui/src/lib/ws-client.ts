@@ -18,14 +18,18 @@ import {
 const INITIAL_CONNECT_DELAY_MS = 50
 const RECONNECT_MS = 1200
 const REQUEST_TIMEOUT_MS = 300_000
-// Keep client-side retention aligned with backend history retention.
+// Keep client-side activity retention aligned with backend history retention.
 const MAX_CLIENT_CONVERSATION_HISTORY = 2000
+
+type ConversationHistoryEntry = Extract<ConversationEntry, { type: 'conversation_message' | 'conversation_log' }>
+type AgentActivityEntry = Extract<ConversationEntry, { type: 'agent_message' | 'agent_tool_call' }>
 
 export interface ManagerWsState {
   connected: boolean
   targetAgentId: string | null
   subscribedAgentId: string | null
-  messages: ConversationEntry[]
+  messages: ConversationHistoryEntry[]
+  activityMessages: AgentActivityEntry[]
   agents: AgentDescriptor[]
   statuses: Record<string, { status: AgentStatus; pendingCount: number; contextUsage?: AgentContextUsage }>
   lastError: string | null
@@ -57,6 +61,7 @@ const initialState: ManagerWsState = {
   targetAgentId: null,
   subscribedAgentId: null,
   messages: [],
+  activityMessages: [],
   agents: [],
   statuses: {},
   lastError: null,
@@ -146,6 +151,7 @@ export class ManagerWsClient {
     this.updateState({
       targetAgentId: trimmed,
       messages: [],
+      activityMessages: [],
       lastError: null,
     })
 
@@ -495,15 +501,24 @@ export class ManagerWsClient {
         break
 
       case 'conversation_message':
-      case 'conversation_log':
+      case 'conversation_log': {
+        if (event.agentId !== this.state.targetAgentId) {
+          break
+        }
+
+        const messages = [...this.state.messages, event]
+        this.updateState({ messages })
+        break
+      }
+
       case 'agent_message':
       case 'agent_tool_call': {
         if (event.agentId !== this.state.targetAgentId) {
           break
         }
 
-        const messages = clampConversationHistory([...this.state.messages, event])
-        this.updateState({ messages })
+        const activityMessages = clampConversationHistory([...this.state.activityMessages, event])
+        this.updateState({ activityMessages })
         break
       }
 
@@ -512,7 +527,13 @@ export class ManagerWsClient {
           break
         }
 
-        this.updateState({ messages: clampConversationHistory(event.messages) })
+        {
+          const { messages, activityMessages } = splitConversationHistory(event.messages)
+          this.updateState({
+            messages,
+            activityMessages: clampConversationHistory(activityMessages),
+          })
+        }
         break
 
       case 'conversation_reset':
@@ -522,6 +543,7 @@ export class ManagerWsClient {
 
         this.updateState({
           messages: [],
+          activityMessages: [],
           lastError: null,
         })
         break
@@ -663,6 +685,7 @@ export class ManagerWsClient {
     if (targetChanged) {
       patch.targetAgentId = fallbackTarget
       patch.messages = []
+      patch.activityMessages = []
     }
 
     if (nextSubscribedAgentId !== this.state.subscribedAgentId) {
@@ -706,7 +729,7 @@ export class ManagerWsClient {
       source: 'system',
     }
 
-    const messages = clampConversationHistory([...this.state.messages, message])
+    const messages = [...this.state.messages, message]
     this.updateState({ messages })
   }
 
@@ -983,7 +1006,28 @@ function normalizeConversationAttachments(
   return normalized
 }
 
-function clampConversationHistory(messages: ConversationEntry[]): ConversationEntry[] {
+function splitConversationHistory(
+  messages: ConversationEntry[],
+): { messages: ConversationHistoryEntry[]; activityMessages: AgentActivityEntry[] } {
+  const conversationMessages: ConversationHistoryEntry[] = []
+  const activityMessages: AgentActivityEntry[] = []
+
+  for (const entry of messages) {
+    if (entry.type === 'agent_message' || entry.type === 'agent_tool_call') {
+      activityMessages.push(entry)
+      continue
+    }
+
+    conversationMessages.push(entry)
+  }
+
+  return {
+    messages: conversationMessages,
+    activityMessages,
+  }
+}
+
+function clampConversationHistory(messages: AgentActivityEntry[]): AgentActivityEntry[] {
   if (messages.length <= MAX_CLIENT_CONVERSATION_HISTORY) {
     return messages
   }
