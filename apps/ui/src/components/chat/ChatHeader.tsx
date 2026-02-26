@@ -1,8 +1,14 @@
-import { Loader2, Menu, Minimize2, PanelRight, Square, Trash2 } from 'lucide-react'
+import { Loader2, Menu, Minimize2, MoreHorizontal, PanelRight, Square, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { ContextWindowIndicator } from '@/components/chat/ContextWindowIndicator'
 import { cn } from '@/lib/utils'
 import type { AgentStatus } from '@/lib/ws-types'
@@ -161,7 +167,7 @@ export function ChatHeader({
       </div>
 
       <div className="flex shrink-0 items-center gap-1.5">
-        {/* ── Status group: channel toggle + context window ── */}
+        {/* ── Inline: channel toggle + context window ── */}
         <div className="hidden sm:inline-flex items-center gap-1">
           <div className="inline-flex h-7 items-center rounded-md border border-border/60 bg-muted/30 p-0.5">
             <ChannelToggleButton
@@ -184,93 +190,89 @@ export function ChatHeader({
           ) : null}
         </div>
 
-        {/* ── Action group: stop all ── */}
-        {showStopAll ? (
-          <>
-            <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-4 bg-border/60" />
+        {/* ── Inline: artifacts toggle ── */}
+        <Tooltip>
+          <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="sm"
-              className="h-7 shrink-0 gap-1.5 px-2 text-[11px] font-medium text-destructive/80 hover:bg-destructive/10 hover:text-destructive"
-              onClick={onStopAll}
-              disabled={stopAllDisabled || stopAllInProgress}
-              title={stopAllInProgress ? 'Stopping manager and workers…' : 'Stop manager and all workers'}
-              aria-label={stopAllInProgress ? 'Stopping manager and all workers' : 'Stop manager and all workers'}
+              size="icon"
+              className={cn(
+                'size-7 shrink-0 transition-colors',
+                isArtifactsPanelOpen
+                  ? 'bg-accent text-foreground'
+                  : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
+              )}
+              onClick={onToggleArtifactsPanel}
+              aria-label={isArtifactsPanelOpen ? 'Close artifacts panel' : 'Open artifacts panel'}
+              aria-pressed={isArtifactsPanelOpen}
             >
-              {stopAllInProgress ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3" />}
-              <span>Stop All</span>
+              <PanelRight className="size-3.5" />
             </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>
+            {isArtifactsPanelOpen ? 'Close artifacts' : 'Artifacts'}
+          </TooltipContent>
+        </Tooltip>
+
+        {/* ── Three-dots dropdown: secondary actions ── */}
+        {(showCompact || showNewChat || showStopAll) ? (
+          <>
+            <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-4 bg-border/60" />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                  aria-label="More actions"
+                >
+                  <MoreHorizontal className="size-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" sideOffset={6} className="min-w-44">
+                {showCompact ? (
+                  <DropdownMenuItem
+                    onClick={onCompact}
+                    disabled={compactInProgress}
+                    className="gap-2 text-xs"
+                  >
+                    {compactInProgress ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Minimize2 className="size-3.5" />
+                    )}
+                    {compactInProgress ? 'Compacting…' : 'Compact context'}
+                  </DropdownMenuItem>
+                ) : null}
+
+                {showNewChat ? (
+                  <DropdownMenuItem
+                    onClick={onNewChat}
+                    className="gap-2 text-xs"
+                  >
+                    <Trash2 className="size-3.5" />
+                    Clear conversation
+                  </DropdownMenuItem>
+                ) : null}
+
+                {showStopAll ? (
+                  <DropdownMenuItem
+                    onClick={onStopAll}
+                    disabled={stopAllDisabled || stopAllInProgress}
+                    className="gap-2 text-xs text-destructive focus:text-destructive"
+                  >
+                    {stopAllInProgress ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Square className="size-3.5" />
+                    )}
+                    {stopAllInProgress ? 'Stopping…' : 'Stop All'}
+                  </DropdownMenuItem>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         ) : null}
-
-        {/* ── Utility group: compact, clear, artifacts ── */}
-        {(showCompact || showNewChat) ? (
-          <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-4 bg-border/60" />
-        ) : null}
-
-        <div className="flex items-center gap-0.5">
-          {showCompact ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
-                  onClick={onCompact}
-                  disabled={compactInProgress}
-                  aria-label={compactInProgress ? 'Compacting manager context…' : 'Compact context'}
-                >
-                  {compactInProgress ? <Loader2 className="size-3.5 animate-spin" /> : <Minimize2 className="size-3.5" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={6}>
-                {compactInProgress ? 'Compacting…' : 'Compact context'}
-              </TooltipContent>
-            </Tooltip>
-          ) : null}
-
-          {showNewChat ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
-                  onClick={onNewChat}
-                  aria-label="Clear conversation"
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={6}>
-                Clear conversation
-              </TooltipContent>
-            </Tooltip>
-          ) : null}
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  'size-7 shrink-0 transition-colors',
-                  isArtifactsPanelOpen
-                    ? 'bg-accent text-foreground'
-                    : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
-                )}
-                onClick={onToggleArtifactsPanel}
-                aria-label={isArtifactsPanelOpen ? 'Close artifacts panel' : 'Open artifacts panel'}
-                aria-pressed={isArtifactsPanelOpen}
-              >
-                <PanelRight className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" sideOffset={6}>
-              {isArtifactsPanelOpen ? 'Close artifacts' : 'Artifacts'}
-            </TooltipContent>
-          </Tooltip>
-        </div>
       </div>
     </header>
   )
