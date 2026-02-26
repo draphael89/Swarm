@@ -29,16 +29,6 @@ const features = [
       'Route tasks to the right model. Codex App for backend features, Opus for UI polish, Codex for code generation. Your manager picks.',
   },
   {
-    title: 'Voice or Text',
-    description:
-      'Dump a list of tasks via text or voice. The manager breaks it down, parallelizes what it can, and sequences the rest.',
-  },
-  {
-    title: 'Works for Real Code',
-    description:
-      'Not just vibe coding. Git worktrees, proper branch isolation, automated merges — production-grade workflows out of the box.',
-  },
-  {
     title: 'Local-First & Open Source',
     description:
       'Self-hosted daemon on your machine. Apache 2.0 licensed. Your code and API keys never leave localhost.',
@@ -47,28 +37,19 @@ const features = [
 
 const flow = [
   {
-    num: '01',
     title: 'Create a manager',
     description:
-      'One persistent manager per project. Point it at a repo, pick a model, and give it context about how you like to work.',
+      "Spin one up for your project. Point it at a repo, pick the models you want it to use, and you're ready to go.",
   },
   {
-    num: '02',
-    title: 'Describe what needs to be done',
+    title: 'Onboard it',
     description:
-      'Tell the manager your tasks — a feature, a bug, a refactor. It plans the work and spins up workers in git worktree branches.',
+      'Tell it how you like to work — how tasks should be broken down, which models handle what, your coding standards and preferences. It remembers everything.',
   },
   {
-    num: '03',
-    title: 'Workers execute in parallel',
+    title: 'Let it manage',
     description:
-      'Each worker gets a scoped task and an isolated branch. Codex for code, Opus for UI. They implement, validate, and report back.',
-  },
-  {
-    num: '04',
-    title: 'Merger handles integration',
-    description:
-      'A dedicated merger agent reviews completed work and merges to main. One serialization point — no merge conflicts, no manual rebasing.',
+      'Hand off the work. Your manager dispatches coding agents, tracks progress, handles merges, and keeps you posted. You direct — it executes.',
   },
 ]
 
@@ -109,10 +90,10 @@ function LandingPage() {
           </h1>
 
           <p className="reveal-2 mt-8 max-w-xl text-[1.05rem] leading-[1.7] text-muted">
-            You&rsquo;re not an IC anymore. You spend your day doing project
-            management — dispatching tasks, checking status, rebasing branches.
-            Middleman gives you a persistent AI manager that handles the
-            coordination so you can focus on direction.
+            Go from being the agent manager to the CEO of your coding projects.
+            Stop dispatching tasks, babysitting terminals, and rebasing
+            branches. Give direction, set standards, and let a persistent AI
+            manager handle everything between your intent and shipped code.
           </p>
 
           <div className="reveal-3 mt-10 flex items-center gap-8">
@@ -136,10 +117,9 @@ function LandingPage() {
         <Rule />
 
         {/* ── At a glance ── */}
-        <section className="grid grid-cols-2 gap-y-7 py-12 sm:grid-cols-4">
+        <section className="grid grid-cols-3 gap-y-7 py-12">
           {(
             [
-              ['Role', 'Middle management'],
               ['Runtimes', 'Claude, Codex, Codex App'],
               ['Channels', 'Web, Slack, Telegram'],
               ['License', 'Apache 2.0'],
@@ -169,10 +149,10 @@ function LandingPage() {
               different agent sessions.
             </p>
             <p className="text-[1.05rem] leading-[1.7] text-ink">
-              Middleman introduces a layer of middle management. One persistent
-              manager per project. You tell it what needs to get done — it
-              dispatches workers, tracks progress, and handles the merge queue.
-              You stay informed, not involved.
+              Middleman gives every project a persistent manager that actually
+              sticks around. You tell it what needs to get done — it dispatches
+              workers, tracks progress, and handles the merge queue. You stay
+              informed, not involved.
             </p>
           </div>
         </section>
@@ -183,13 +163,10 @@ function LandingPage() {
         <section className="py-20 sm:py-24">
           <SectionLabel>How it works</SectionLabel>
 
-          <div className="mt-12 grid gap-10 sm:grid-cols-2 sm:gap-x-20 sm:gap-y-14">
+          <div className="mt-12 grid gap-10 sm:grid-cols-3 sm:gap-x-16">
             {flow.map((step) => (
-              <div key={step.num}>
-                <span className="font-display block text-[2.8rem] font-normal italic leading-none text-rule">
-                  {step.num}
-                </span>
-                <h3 className="mt-5 text-[15px] font-medium">{step.title}</h3>
+              <div key={step.title}>
+                <h3 className="text-[15px] font-medium">{step.title}</h3>
                 <p className="mt-2 text-[13px] leading-[1.7] text-muted">
                   {step.description}
                 </p>
@@ -205,23 +182,18 @@ function LandingPage() {
           <SectionLabel>Capabilities</SectionLabel>
 
           <div className="mt-12 grid gap-x-20 sm:grid-cols-2">
-            {features.map((feature, i) => (
+            {features.map((feature) => (
               <div
                 key={feature.title}
                 className="border-t border-rule py-6"
               >
-                <div className="flex gap-5">
-                  <span className="font-display mt-px text-[13px] tabular-nums text-muted/60">
-                    {String(i + 1).padStart(2, '0')}
-                  </span>
-                  <div>
-                    <h3 className="text-[14px] font-medium leading-snug">
-                      {feature.title}
-                    </h3>
-                    <p className="mt-1.5 text-[13px] leading-[1.7] text-muted">
-                      {feature.description}
-                    </p>
-                  </div>
+                <div>
+                  <h3 className="text-[14px] font-medium leading-snug">
+                    {feature.title}
+                  </h3>
+                  <p className="mt-1.5 text-[13px] leading-[1.7] text-muted">
+                    {feature.description}
+                  </p>
                 </div>
               </div>
             ))}
