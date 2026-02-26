@@ -5,13 +5,20 @@ import { describe, expect, it } from 'vitest'
 import { SessionManager } from '@mariozechner/pi-coding-agent'
 import { getScheduleFilePath } from '../scheduler/schedule-storage.js'
 import { SwarmManager } from '../swarm/swarm-manager.js'
-import type { AgentDescriptor, RequestedDeliveryMode, SendMessageReceipt, SwarmConfig } from '../swarm/types.js'
+import type {
+  AgentContextUsage,
+  AgentDescriptor,
+  RequestedDeliveryMode,
+  SendMessageReceipt,
+  SwarmConfig,
+} from '../swarm/types.js'
 import type { RuntimeUserMessage, SwarmAgentRuntime } from '../swarm/runtime-types.js'
 
 class FakeRuntime {
   readonly descriptor: AgentDescriptor
   private readonly sessionManager: SessionManager
   terminateCalls: Array<{ abort?: boolean } | undefined> = []
+  stopInFlightCalls: Array<{ abort?: boolean } | undefined> = []
   sendCalls: Array<{ message: string | RuntimeUserMessage; delivery: RequestedDeliveryMode }> = []
   compactCalls: Array<string | undefined> = []
   nextDeliveryId = 0
@@ -28,6 +35,10 @@ class FakeRuntime {
 
   getPendingCount(): number {
     return this.busy ? 1 : 0
+  }
+
+  getContextUsage(): AgentContextUsage | undefined {
+    return undefined
   }
 
   async sendMessage(message: string | RuntimeUserMessage, delivery: RequestedDeliveryMode = 'auto'): Promise<SendMessageReceipt> {
@@ -47,6 +58,12 @@ class FakeRuntime {
 
   async terminate(options?: { abort?: boolean }): Promise<void> {
     this.terminateCalls.push(options)
+  }
+
+  async stopInFlight(options?: { abort?: boolean }): Promise<void> {
+    this.stopInFlightCalls.push(options)
+    this.busy = false
+    this.descriptor.status = 'idle'
   }
 
   async compact(customInstructions?: string): Promise<unknown> {
@@ -1245,6 +1262,50 @@ describe('SwarmManager', () => {
     expect(runtime!.terminateCalls).toEqual([{ abort: true }])
     const descriptor = manager.listAgents().find((agent) => agent.agentId === worker.agentId)
     expect(descriptor?.status).toBe('terminated')
+  })
+
+  it('stops all agents by cancelling in-flight work without terminating runtimes', async () => {
+    const config = await makeTempConfig()
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', { agentId: 'Stop-All Worker' })
+    const managerRuntime = manager.runtimeByAgentId.get('manager')
+    const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
+    expect(managerRuntime).toBeDefined()
+    expect(workerRuntime).toBeDefined()
+
+    const state = manager as unknown as { descriptors: Map<string, AgentDescriptor> }
+    const managerDescriptor = state.descriptors.get('manager')
+    const workerDescriptor = state.descriptors.get(worker.agentId)
+    expect(managerDescriptor).toBeDefined()
+    expect(workerDescriptor).toBeDefined()
+
+    managerDescriptor!.status = 'streaming'
+    workerDescriptor!.status = 'streaming'
+    managerRuntime!.busy = true
+    workerRuntime!.busy = true
+
+    const stopped = await manager.stopAllAgents('manager', 'manager')
+
+    expect(stopped).toEqual({
+      managerId: 'manager',
+      stoppedWorkerIds: [worker.agentId],
+      managerStopped: true,
+      terminatedWorkerIds: [worker.agentId],
+      managerTerminated: true,
+    })
+    expect(managerRuntime!.stopInFlightCalls).toEqual([{ abort: true }])
+    expect(workerRuntime!.stopInFlightCalls).toEqual([{ abort: true }])
+    expect(managerRuntime!.terminateCalls).toEqual([])
+    expect(workerRuntime!.terminateCalls).toEqual([])
+
+    const managerAfter = manager.listAgents().find((agent) => agent.agentId === 'manager')
+    const workerAfter = manager.listAgents().find((agent) => agent.agentId === worker.agentId)
+    expect(managerAfter?.status).toBe('idle')
+    expect(workerAfter?.status).toBe('idle')
+    expect(manager.runtimeByAgentId.has('manager')).toBe(true)
+    expect(manager.runtimeByAgentId.has(worker.agentId)).toBe(true)
   })
 
   it('restores non-terminated workers on restart', async () => {

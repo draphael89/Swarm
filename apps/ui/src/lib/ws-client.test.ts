@@ -635,14 +635,14 @@ describe('ManagerWsClient', () => {
       type: 'stop_all_agents_result',
       requestId: stopPayload.requestId,
       managerId: 'manager',
-      terminatedWorkerIds: ['worker-1', 'worker-2'],
-      managerTerminated: true,
+      stoppedWorkerIds: ['worker-1', 'worker-2'],
+      managerStopped: true,
     })
 
     await expect(stopPromise).resolves.toEqual({
       managerId: 'manager',
-      terminatedWorkerIds: ['worker-1', 'worker-2'],
-      managerTerminated: true,
+      stoppedWorkerIds: ['worker-1', 'worker-2'],
+      managerStopped: true,
     })
 
     client.destroy()
@@ -954,6 +954,7 @@ describe('ManagerWsClient', () => {
     emitServerEvent(socket, {
       type: 'manager_deleted',
       managerId: 'manager-2',
+      terminatedWorkerIds: [],
     })
 
     expect(client.getState().targetAgentId).toBe('manager')
@@ -1007,6 +1008,7 @@ describe('ManagerWsClient', () => {
     emitServerEvent(socket, {
       type: 'manager_deleted',
       managerId: 'manager',
+      terminatedWorkerIds: [],
     })
 
     expect(client.getState().targetAgentId).toBeNull()

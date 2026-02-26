@@ -235,6 +235,34 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     await this.emitStatus();
   }
 
+  async stopInFlight(options?: { abort?: boolean }): Promise<void> {
+    if (this.status === "terminated") {
+      return;
+    }
+
+    const shouldAbort = options?.abort ?? true;
+    if (shouldAbort && this.threadId && this.activeTurnId) {
+      try {
+        await this.rpc.request("turn/interrupt", {
+          threadId: this.threadId,
+          turnId: this.activeTurnId
+        });
+      } catch (error) {
+        this.logRuntimeError("interrupt", error, {
+          threadId: this.threadId,
+          turnId: this.activeTurnId
+        });
+      }
+    }
+
+    this.pendingDeliveries = [];
+    this.queuedSteers = [];
+    this.startRequestPending = false;
+    this.activeTurnId = undefined;
+
+    await this.updateStatus("idle");
+  }
+
   async compact(): Promise<unknown> {
     this.ensureNotTerminated();
     throw new Error(`Agent ${this.descriptor.agentId} does not support manual compaction`);

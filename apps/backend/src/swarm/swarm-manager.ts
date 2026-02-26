@@ -515,7 +515,13 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   async stopAllAgents(
     callerAgentId: string,
     targetManagerId: string
-  ): Promise<{ managerId: string; terminatedWorkerIds: string[]; managerTerminated: boolean }> {
+  ): Promise<{
+    managerId: string;
+    stoppedWorkerIds: string[];
+    managerStopped: boolean;
+    terminatedWorkerIds: string[];
+    managerTerminated: boolean;
+  }> {
     const manager = this.assertManager(callerAgentId, "stop all agents");
 
     const target = this.descriptors.get(targetManagerId);
@@ -527,7 +533,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error(`Only selected manager can stop all agents for ${targetManagerId}`);
     }
 
-    const terminatedWorkers: AgentDescriptor[] = [];
+    const stoppedWorkerIds: string[] = [];
 
     for (const descriptor of Array.from(this.descriptors.values())) {
       if (descriptor.role !== "worker") {
@@ -542,39 +548,51 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         continue;
       }
 
-      await this.terminateDescriptor(descriptor, { abort: true, emitStatus: false });
-      terminatedWorkers.push(descriptor);
+      const runtime = this.runtimes.get(descriptor.agentId);
+      if (runtime) {
+        await runtime.stopInFlight({ abort: true });
+      } else {
+        descriptor.status = "idle";
+        descriptor.updatedAt = this.now();
+        this.descriptors.set(descriptor.agentId, descriptor);
+        this.emitStatus(descriptor.agentId, descriptor.status, 0, descriptor.contextUsage);
+      }
+
+      stoppedWorkerIds.push(descriptor.agentId);
     }
 
-    let managerTerminated = false;
+    let managerStopped = false;
     if (target.status !== "terminated" && target.status !== "stopped_on_restart") {
-      await this.terminateDescriptor(target, { abort: true, emitStatus: false });
-      managerTerminated = true;
+      const managerRuntime = this.runtimes.get(target.agentId);
+      if (managerRuntime) {
+        await managerRuntime.stopInFlight({ abort: true });
+      } else {
+        target.status = "idle";
+        target.updatedAt = this.now();
+        this.descriptors.set(target.agentId, target);
+        this.emitStatus(target.agentId, target.status, 0, target.contextUsage);
+      }
+
+      managerStopped = true;
     }
 
     await this.saveStore();
-
-    for (const worker of terminatedWorkers) {
-      this.emitStatus(worker.agentId, worker.status, 0);
-    }
-
-    if (managerTerminated) {
-      this.emitStatus(target.agentId, target.status, 0);
-    }
-
     this.emitAgentsSnapshot();
 
     this.logDebug("manager:stop_all", {
       callerAgentId,
       targetManagerId,
-      terminatedWorkerIds: terminatedWorkers.map((worker) => worker.agentId),
-      managerTerminated
+      stoppedWorkerIds,
+      managerStopped
     });
 
     return {
       managerId: targetManagerId,
-      terminatedWorkerIds: terminatedWorkers.map((worker) => worker.agentId),
-      managerTerminated
+      stoppedWorkerIds,
+      managerStopped,
+      // Backward compatibility for older clients still expecting terminated-oriented fields.
+      terminatedWorkerIds: stoppedWorkerIds,
+      managerTerminated: managerStopped
     };
   }
 

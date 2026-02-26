@@ -83,7 +83,7 @@ export class ManagerWsClient {
   private readonly pendingDeleteManagerRequests = new Map<string, PendingRequest<{ managerId: string }>>()
   private readonly pendingStopAllAgentsRequests = new Map<
     string,
-    PendingRequest<{ managerId: string; terminatedWorkerIds: string[]; managerTerminated: boolean }>
+    PendingRequest<{ managerId: string; stoppedWorkerIds: string[]; managerStopped: boolean }>
   >()
   private readonly pendingListDirectoriesRequests = new Map<string, PendingRequest<DirectoriesListedResult>>()
   private readonly pendingValidateDirectoryRequests = new Map<string, PendingRequest<DirectoryValidationResult>>()
@@ -231,7 +231,7 @@ export class ManagerWsClient {
 
   async stopAllAgents(
     managerId: string,
-  ): Promise<{ managerId: string; terminatedWorkerIds: string[]; managerTerminated: boolean }> {
+  ): Promise<{ managerId: string; stoppedWorkerIds: string[]; managerStopped: boolean }> {
     const trimmed = managerId.trim()
     if (!trimmed) {
       throw new Error('Manager id is required.')
@@ -243,7 +243,7 @@ export class ManagerWsClient {
 
     const requestId = this.nextRequestId('stop_all_agents')
 
-    return new Promise<{ managerId: string; terminatedWorkerIds: string[]; managerTerminated: boolean }>(
+    return new Promise<{ managerId: string; stoppedWorkerIds: string[]; managerStopped: boolean }>(
       (resolve, reject) => {
         this.trackPendingRequest(this.pendingStopAllAgentsRequests, requestId, resolve, reject)
 
@@ -564,13 +564,16 @@ export class ManagerWsClient {
       }
 
       case 'stop_all_agents_result': {
+        const stoppedWorkerIds = event.stoppedWorkerIds ?? event.terminatedWorkerIds ?? []
+        const managerStopped = event.managerStopped ?? event.managerTerminated ?? false
+
         this.resolvePendingRequest(
           this.pendingStopAllAgentsRequests,
           event.requestId,
           {
             managerId: event.managerId,
-            terminatedWorkerIds: event.terminatedWorkerIds,
-            managerTerminated: event.managerTerminated,
+            stoppedWorkerIds,
+            managerStopped,
           },
         )
         break

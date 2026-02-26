@@ -59,8 +59,10 @@ export type ServerEvent =
   | {
       type: "stop_all_agents_result";
       managerId: string;
-      terminatedWorkerIds: string[];
-      managerTerminated: boolean;
+      stoppedWorkerIds: string[];
+      managerStopped: boolean;
+      terminatedWorkerIds?: string[];
+      managerTerminated?: boolean;
       requestId?: string;
     }
   | {
