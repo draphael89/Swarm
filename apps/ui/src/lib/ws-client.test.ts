@@ -396,6 +396,55 @@ describe('ManagerWsClient', () => {
     client.destroy()
   })
 
+  it('preserves conversation messages when history includes many tool-call events', () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787', 'voice')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('open')
+
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'voice',
+    })
+
+    const baseTime = Date.now()
+    const conversationMessages = Array.from({ length: 120 }, (_, index) => ({
+      type: 'conversation_message' as const,
+      agentId: 'voice',
+      role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+      text: `message-${index}`,
+      timestamp: new Date(baseTime + index).toISOString(),
+      source: index % 2 === 0 ? ('user_input' as const) : ('speak_to_user' as const),
+    }))
+
+    const toolMessages = Array.from({ length: 480 }, (_, index) => ({
+      type: 'agent_tool_call' as const,
+      agentId: 'voice',
+      actorAgentId: 'voice-worker',
+      timestamp: new Date(baseTime + 120 + index).toISOString(),
+      kind: 'tool_execution_update' as const,
+      toolName: 'bash',
+      toolCallId: `call-${index}`,
+      text: '{"ok":true}',
+    }))
+
+    emitServerEvent(socket, {
+      type: 'conversation_history',
+      agentId: 'voice',
+      messages: [...conversationMessages, ...toolMessages],
+    })
+
+    const messages = client.getState().messages
+    expect(messages).toHaveLength(600)
+    expect(messages.filter((message) => message.type === 'conversation_message')).toHaveLength(120)
+
+    client.destroy()
+  })
+
   it('stores conversation_log events for the selected agent and ignores other threads', () => {
     const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
 

@@ -18,6 +18,8 @@ import {
 const INITIAL_CONNECT_DELAY_MS = 50
 const RECONNECT_MS = 1200
 const REQUEST_TIMEOUT_MS = 300_000
+// Keep client-side retention aligned with backend history retention.
+const MAX_CLIENT_CONVERSATION_HISTORY = 2000
 
 export interface ManagerWsState {
   connected: boolean
@@ -500,7 +502,7 @@ export class ManagerWsClient {
           break
         }
 
-        const messages = [...this.state.messages, event].slice(-500)
+        const messages = clampConversationHistory([...this.state.messages, event])
         this.updateState({ messages })
         break
       }
@@ -510,7 +512,7 @@ export class ManagerWsClient {
           break
         }
 
-        this.updateState({ messages: event.messages.slice(-500) })
+        this.updateState({ messages: clampConversationHistory(event.messages) })
         break
 
       case 'conversation_reset':
@@ -701,7 +703,7 @@ export class ManagerWsClient {
       source: 'system',
     }
 
-    const messages = [...this.state.messages, message].slice(-500)
+    const messages = clampConversationHistory([...this.state.messages, message])
     this.updateState({ messages })
   }
 
@@ -976,6 +978,14 @@ function normalizeConversationAttachments(
   }
 
   return normalized
+}
+
+function clampConversationHistory(messages: ConversationEntry[]): ConversationEntry[] {
+  if (messages.length <= MAX_CLIENT_CONVERSATION_HISTORY) {
+    return messages
+  }
+
+  return messages.slice(-MAX_CLIENT_CONVERSATION_HISTORY)
 }
 
 function normalizeAgentId(agentId: string | null | undefined): string | null {
