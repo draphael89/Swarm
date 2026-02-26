@@ -13,7 +13,6 @@ import { AgentSidebar } from '@/components/chat/AgentSidebar'
 import { ArtifactPanel } from '@/components/chat/ArtifactPanel'
 import { ArtifactsSidebar } from '@/components/chat/ArtifactsSidebar'
 import { ChatHeader, type ChannelView } from '@/components/chat/ChatHeader'
-import { LandingPage } from '@/components/chat/LandingPage'
 import { MessageInput, type MessageInputHandle } from '@/components/chat/MessageInput'
 import { MessageList } from '@/components/chat/MessageList'
 import { SettingsPanel } from '@/components/chat/SettingsDialog'
@@ -874,8 +873,6 @@ export function IndexPage() {
                   })
                 }
               />
-            ) : state.agents.length === 0 ? (
-              <LandingPage onCreateManager={handleOpenCreateManagerDialog} />
             ) : (
               <>
                 <ChatHeader

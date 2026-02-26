@@ -821,12 +821,9 @@ function EmptyState({
   if (!activeAgentId) {
     return (
       <div className="flex h-full flex-col items-center justify-center p-6 text-center">
-        <div className="mb-4 flex size-12 items-center justify-center rounded-xl border border-primary/20 bg-primary/10">
-          <MessageSquare className="size-5 text-primary" strokeWidth={1.5} />
-        </div>
-        <h2 className="mb-2 text-lg font-semibold text-foreground">No manager selected</h2>
-        <p className="max-w-xs text-sm leading-relaxed text-muted-foreground">
-          Create a manager from the sidebar to start delegating work.
+        <h2 className="mb-2 text-base font-medium text-foreground">No manager selected</h2>
+        <p className="text-sm text-muted-foreground">
+          Create a manager from the sidebar to start a thread.
         </p>
       </div>
     )
@@ -834,28 +831,23 @@ function EmptyState({
 
   return (
     <div className="flex h-full flex-col items-center justify-center p-6 text-center">
-      <h2 className="mb-2 text-lg font-semibold text-foreground">What needs to get done?</h2>
-      <p className="mb-5 max-w-sm text-sm text-muted-foreground">
-        Describe tasks, drop a list of work items, or try a suggestion below.
-      </p>
+      <h2 className="mb-4 text-base font-medium text-foreground">What can I do for you?</h2>
       {onSuggestionClick ? (
-        <div className="flex max-w-[380px] flex-wrap justify-center gap-2">
+        <div className="flex max-w-[320px] flex-wrap justify-center gap-2">
           {suggestions.map((suggestion) => (
             <Button
               key={suggestion}
               onClick={() => onSuggestionClick(suggestion)}
               type="button"
               variant="outline"
-              className="h-auto rounded-full px-3.5 py-1.5 text-sm font-normal text-foreground transition-colors"
+              className="h-auto rounded-full bg-muted px-3 py-1.5 text-sm font-normal text-foreground transition-colors hover:bg-muted/80"
             >
               {suggestion}
             </Button>
           ))}
         </div>
       ) : null}
-      <p className="mt-6 text-[11px] text-muted-foreground/70">
-        Your manager dispatches workers, parallelizes tasks, and remembers your preferences.
-      </p>
+      <p className="mt-6 text-xs text-muted-foreground">AI can make mistakes. Always verify important actions.</p>
     </div>
   )
 }
