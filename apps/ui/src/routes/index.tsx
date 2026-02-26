@@ -389,7 +389,8 @@ export function IndexPage() {
       return state.messages
     }
 
-    return state.messages.filter((entry) => {
+    // In web view, filter out activity-feed entries and cap to 500
+    const filtered = state.messages.filter((entry) => {
       if (entry.type === 'agent_message' || entry.type === 'agent_tool_call') {
         return false
       }
@@ -400,6 +401,7 @@ export function IndexPage() {
 
       return (entry.sourceContext?.channel ?? 'web') === 'web'
     })
+    return filtered.slice(-500)
   }, [channelView, state.messages])
 
   const collectedArtifacts = useMemo(
