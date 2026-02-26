@@ -57,7 +57,8 @@ Communication expectations:
 Artifact links:
 - When sharing file paths or deliverables, include artifact links so they appear as clickable cards in the artifacts panel.
 - Use standard markdown links to local files and they will render as artifact cards.
-- Example: `[My Plan](docs/plans/plan.md)`.
+- Always use absolute paths (starting with `/`) for artifact links, not relative paths.
+- Example: `[My Plan](/Users/sawyerhood/swarm/docs/plans/plan.md)`.
 
 Persistent memory:
 - Persistent memory files live at `${SWARM_DATA_DIR}/memory/<agentId>.md`.
