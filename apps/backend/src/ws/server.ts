@@ -1522,6 +1522,9 @@ export class SwarmWebSocketServer {
         this.send(socket, {
           type: "stop_all_agents_result",
           managerId: stopped.managerId,
+          stoppedWorkerIds: stopped.stoppedWorkerIds,
+          managerStopped: stopped.managerStopped,
+          // Backward compatibility for older clients still expecting terminated-oriented fields.
           terminatedWorkerIds: stopped.terminatedWorkerIds,
           managerTerminated: stopped.managerTerminated,
           requestId: command.requestId

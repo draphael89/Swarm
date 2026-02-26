@@ -126,6 +126,24 @@ export class AgentRuntime implements SwarmAgentRuntime {
     await this.emitStatus();
   }
 
+  async stopInFlight(options?: { abort?: boolean }): Promise<void> {
+    if (this.status === "terminated") {
+      return;
+    }
+
+    const shouldAbort = options?.abort ?? true;
+    if (shouldAbort) {
+      await this.session.abort();
+    }
+
+    this.pendingDeliveries = [];
+    this.promptDispatchPending = false;
+    this.ignoreNextAgentStart = false;
+    this.inFlightPrompts.clear();
+
+    await this.updateStatus("idle");
+  }
+
   async compact(customInstructions?: string): Promise<unknown> {
     this.ensureNotTerminated();
     try {

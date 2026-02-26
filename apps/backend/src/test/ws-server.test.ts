@@ -8,7 +8,13 @@ import WebSocket from 'ws'
 import { describe, expect, it, vi } from 'vitest'
 import { SessionManager } from '@mariozechner/pi-coding-agent'
 import { SwarmManager } from '../swarm/swarm-manager.js'
-import type { AgentDescriptor, RequestedDeliveryMode, SendMessageReceipt, SwarmConfig } from '../swarm/types.js'
+import type {
+  AgentContextUsage,
+  AgentDescriptor,
+  RequestedDeliveryMode,
+  SendMessageReceipt,
+  SwarmConfig,
+} from '../swarm/types.js'
 import type { SwarmAgentRuntime } from '../swarm/runtime-types.js'
 import { getScheduleFilePath } from '../scheduler/schedule-storage.js'
 import { SwarmWebSocketServer } from '../ws/server.js'
@@ -18,6 +24,8 @@ class FakeRuntime {
   readonly descriptor: AgentDescriptor
   private readonly sessionManager: SessionManager
   compactCalls: Array<string | undefined> = []
+  terminateCalls = 0
+  stopInFlightCalls: Array<{ abort?: boolean } | undefined> = []
 
   constructor(descriptor: AgentDescriptor) {
     this.descriptor = descriptor
@@ -30,6 +38,10 @@ class FakeRuntime {
 
   getPendingCount(): number {
     return 0
+  }
+
+  getContextUsage(): AgentContextUsage | undefined {
+    return undefined
   }
 
   async sendMessage(_message: string, _delivery: RequestedDeliveryMode = 'auto'): Promise<SendMessageReceipt> {
@@ -45,7 +57,14 @@ class FakeRuntime {
     }
   }
 
-  async terminate(): Promise<void> {}
+  async terminate(): Promise<void> {
+    this.terminateCalls += 1
+  }
+
+  async stopInFlight(options?: { abort?: boolean }): Promise<void> {
+    this.stopInFlightCalls.push(options)
+    this.descriptor.status = 'idle'
+  }
 
   async compact(customInstructions?: string): Promise<unknown> {
     this.compactCalls.push(customInstructions)
@@ -1300,6 +1319,72 @@ describe('SwarmWebSocketServer', () => {
 
     const descriptor = manager.listAgents().find((agent) => agent.agentId === worker.agentId)
     expect(descriptor?.status).toBe('terminated')
+
+    client.close()
+    await once(client, 'close')
+    await server.stop()
+  })
+
+  it('stops all agents over websocket by cancelling work and keeping agents alive', async () => {
+    const port = await getAvailablePort()
+    const config = await makeTempConfig(port, true)
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const worker = await manager.spawnAgent('manager', { agentId: 'Stop-All Worker' })
+    const managerRuntime = manager.runtimeByAgentId.get('manager')
+    const workerRuntime = manager.runtimeByAgentId.get(worker.agentId)
+    expect(managerRuntime).toBeDefined()
+    expect(workerRuntime).toBeDefined()
+
+    const server = new SwarmWebSocketServer({
+      swarmManager: manager,
+      host: config.host,
+      port: config.port,
+      allowNonManagerSubscriptions: config.allowNonManagerSubscriptions,
+    })
+
+    await server.start()
+
+    const client = new WebSocket(`ws://${config.host}:${config.port}`)
+    const events: ServerEvent[] = []
+
+    client.on('message', (raw) => {
+      events.push(JSON.parse(raw.toString()) as ServerEvent)
+    })
+
+    await once(client, 'open')
+    client.send(JSON.stringify({ type: 'subscribe', agentId: 'manager' }))
+    await waitForEvent(events, (event) => event.type === 'ready' && event.subscribedAgentId === 'manager')
+
+    client.send(JSON.stringify({ type: 'stop_all_agents', managerId: 'manager' }))
+
+    const resultEvent = await waitForEvent(
+      events,
+      (event) => event.type === 'stop_all_agents_result' && event.managerId === 'manager',
+    )
+    expect(resultEvent.type).toBe('stop_all_agents_result')
+    if (resultEvent.type === 'stop_all_agents_result') {
+      expect(resultEvent.stoppedWorkerIds).toEqual([worker.agentId])
+      expect(resultEvent.managerStopped).toBe(true)
+      expect(resultEvent.terminatedWorkerIds).toEqual([worker.agentId])
+      expect(resultEvent.managerTerminated).toBe(true)
+    }
+
+    const snapshotEvent = await waitForEvent(
+      events,
+      (event) =>
+        event.type === 'agents_snapshot' &&
+        event.agents.some((agent) => agent.agentId === 'manager' && agent.status === 'idle') &&
+        event.agents.some((agent) => agent.agentId === worker.agentId && agent.status === 'idle'),
+    )
+    expect(snapshotEvent.type).toBe('agents_snapshot')
+
+    expect(managerRuntime?.stopInFlightCalls).toEqual([{ abort: true }])
+    expect(workerRuntime?.stopInFlightCalls).toEqual([{ abort: true }])
+    expect(managerRuntime?.terminateCalls).toBe(0)
+    expect(workerRuntime?.terminateCalls).toBe(0)
 
     client.close()
     await once(client, 'close')

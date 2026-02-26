@@ -96,6 +96,8 @@ export interface SwarmAgentRuntime {
 
   compact(customInstructions?: string): Promise<unknown>;
 
+  stopInFlight(options?: { abort?: boolean }): Promise<void>;
+
   terminate(options?: { abort?: boolean }): Promise<void>;
 
   getCustomEntries(customType: string): unknown[];

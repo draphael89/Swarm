@@ -164,14 +164,17 @@ export interface ManagerCreatedEvent {
 export interface ManagerDeletedEvent {
   type: 'manager_deleted'
   managerId: string
+  terminatedWorkerIds: string[]
   requestId?: string
 }
 
 export interface StopAllAgentsResultEvent {
   type: 'stop_all_agents_result'
   managerId: string
-  terminatedWorkerIds: string[]
-  managerTerminated: boolean
+  stoppedWorkerIds: string[]
+  managerStopped: boolean
+  terminatedWorkerIds?: string[]
+  managerTerminated?: boolean
   requestId?: string
 }
 
