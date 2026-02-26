@@ -1,5 +1,5 @@
 {
-  "name": "@swarm/ui",
+  "name": "@middleman/ui",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",

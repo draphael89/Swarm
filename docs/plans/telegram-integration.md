@@ -1,7 +1,7 @@
 # Telegram Integration Plan (Slack-Aligned)
 
 ## Objective
-Add Telegram as a third user channel in Swarm while reusing the same channel-aware messaging architecture already used for web + Slack.
+Add Telegram as a third user channel in Middleman while reusing the same channel-aware messaging architecture already used for web + Slack.
 
 This plan intentionally mirrors what worked in Slack:
 - inbound messages are always forwarded to manager with `[sourceContext]` metadata,

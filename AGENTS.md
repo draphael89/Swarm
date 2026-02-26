@@ -1,7 +1,7 @@
-# Swarm - Agent Notes
+# Middleman - Agent Notes
 
 ## What This Project Is
-`swarm` is a local-first multi-agent orchestration platform. It runs:
+`middleman` is a local-first multi-agent orchestration platform. It runs:
 
 1. A Node.js backend for manager/worker orchestration and persistence.
 2. A TanStack Start + Vite SPA for dashboard, chat, settings, and artifacts.

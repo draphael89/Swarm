@@ -35,7 +35,7 @@ Out of scope:
 ## Architecture Overview
 1. User asks manager to schedule something.
 2. Manager uses cron skill instructions and runs `schedule.js add ...`.
-3. Script writes schedule record into `${SWARM_DATA_DIR}/schedules.json` (default `~/.swarm/schedules.json`).
+3. Script writes schedule record into `${SWARM_DATA_DIR}/schedules.json` (default `~/.middleman/schedules.json`).
 4. Scheduler service in backend watches/polls that file, computes due work, and dispatches when ready.
 5. Dispatch path calls `SwarmManager.handleUserMessage(...)` with schedule metadata so execution behaves like normal user input.
 6. Manager replies through existing channel routing (`web`/`slack`) unchanged.
@@ -79,7 +79,7 @@ Rules:
 ## Schedule File Format
 Path:
 - `${SWARM_DATA_DIR}/schedules.json`
-- Default example: `~/.swarm/schedules.json`
+- Default example: `~/.middleman/schedules.json`
 
 Proposed structure:
 ```ts

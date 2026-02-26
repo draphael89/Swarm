@@ -1,6 +1,6 @@
-# @swarm/ui
+# @middleman/ui
 
-`@swarm/ui` is the Swarm web app built with TanStack Start, Vite, and React.
+`@middleman/ui` is the Middleman web app built with TanStack Start, Vite, and React.
 
 ## What it contains
 
@@ -14,10 +14,10 @@
 Run from repo root:
 
 ```bash
-pnpm --filter @swarm/ui dev
-pnpm --filter @swarm/ui build
-pnpm --filter @swarm/ui preview
-pnpm --filter @swarm/ui test
+pnpm --filter @middleman/ui dev
+pnpm --filter @middleman/ui build
+pnpm --filter @middleman/ui preview
+pnpm --filter @middleman/ui test
 ```
 
 ## Local runtime

@@ -5,7 +5,7 @@ The highest-likelihood failure mode is **context overflow in the Pi runtime that
 
 When this happens, user messages are accepted and persisted, but the manager produces only internal assistant error turns (e.g., `prompt is too long...`) and no `speak_to_user` tool call. Since manager runtime message mirroring is intentionally disabled, the UI appears silent until manual compaction shrinks context.
 
-This exact pattern is present in `~/.swarm/sessions/opus-manager.jsonl`.
+This exact pattern is present in `~/.middleman/sessions/opus-manager.jsonl`.
 
 ## Scope / Files Traced
 - `apps/backend/src/swarm/agent-runtime.ts`
@@ -18,7 +18,7 @@ This exact pattern is present in `~/.swarm/sessions/opus-manager.jsonl`.
 - `node_modules/@mariozechner/pi-agent-core/dist/agent.js`
 - `node_modules/@mariozechner/pi-agent-core/dist/agent-loop.js`
 - `node_modules/@mariozechner/pi-ai/dist/utils/overflow.js`
-- `~/.swarm/sessions/opus-manager.jsonl`
+- `~/.middleman/sessions/opus-manager.jsonl`
 
 ## End-to-End Message Acceptance Path
 1. WS receives `user_message` and calls `swarmManager.handleUserMessage(...)` (`apps/backend/src/ws/server.ts:1671-1712`).
@@ -38,7 +38,7 @@ This is central to the “silent” symptom.
 
 ## Session Log Evidence (Recent, Direct)
 ### Incident A (overflow loop, then manual compact, then recovery)
-From `~/.swarm/sessions/opus-manager.jsonl`:
+From `~/.middleman/sessions/opus-manager.jsonl`:
 - `4794`: assistant error turn: `prompt is too long: 180186 tokens > 180000 maximum`
 - `4795`: user message accepted (`did this all get merged`)
 - `4797`: assistant error again (`180202 > 180000`)
@@ -83,7 +83,7 @@ From `~/.swarm/sessions/opus-manager.jsonl`:
 - On failure, it emits `auto_compaction_end` with `errorMessage`, but does not throw (`agent-session.js:1370-1380`).
 
 **Why accepted but silent**
-- Swarm manager does not surface manager runtime auto-compaction events to chat (`swarm-manager.ts:2427-2431`) and debug path also no-ops these event types (`swarm-manager.ts:2377-2383`).
+- Middleman manager does not surface manager runtime auto-compaction events to chat (`swarm-manager.ts:2427-2431`) and debug path also no-ops these event types (`swarm-manager.ts:2377-2383`).
 - If auto-compaction fails repeatedly, user only sees accepted inputs and no progress.
 
 **Why compaction unsticks**

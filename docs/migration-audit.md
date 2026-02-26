@@ -11,7 +11,7 @@ Date: 2026-02-25
 
 ### 1) Legacy Pi auth file migration
 - Location: `apps/backend/src/config.ts:38-40`, `apps/backend/src/config.ts:126-142`
-- From -> To: copies legacy Pi auth file `~/.pi/agent/auth.json` into Swarm auth file `<dataDir>/auth/auth.json` when default auth path is used.
+- From -> To: copies legacy Pi auth file `~/.pi/agent/auth.json` into Middleman auth file `<dataDir>/auth/auth.json` when default auth path is used.
 - Added: `2847382` (2026-02-20)
 - Lifecycle: one-time opportunistic migration (runs on boot, no marker file; guarded by file existence).
 - Risk of removal: existing local users who only have legacy Pi auth would stop auto-migrating and would need to re-authenticate or manually copy credentials.
@@ -138,7 +138,7 @@ Date: 2026-02-25
 - Risk of removal: scheduler can break depending on installed `cron-parser` version/API shape.
 
 ## Schema versioning check
-- No explicit schema/version fields were found that drive migration branches in persisted Swarm data files (agents store, schedules, integration configs, memory, sessions).
+- No explicit schema/version fields were found that drive migration branches in persisted Middleman data files (agents store, schedules, integration configs, memory, sessions).
 - Migrations are currently file-presence and marker-based (`.migrated`) rather than version-number based.
 
 ## High-risk removals (if done before public release)

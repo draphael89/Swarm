@@ -1,6 +1,6 @@
-# @swarm/site
+# @middleman/site
 
-Marketing landing page for Swarm, built with TanStack Start + Tailwind CSS.
+Marketing landing page for Middleman, built with TanStack Start + Tailwind CSS.
 
 ## Scripts
 

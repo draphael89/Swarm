@@ -1,7 +1,7 @@
-# Agent Browser Skill Integration Plan for Swarm
+# Agent Browser Skill Integration Plan for Middleman
 
 ## Objective
-Give Swarm agents reliable web-browsing automation by integrating Vercel Labs `agent-browser`, while preserving Swarm's existing skill-driven architecture and keeping security controls explicit.
+Give Middleman agents reliable web-browsing automation by integrating Vercel Labs `agent-browser`, while preserving Middleman's existing skill-driven architecture and keeping security controls explicit.
 
 ---
 
@@ -34,7 +34,7 @@ Research confirms `agent-browser` is a **browser automation CLI** with a local d
 ### Exposure model
 - Primary interface: CLI (`agent-browser ...`).
 - Internal daemon protocol: local JSON messages over Unix socket/TCP.
-- Optional TypeScript API is documented (`BrowserManager`), but the stable integration surface for Swarm should be CLI.
+- Optional TypeScript API is documented (`BrowserManager`), but the stable integration surface for Middleman should be CLI.
 
 ### MCP status
 - No MCP server entrypoint found in repo structure, README, or package scripts.
@@ -48,7 +48,7 @@ Research confirms `agent-browser` is a **browser automation CLI** with a local d
 Integrate as a **built-in skill + CLI usage** first.
 
 Why this is the best first step:
-1. Swarm agents already have shell execution.
+1. Middleman agents already have shell execution.
 2. `agent-browser` is already optimized for agent workflows (snapshot/ref loop, JSON mode).
 3. Minimal backend risk versus building a new protocol bridge.
 4. Keeps parity with current built-in skill pattern (`memory`/`brave-search`).
@@ -63,7 +63,7 @@ Agents can immediately use:
 ### When deeper integration becomes worthwhile
 - Need one-click install/health checks in Settings UI
 - Need policy enforcement (allow/deny domains, disable file://)
-- Need first-class live browser preview embedding in Swarm UI
+- Need first-class live browser preview embedding in Middleman UI
 
 ---
 
@@ -77,7 +77,7 @@ Agents can immediately use:
   - Linux: `agent-browser install --with-deps` if required.
 
 ### Installation options
-1. Global (recommended for Swarm host):
+1. Global (recommended for Middleman host):
    - `npm install -g agent-browser`
    - `agent-browser install`
 2. No-install fallback:
@@ -93,7 +93,7 @@ Agents can immediately use:
 
 ---
 
-## 4) Skill structure in Swarm (brave-search-aligned)
+## 4) Skill structure in Middleman (brave-search-aligned)
 
 ### Files to add
 - `apps/backend/src/swarm/skills/builtins/agent-browser/SKILL.md`
@@ -139,7 +139,7 @@ The skill should teach a default safe workflow and a concise command set.
 4. Re-snapshot after page changes
 5. `agent-browser close`
 
-### High-value command groups for Swarm docs
+### High-value command groups for Middleman docs
 - Navigation/state: `open`, `back`, `forward`, `reload`, `close`, `tab`, `session`
 - Interaction: `click`, `fill`, `type`, `select`, `check`, `upload`, `press`, `find ...`
 - Extraction: `get text`, `get url`, `get title`, `snapshot --json`
@@ -185,7 +185,7 @@ Add a Browser integration card with:
 - Initial HTTP-like socket payloads are rejected (cross-origin hardening).
 - Header scoping support to avoid cross-origin auth leakage patterns.
 
-### Swarm policy recommendations
+### Middleman policy recommendations
 1. Skill guidance: avoid login/auth flows unless explicitly requested.
 2. Default to ephemeral sessions; only use `--profile`/`--session-name` when needed.
 3. Treat `--allow-file-access`, `--cdp`, and cloud providers as explicit advanced modes.
@@ -237,4 +237,4 @@ Add a Browser integration card with:
 - https://raw.githubusercontent.com/vercel-labs/agent-browser/main/src/daemon.ts
 - https://raw.githubusercontent.com/vercel-labs/agent-browser/main/src/stream-server.ts
 - https://raw.githubusercontent.com/vercel-labs/agent-browser/main/skills/agent-browser/SKILL.md
-- Swarm reference skill: `apps/backend/src/swarm/skills/builtins/brave-search/SKILL.md`
+- Middleman reference skill: `apps/backend/src/swarm/skills/builtins/brave-search/SKILL.md`

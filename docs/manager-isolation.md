@@ -15,7 +15,7 @@ This document maps current storage/runtime boundaries in the swarm backend, base
 
 Conventions used below:
 
-- `dataDir` means `config.paths.dataDir` (for example `~/.swarm` in prod or `~/.swarm-dev` in dev).
+- `dataDir` means `config.paths.dataDir` (for example `~/.middleman` in prod or `~/.middleman-dev` in dev).
 - "Isolated" means scoped by manager/agent identity in code and file layout.
 - "Shared" means one backing resource is used by all managers.
 

@@ -24,7 +24,7 @@
 | `apps/backend/src/test/directory-picker.test.ts` | Backend directory picker | Platform command selection, fallback, cancellation, unsupported platform errors. |
 | `apps/backend/src/test/schedule-storage.test.ts` | Backend scheduler storage | Manager-scoped schedule path + one-time legacy migration behavior. |
 | `apps/backend/src/test/slack-mrkdwn.test.ts` | Slack markdown conversion | Markdown-to-mrkdwn formatting, comment stripping, code fence/newline normalization. |
-| `apps/backend/src/test/swarm-manager.test.ts` | Swarm manager core | Broad lifecycle: boot, manager/worker creation/deletion, ownership, routing, attachments, history restore, model presets, memory/skills wiring. |
+| `apps/backend/src/test/swarm-manager.test.ts` | Middleman manager core | Broad lifecycle: boot, manager/worker creation/deletion, ownership, routing, attachments, history restore, model presets, memory/skills wiring. |
 | `apps/backend/src/test/swarm-tools.test.ts` | Tool layer | `spawn_agent` model preset forwarding/validation + `speak_to_user` target forwarding. |
 | `apps/backend/src/test/telegram-markdown.test.ts` | Telegram markdown conversion | Markdown-to-HTML conversion, escaping, code block rendering, newline normalization. |
 | `apps/backend/src/test/ws-server.test.ts` | WS + HTTP server | Subscribe/message flow, reboot, compact endpoint, read-file, schedule endpoints, settings env/auth endpoints, attachment payloads, manager CRUD, ownership, directory WS commands. |
