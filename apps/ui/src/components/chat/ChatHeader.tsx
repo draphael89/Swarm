@@ -1,6 +1,8 @@
 import { Loader2, Menu, Minimize2, PanelRight, Square, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ContextWindowIndicator } from '@/components/chat/ContextWindowIndicator'
 import { cn } from '@/lib/utils'
 import type { AgentStatus } from '@/lib/ws-types'
@@ -58,10 +60,10 @@ function ChannelToggleButton({
     <button
       type="button"
       className={cn(
-        'h-6 min-w-11 rounded px-2 text-[11px] font-medium transition-colors',
+        'h-[22px] min-w-10 rounded-[4px] px-2 text-[11px] font-medium transition-colors',
         active
-          ? 'bg-secondary text-foreground'
-          : 'text-muted-foreground hover:bg-secondary/60 hover:text-foreground',
+          ? 'bg-background text-foreground shadow-sm'
+          : 'text-muted-foreground hover:text-foreground',
       )}
       onClick={onClick}
       aria-pressed={active}
@@ -158,87 +160,117 @@ export function ChatHeader({
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1 md:gap-2">
-        <div className="hidden sm:inline-flex h-8 items-center rounded-md border border-border/70 bg-muted/40 p-1">
-          <ChannelToggleButton
-            label="Web"
-            active={channelView === 'web'}
-            onClick={() => onChannelViewChange('web')}
-          />
-          <ChannelToggleButton
-            label="All"
-            active={channelView === 'all'}
-            onClick={() => onChannelViewChange('all')}
-          />
-        </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {/* ── Status group: channel toggle + context window ── */}
+        <div className="hidden sm:inline-flex items-center gap-1">
+          <div className="inline-flex h-7 items-center rounded-md border border-border/60 bg-muted/30 p-0.5">
+            <ChannelToggleButton
+              label="Web"
+              active={channelView === 'web'}
+              onClick={() => onChannelViewChange('web')}
+            />
+            <ChannelToggleButton
+              label="All"
+              active={channelView === 'all'}
+              onClick={() => onChannelViewChange('all')}
+            />
+          </div>
 
-        {contextWindowUsage ? (
-          <span className="hidden sm:inline-flex">
+          {contextWindowUsage ? (
             <ContextWindowIndicator
               usedTokens={contextWindowUsage.usedTokens}
               contextWindow={contextWindowUsage.contextWindow}
             />
-          </span>
-        ) : null}
+          ) : null}
+        </div>
 
+        {/* ── Action group: stop all ── */}
         {showStopAll ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 shrink-0 gap-1.5 border-destructive/50 bg-destructive/5 px-2 text-[11px] font-medium text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={onStopAll}
-            disabled={stopAllDisabled || stopAllInProgress}
-            title={stopAllInProgress ? 'Stopping manager and workers...' : 'Stop manager and all workers'}
-            aria-label={stopAllInProgress ? 'Stopping manager and all workers' : 'Stop manager and all workers'}
-          >
-            {stopAllInProgress ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}
-            <span>Stop All</span>
-          </Button>
+          <>
+            <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-4 bg-border/60" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 gap-1.5 px-2 text-[11px] font-medium text-destructive/80 hover:bg-destructive/10 hover:text-destructive"
+              onClick={onStopAll}
+              disabled={stopAllDisabled || stopAllInProgress}
+              title={stopAllInProgress ? 'Stopping manager and workers…' : 'Stop manager and all workers'}
+              aria-label={stopAllInProgress ? 'Stopping manager and all workers' : 'Stop manager and all workers'}
+            >
+              {stopAllInProgress ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3" />}
+              <span>Stop All</span>
+            </Button>
+          </>
         ) : null}
 
-        {showCompact ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
-            onClick={onCompact}
-            disabled={compactInProgress}
-            title={compactInProgress ? 'Compacting manager context...' : 'Compact manager context'}
-            aria-label={compactInProgress ? 'Compacting manager context' : 'Compact manager context'}
-          >
-            {compactInProgress ? <Loader2 className="size-3.5 animate-spin" /> : <Minimize2 className="size-3.5" />}
-          </Button>
+        {/* ── Utility group: compact, clear, artifacts ── */}
+        {(showCompact || showNewChat) ? (
+          <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-4 bg-border/60" />
         ) : null}
 
-        {showNewChat ? (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
-            onClick={onNewChat}
-            title="Clear conversation"
-            aria-label="Clear conversation"
-          >
-            <Trash2 className="size-3.5" />
-          </Button>
-        ) : null}
+        <div className="flex items-center gap-0.5">
+          {showCompact ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                  onClick={onCompact}
+                  disabled={compactInProgress}
+                  aria-label={compactInProgress ? 'Compacting manager context…' : 'Compact context'}
+                >
+                  {compactInProgress ? <Loader2 className="size-3.5 animate-spin" /> : <Minimize2 className="size-3.5" />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>
+                {compactInProgress ? 'Compacting…' : 'Compact context'}
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn(
-            'h-8 w-8 shrink-0 transition-colors',
-            isArtifactsPanelOpen
-              ? 'bg-accent/80 text-foreground'
-              : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
-          )}
-          onClick={onToggleArtifactsPanel}
-          title={isArtifactsPanelOpen ? 'Close artifacts panel' : 'Open artifacts panel'}
-          aria-label={isArtifactsPanelOpen ? 'Close artifacts panel' : 'Open artifacts panel'}
-          aria-pressed={isArtifactsPanelOpen}
-        >
-          <PanelRight className="size-3.5" />
-        </Button>
+          {showNewChat ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 shrink-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
+                  onClick={onNewChat}
+                  aria-label="Clear conversation"
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" sideOffset={6}>
+                Clear conversation
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  'size-7 shrink-0 transition-colors',
+                  isArtifactsPanelOpen
+                    ? 'bg-accent text-foreground'
+                    : 'text-muted-foreground hover:bg-accent/70 hover:text-foreground',
+                )}
+                onClick={onToggleArtifactsPanel}
+                aria-label={isArtifactsPanelOpen ? 'Close artifacts panel' : 'Open artifacts panel'}
+                aria-pressed={isArtifactsPanelOpen}
+              >
+                <PanelRight className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={6}>
+              {isArtifactsPanelOpen ? 'Close artifacts' : 'Artifacts'}
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </div>
     </header>
   )
