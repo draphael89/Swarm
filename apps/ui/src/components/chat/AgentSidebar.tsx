@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, CircleDashed, Settings, SquarePen, UserStar, X } from 'lucide-react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { buildManagerTreeRows } from '@/lib/agent-hierarchy'
 import { cn } from '@/lib/utils'
@@ -275,41 +275,10 @@ export function AgentSidebar({
   onOpenSettings,
 }: AgentSidebarProps) {
   const { managerRows, orphanWorkers } = buildManagerTreeRows(agents)
-  const [collapsedManagerIds, setCollapsedManagerIds] = useState<Set<string>>(
-    () => new Set(managerRows.map(({ manager }) => manager.agentId)),
-  )
-
-  useEffect(() => {
-    const managerIds = new Set(managerRows.map(({ manager }) => manager.agentId))
-
-    setCollapsedManagerIds((previous) => {
-      const next = new Set<string>()
-
-      // Keep previously collapsed managers that still exist
-      for (const managerId of previous) {
-        if (managerIds.has(managerId)) {
-          next.add(managerId)
-        }
-      }
-
-      // Collapse new managers by default
-      for (const managerId of managerIds) {
-        if (!previous.has(managerId)) {
-          next.add(managerId)
-        }
-      }
-
-      // Only update state if the set actually changed
-      if (next.size === previous.size && [...next].every((id) => previous.has(id))) {
-        return previous
-      }
-
-      return next
-    })
-  }, [managerRows])
+  const [expandedManagerIds, setExpandedManagerIds] = useState<Set<string>>(() => new Set())
 
   const toggleManagerCollapsed = (managerId: string) => {
-    setCollapsedManagerIds((previous) => {
+    setExpandedManagerIds((previous) => {
       const next = new Set(previous)
 
       if (next.has(managerId)) {
@@ -394,7 +363,7 @@ export function AgentSidebar({
             {managerRows.map(({ manager, workers }) => {
               const managerLiveStatus = getAgentLiveStatus(manager, statuses)
               const managerIsSelected = !isSettingsActive && selectedAgentId === manager.agentId
-              const managerIsCollapsed = collapsedManagerIds.has(manager.agentId)
+              const managerIsCollapsed = !expandedManagerIds.has(manager.agentId)
               const streamingWorkerCount = managerIsCollapsed
                 ? workers.filter((w) => getAgentLiveStatus(w, statuses).status === 'streaming').length
                 : 0
