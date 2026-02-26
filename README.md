@@ -1,4 +1,4 @@
-# Swarm
+# Middleman
 
 Local-first multi-agent orchestration platform.
 

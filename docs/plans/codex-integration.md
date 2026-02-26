@@ -1,13 +1,13 @@
-# Codex App Server Integration Plan for Swarm
+# Codex App Server Integration Plan for Middleman
 
 ## Objective
-Integrate **OpenAI Codex App Server** as an alternate runtime so Swarm can run Codex-based agents alongside existing pi-based agents.
+Integrate **OpenAI Codex App Server** as an alternate runtime so Middleman can run Codex-based agents alongside existing pi-based agents.
 
 Target outcomes:
 - Codex agents appear in the existing UI agent list/sidebar
 - Users can message Codex agents and receive replies
 - Manager can delegate to Codex workers (including code tasks)
-- Codex workers can report back to manager through Swarm tools (`send_message_to_agent`)
+- Codex workers can report back to manager through Middleman tools (`send_message_to_agent`)
 
 ---
 
@@ -20,7 +20,7 @@ Target outcomes:
    - `codex-rs/app-server-protocol/src/protocol/*`
    - `codex-rs/app-server-protocol/schema/typescript/*`
    - `codex-rs/app-server/tests/suite/v2/*`
-3. Current Swarm architecture:
+3. Current Middleman architecture:
    - `apps/backend/src/swarm/agent-runtime.ts`
    - `apps/backend/src/swarm/swarm-manager.ts`
    - `apps/backend/src/swarm/swarm-tools.ts`
@@ -31,9 +31,9 @@ Target outcomes:
 
 ---
 
-## Current Swarm Runtime Architecture (As-Is)
+## Current Middleman Runtime Architecture (As-Is)
 
-Swarm currently assumes pi `AgentSession` runtime for all agents:
+Middleman currently assumes pi `AgentSession` runtime for all agents:
 
 - `SwarmManager.createRuntimeForDescriptor()` always calls pi `createAgentSession(...)`
 - `AgentRuntime` wraps `AgentSession` and provides:
@@ -49,7 +49,7 @@ This means there is no runtime boundary yet; “runtime” is effectively “pi 
 
 ---
 
-## Codex App Server API Surface (What matters for Swarm)
+## Codex App Server API Surface (What matters for Middleman)
 
 ## 1) Transport & Handshake
 - Preferred transport for integration: **stdio JSONL** (`codex app-server`)
@@ -101,7 +101,7 @@ Codex can request input from client:
 
 ## Proposed Runtime Adapter Design
 
-## A. Introduce runtime abstraction in Swarm
+## A. Introduce runtime abstraction in Middleman
 Create a runtime interface used by `SwarmManager` instead of concrete `AgentRuntime` class.
 
 Suggested shape:
@@ -131,12 +131,12 @@ This keeps SwarmManager orchestration unchanged while enabling runtime routing.
 5. Message delivery:
    - idle -> `turn/start`
    - streaming/busy -> `turn/steer`
-6. Status mapping to Swarm `AgentStatus`
+6. Status mapping to Middleman `AgentStatus`
 7. Persist thread metadata + conversation entries via same `SessionManager` custom-entry path used today (for compatibility with existing history reload logic)
 
 ---
 
-## Integration Points in Swarm
+## Integration Points in Middleman
 
 ## 1) `apps/backend/src/swarm/swarm-manager.ts`
 - Replace concrete runtime map type with interface
@@ -192,7 +192,7 @@ This avoids ambiguity with current pi codex-app-server runtime and allows mixed 
 
 ## Tool Compatibility Plan
 
-Swarm tool parity requirement for manager delegation:
+Middleman tool parity requirement for manager delegation:
 - `list_agents`
 - `send_message_to_agent`
 - manager-only: `spawn_agent`, `kill_agent`, `speak_to_user`
@@ -200,16 +200,16 @@ Swarm tool parity requirement for manager delegation:
 ### How to expose tools in Codex runtime
 Use Codex **dynamic tools** (experimental):
 - Pass `dynamicTools` in `thread/start` (JSON Schema derived from existing TypeBox tool schemas)
-- Handle server request `item/tool/call` and execute corresponding Swarm tool handler
+- Handle server request `item/tool/call` and execute corresponding Middleman tool handler
 - Return `DynamicToolCallResponse` with `inputText` content items
 
-This enables Codex workers to call `send_message_to_agent`, which is required for manager<->worker workflow in current Swarm design.
+This enables Codex workers to call `send_message_to_agent`, which is required for manager<->worker workflow in current Middleman design.
 
 ---
 
 ## Message/Event Mapping
 
-Swarm UI expects Swarm conversation events, not raw Codex notifications.
+Middleman UI expects Middleman conversation events, not raw Codex notifications.
 
 Recommended mapping in Codex runtime adapter:
 
@@ -255,14 +255,14 @@ Important: set meaningful `clientInfo.name` for compliance logs.
 
 ## Streaming & Delivery Semantics
 
-Current Swarm behavior for busy agents already favors steering.
+Current Middleman behavior for busy agents already favors steering.
 
 For Codex runtime:
 - Maintain same external semantics:
   - if idle: `acceptedMode=prompt`, use `turn/start`
   - if active: `acceptedMode=steer`, use `turn/steer`
 - Keep existing pending-delivery accounting behavior
-- `followUp` remains compatible with current Swarm behavior (currently coerced to steer while active)
+- `followUp` remains compatible with current Middleman behavior (currently coerced to steer while active)
 
 ---
 
@@ -271,7 +271,7 @@ For Codex runtime:
 1. **Dynamic tools are experimental** in Codex API; protocol may change.
 2. **WebSocket transport is experimental**; use stdio.
 3. Codex approval flows can block turns; phase-1 should explicitly set non-blocking approval policy or deterministically handle approval requests.
-4. Codex event richness is higher than current Swarm UI schema; initial integration will flatten to existing message/log model.
+4. Codex event richness is higher than current Middleman UI schema; initial integration will flatten to existing message/log model.
 5. Runtime process management complexity (child process crashes, reconnect/resume).
 6. Potential contention if many codex app-server processes share one `CODEX_HOME` state DB.
 
@@ -294,7 +294,7 @@ For Codex runtime:
 Acceptance: user can chat directly with a codex agent.
 
 ## Phase 2 — Tool bridge for delegation
-- Implement dynamic tools adapter for Swarm tools
+- Implement dynamic tools adapter for Middleman tools
 - Handle `item/tool/call` requests
 - Ensure codex worker can call `send_message_to_agent`
 
@@ -327,7 +327,7 @@ Backend unit/integration:
 - codex handshake sequence
 - thread resume/start logic
 - sendMessage idle vs active (`turn/start` vs `turn/steer`)
-- event mapping -> Swarm conversation events
+- event mapping -> Middleman conversation events
 - dynamic tool request execution path (`item/tool/call`)
 - approval request behavior
 - process crash handling

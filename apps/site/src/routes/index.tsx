@@ -73,8 +73,8 @@ const flow = [
 ]
 
 const quickStartCommands = [
-  'git clone https://github.com/SawyerHood/swarm.git',
-  'cd swarm',
+  'git clone https://github.com/SawyerHood/middleman.git',
+  'cd middleman',
   'pnpm install',
   'pnpm dev',
 ]
@@ -89,10 +89,10 @@ function LandingPage() {
             href="#"
             className="font-display text-[1.15rem] tracking-[-0.01em] no-underline"
           >
-            Swarm
+            Middleman
           </a>
           <a
-            href="https://github.com/SawyerHood/swarm"
+            href="https://github.com/SawyerHood/middleman"
             target="_blank"
             rel="noopener noreferrer"
             className="text-[13px] text-muted no-underline transition-colors duration-300 hover:text-ink"
@@ -111,7 +111,7 @@ function LandingPage() {
           <p className="reveal-2 mt-8 max-w-xl text-[1.05rem] leading-[1.7] text-muted">
             You&rsquo;re not an IC anymore. You spend your day doing project
             management — dispatching tasks, checking status, rebasing branches.
-            Swarm gives you a persistent AI manager that handles the
+            Middleman gives you a persistent AI manager that handles the
             coordination so you can focus on direction.
           </p>
 
@@ -123,7 +123,7 @@ function LandingPage() {
               Get started
             </a>
             <a
-              href="https://github.com/SawyerHood/swarm"
+              href="https://github.com/SawyerHood/middleman"
               target="_blank"
               rel="noopener noreferrer"
               className="text-[13px] text-muted no-underline transition-colors duration-300 hover:text-ink"
@@ -169,7 +169,7 @@ function LandingPage() {
               different agent sessions.
             </p>
             <p className="text-[1.05rem] leading-[1.7] text-ink">
-              Swarm introduces a layer of middle management. One persistent
+              Middleman introduces a layer of middle management. One persistent
               manager per project. You tell it what needs to get done — it
               dispatches workers, tracks progress, and handles the merge queue.
               You stay informed, not involved.
@@ -255,13 +255,13 @@ function LandingPage() {
 
         {/* ── Footer ── */}
         <footer className="flex flex-wrap items-center justify-between gap-4 py-8 text-[12px] text-muted">
-          <span>Swarm — The middle manager your agents deserve</span>
+          <span>Middleman — The middle manager your agents deserve</span>
           <div className="flex gap-6">
             {(
               [
-                ['GitHub', 'https://github.com/SawyerHood/swarm'],
-                ['License', 'https://github.com/SawyerHood/swarm/blob/main/LICENSE'],
-                ['Docs', 'https://github.com/SawyerHood/swarm/tree/main/docs'],
+                ['GitHub', 'https://github.com/SawyerHood/middleman'],
+                ['License', 'https://github.com/SawyerHood/middleman/blob/main/LICENSE'],
+                ['Docs', 'https://github.com/SawyerHood/middleman/tree/main/docs'],
               ] as const
             ).map(([label, href]) => (
               <a

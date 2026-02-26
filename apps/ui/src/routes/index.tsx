@@ -299,7 +299,7 @@ interface PendingResponseStart {
 }
 
 export function IndexPage() {
-  const wsUrl = import.meta.env.VITE_SWARM_WS_URL ?? resolveDefaultWsUrl()
+  const wsUrl = import.meta.env.VITE_MIDDLEMAN_WS_URL ?? resolveDefaultWsUrl()
   const clientRef = useRef<ManagerWsClient | null>(null)
   const messageInputRef = useRef<MessageInputHandle | null>(null)
   const navigate = useNavigate()

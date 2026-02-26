@@ -1,10 +1,10 @@
-# Swarm Codebase Overview
+# Middleman Codebase Overview
 
 Last updated: 2026-02-23
 
 ## Architecture Summary
 
-Swarm is a pnpm monorepo with two primary applications:
+Middleman is a pnpm monorepo with two primary applications:
 
 - `apps/backend`: Node.js orchestration backend (HTTP + WebSocket).
 - `apps/ui`: TanStack Start + Vite React SPA.
@@ -127,13 +127,13 @@ In production preview mode, UI runs on `47289` and targets backend on `47287`.
 
 ### Environment Variables (common)
 
-- `SWARM_HOST` (default `127.0.0.1`)
-- `SWARM_PORT` (default `47187`)
-- `VITE_SWARM_WS_URL`
+- `MIDDLEMAN_HOST` (default `127.0.0.1`)
+- `MIDDLEMAN_PORT` (default `47187`)
+- `VITE_MIDDLEMAN_WS_URL`
 
 ### Persistent Data
 
-Swarm backend state is stored under `~/.swarm` (fixed path):
+Middleman backend state is stored under `~/.middleman` (fixed path):
 
 - `swarm/agents.json`
 - `sessions/*.jsonl`

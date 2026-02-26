@@ -10,6 +10,8 @@ const MANAGED_ENV_KEYS = [
   'SWARM_AUTH_FILE',
   'SWARM_HOST',
   'SWARM_PORT',
+  'MIDDLEMAN_HOST',
+  'MIDDLEMAN_PORT',
   'SWARM_DEBUG',
   'SWARM_ALLOW_NON_MANAGER_SUBSCRIPTIONS',
   'SWARM_MANAGER_ID',
@@ -65,19 +67,19 @@ describe('createConfig', () => {
         thinkingLevel: 'xhigh',
       })
 
-      expect(config.paths.dataDir).toBe(resolve(homedir(), '.swarm'))
-      expect(config.paths.swarmDir).toBe(resolve(homedir(), '.swarm', 'swarm'))
-      expect(config.paths.sessionsDir).toBe(resolve(homedir(), '.swarm', 'sessions'))
-      expect(config.paths.uploadsDir).toBe(resolve(homedir(), '.swarm', 'uploads'))
-      expect(config.paths.authDir).toBe(resolve(homedir(), '.swarm', 'auth'))
-      expect(config.paths.authFile).toBe(resolve(homedir(), '.swarm', 'auth', 'auth.json'))
-      expect(config.paths.managerAgentDir).toBe(resolve(homedir(), '.swarm', 'agent', 'manager'))
+      expect(config.paths.dataDir).toBe(resolve(homedir(), '.middleman'))
+      expect(config.paths.swarmDir).toBe(resolve(homedir(), '.middleman', 'swarm'))
+      expect(config.paths.sessionsDir).toBe(resolve(homedir(), '.middleman', 'sessions'))
+      expect(config.paths.uploadsDir).toBe(resolve(homedir(), '.middleman', 'uploads'))
+      expect(config.paths.authDir).toBe(resolve(homedir(), '.middleman', 'auth'))
+      expect(config.paths.authFile).toBe(resolve(homedir(), '.middleman', 'auth', 'auth.json'))
+      expect(config.paths.managerAgentDir).toBe(resolve(homedir(), '.middleman', 'agent', 'manager'))
       expect(config.paths.repoArchetypesDir).toBe(resolve(config.paths.rootDir, '.swarm', 'archetypes'))
-      expect(config.paths.memoryDir).toBe(resolve(homedir(), '.swarm', 'memory'))
+      expect(config.paths.memoryDir).toBe(resolve(homedir(), '.middleman', 'memory'))
       expect(config.paths.memoryFile).toBeUndefined()
       expect(config.paths.repoMemorySkillFile).toBe(resolve(config.paths.rootDir, '.swarm', 'skills', 'memory', 'SKILL.md'))
-      expect(config.paths.agentsStoreFile).toBe(resolve(homedir(), '.swarm', 'swarm', 'agents.json'))
-      expect(config.paths.secretsFile).toBe(resolve(homedir(), '.swarm', 'secrets.json'))
+      expect(config.paths.agentsStoreFile).toBe(resolve(homedir(), '.middleman', 'swarm', 'agents.json'))
+      expect(config.paths.secretsFile).toBe(resolve(homedir(), '.middleman', 'secrets.json'))
       expect(config.paths.schedulesFile).toBeUndefined()
 
       expect(config.defaultCwd).toBe(config.paths.rootDir)
@@ -86,8 +88,8 @@ describe('createConfig', () => {
     })
   })
 
-  it('respects SWARM_HOST and SWARM_PORT', async () => {
-    await withEnv({ SWARM_HOST: '0.0.0.0', SWARM_PORT: '9999' }, () => {
+  it('respects MIDDLEMAN_HOST and MIDDLEMAN_PORT', async () => {
+    await withEnv({ MIDDLEMAN_HOST: '0.0.0.0', MIDDLEMAN_PORT: '9999' }, () => {
       const config = createConfig()
       expect(config.host).toBe('0.0.0.0')
       expect(config.port).toBe(9999)
@@ -113,8 +115,8 @@ describe('createConfig', () => {
       () => {
         const config = createConfig()
 
-        expect(config.paths.dataDir).toBe(resolve(homedir(), '.swarm'))
-        expect(config.paths.authFile).toBe(resolve(homedir(), '.swarm', 'auth', 'auth.json'))
+        expect(config.paths.dataDir).toBe(resolve(homedir(), '.middleman'))
+        expect(config.paths.authFile).toBe(resolve(homedir(), '.middleman', 'auth', 'auth.json'))
         expect(config.debug).toBe(true)
         expect(config.allowNonManagerSubscriptions).toBe(true)
         expect(config.managerId).toBeUndefined()

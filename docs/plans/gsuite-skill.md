@@ -1,11 +1,11 @@
 # G Suite Skill Plan (gogcli, Read+Write in v1)
 
 ## Objective
-Ship Google Workspace support in Swarm with minimal maintenance:
+Ship Google Workspace support in Middleman with minimal maintenance:
 
 1. Install and use `gog` directly.
 2. Add a built-in `gsuite` skill that is just `SKILL.md` docs (no wrapper scripts).
-3. Run Google OAuth setup entirely from Swarm Settings UI.
+3. Run Google OAuth setup entirely from Middleman Settings UI.
 4. Enable both read and write operations from day one in v1.
 
 This revision keeps the simplified `gog` approach and removes the earlier phased read-only-first model.
@@ -19,12 +19,12 @@ This revision keeps the simplified `gog` approach and removes the earlier phased
    - Do not add a `gog-runner.js` abstraction.
    - The skill should document direct CLI usage (`gog --help`, `gog <group> --help`, `gog ... --json`).
 
-2. **OAuth flow moves into Swarm Settings**
+2. **OAuth flow moves into Middleman Settings**
    - User flow in Settings:
      - Click **Connect Google**
      - Get auth URL
      - Paste redirect URL/auth code
-     - Swarm completes OAuth and stores credentials for `gog`
+     - Middleman completes OAuth and stores credentials for `gog`
 
 3. **Read + write in v1 (no read-only phase)**
    - v1 must support both read and write workflows immediately.
@@ -109,7 +109,7 @@ Do not add scripts/package for command wrappers.
 - Explicit write examples in v1: Gmail send, Calendar event create, Drive upload.
 - Guidance to use `--account` or `GOG_ACCOUNT`.
 
-Swarm manager wiring:
+Middleman manager wiring:
 - Extend `reloadSkillMetadata()` to include `gsuite` SKILL path (same pattern as `memory` and `brave-search`).
 
 ### 2) Backend integration service (Settings + command bridge)
@@ -160,7 +160,7 @@ Implement in `SettingsDialog.tsx` (modeled after existing OAuth UX patterns):
 
 ## Storage Strategy in `SWARM_DATA_DIR`
 
-Goal: keep `gog` state isolated to Swarm-managed storage.
+Goal: keep `gog` state isolated to Middleman-managed storage.
 
 Constraint from research:
 - `gog` does not expose an explicit config-dir flag/env.
@@ -168,7 +168,7 @@ Constraint from research:
 Plan:
 - Build one helper that returns env overrides for every `gog` process:
   - `GOG_KEYRING_BACKEND=file`
-  - `GOG_KEYRING_PASSWORD=<from Swarm secrets>`
+  - `GOG_KEYRING_PASSWORD=<from Middleman secrets>`
   - Platform-specific config root override:
     - Linux: `XDG_CONFIG_HOME=${SWARM_DATA_DIR}/integrations/gsuite/config-home`
     - macOS: `HOME=${SWARM_DATA_DIR}/integrations/gsuite/home`

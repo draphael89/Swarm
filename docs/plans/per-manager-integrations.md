@@ -12,8 +12,8 @@ That limits multi-manager usage:
 Use manager-scoped integration profiles, not global provider config.
 
 Suggested storage:
-- `~/.swarm*/integrations/managers/<managerId>/slack.json`
-- `~/.swarm*/integrations/managers/<managerId>/telegram.json`
+- `~/.middleman*/integrations/managers/<managerId>/slack.json`
+- `~/.middleman*/integrations/managers/<managerId>/telegram.json`
 
 Profile shape (per provider):
 - `enabled`

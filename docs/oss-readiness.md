@@ -67,7 +67,7 @@ Branch: `oss-readiness-audit`
 
 - **Branding/Identity**
 - [ ] Unify naming across repo artifacts:
-  - Public identity in README is “Swarm” ([README.md:1](../README.md#L1))
+  - Public identity in README is “Middleman” ([README.md:1](../README.md#L1))
   - Agent guidance doc still brands as “terry-local” and Terragon-derived ([AGENTS.md:4](../AGENTS.md#L4), [AGENTS.md:13](../AGENTS.md#L13))
 - [ ] Add concise public descriptions to package manifests (currently none in root/backend/ui package files).
 

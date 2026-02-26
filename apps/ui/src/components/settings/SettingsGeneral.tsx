@@ -81,11 +81,11 @@ export function SettingsGeneral({ wsUrl }: SettingsGeneralProps) {
 
       <SettingsSection
         label="System"
-        description="Manage the swarm daemon"
+        description="Manage the Middleman daemon"
       >
         <SettingsWithCTA
           label="Reboot"
-          description="Restart the swarm daemon and all agents"
+          description="Restart the Middleman daemon and all agents"
         >
           <Button
             variant="outline"

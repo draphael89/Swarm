@@ -7,11 +7,11 @@ Investigated the requested paths:
 - `apps/backend/src/swarm/agent-runtime.ts`
 - `apps/backend/src/ws/server.ts`
 - `apps/backend/src/swarm/codex-agent-runtime.ts`
-- Session evidence from `~/.swarm/sessions/voice.jsonl`
+- Session evidence from `~/.middleman/sessions/voice.jsonl`
 
 ## Quick timeline from session evidence
 
-- `~/.swarm/sessions/voice.jsonl` line `3777`: `compaction` at `2026-02-24T18:40:31.071Z`
+- `~/.middleman/sessions/voice.jsonl` line `3777`: `compaction` at `2026-02-24T18:40:31.071Z`
 - line `3778`: user message (`Does Tari support Windows?`)
 - line `3779`: user message (`hello`)
 - line `3780`: `compaction` at `2026-02-24T19:55:11.071Z`

@@ -1,7 +1,7 @@
-# Slack Integration Plan for Swarm
+# Slack Integration Plan for Middleman
 
 ## Objective
-Add a Slack bot integration to Swarm with **channel-aware messaging**:
+Add a Slack bot integration to Middleman with **channel-aware messaging**:
 - Every inbound message is tagged with source/channel metadata (web, Slack DM, Slack channel, etc.).
 - `speak_to_user` sends to a **single chosen channel target** (default = originating channel), not blind broadcast.
 - Slack channel listening should allow the manager to see channel traffic but be selective about when to respond.
@@ -32,7 +32,7 @@ This plan is **research + implementation plan only** (no code changes yet).
   - inbound file metadata appears on message events
   - private file URLs require bearer token and appropriate scopes (`files:read`)
 
-## Current Swarm message flow (from code)
+## Current Middleman message flow (from code)
 - Web UI sends WS `user_message` command.
 - `apps/backend/src/ws/server.ts` calls `swarmManager.handleUserMessage(text, { targetAgentId, delivery, attachments })`.
 - `SwarmManager` emits `conversation_message` with `source: "user_input"`.
@@ -221,7 +221,7 @@ WS egress:
 
 ### Recommendation: Socket Mode first
 Why:
-- Local-first Swarm (no public HTTPS endpoint requirement)
+- Local-first Middleman (no public HTTPS endpoint requirement)
 - Fastest development loop
 - Aligns with single-process local daemon architecture
 
@@ -310,7 +310,7 @@ Phase 3+:
 Inbound Slack file flow:
 1. detect files in message payload
 2. fetch `url_private` / `url_private_download` with bearer bot token
-3. map to Swarm attachments:
+3. map to Middleman attachments:
    - image/* -> image attachment
    - text/* + small structured text -> text attachment
    - other -> binary attachment (size-gated)
@@ -456,13 +456,13 @@ Acceptance:
 
 Scope:
 - Robust thread behavior (`thread_ts`, start-thread-on-first-reply mode).
-- Inbound file/image download and mapping to Swarm attachments.
+- Inbound file/image download and mapping to Middleman attachments.
 - Message formatting improvements (markdown->mrkdwn).
 - 429 retry/backoff and send queue hardening.
 
 Acceptance:
 - Channel replies stay in intended threads.
-- Images/files from Slack can reach Swarm agent context safely.
+- Images/files from Slack can reach Middleman agent context safely.
 
 ## Phase 4 - Full UI settings experience
 
