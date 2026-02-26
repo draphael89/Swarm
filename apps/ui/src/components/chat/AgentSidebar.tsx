@@ -283,19 +283,28 @@ export function AgentSidebar({
     const managerIds = new Set(managerRows.map(({ manager }) => manager.agentId))
 
     setCollapsedManagerIds((previous) => {
-      let hasRemovedManagers = false
       const next = new Set<string>()
 
+      // Keep previously collapsed managers that still exist
       for (const managerId of previous) {
         if (managerIds.has(managerId)) {
           next.add(managerId)
-          continue
         }
-
-        hasRemovedManagers = true
       }
 
-      return hasRemovedManagers ? next : previous
+      // Collapse new managers by default
+      for (const managerId of managerIds) {
+        if (!previous.has(managerId)) {
+          next.add(managerId)
+        }
+      }
+
+      // Only update state if the set actually changed
+      if (next.size === previous.size && [...next].every((id) => previous.has(id))) {
+        return previous
+      }
+
+      return next
     })
   }, [managerRows])
 
