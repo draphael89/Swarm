@@ -438,9 +438,10 @@ describe('ManagerWsClient', () => {
       messages: [...conversationMessages, ...toolMessages],
     })
 
-    const messages = client.getState().messages
-    expect(messages).toHaveLength(600)
-    expect(messages.filter((message) => message.type === 'conversation_message')).toHaveLength(120)
+    const state = client.getState()
+    expect(state.messages).toHaveLength(120)
+    expect(state.activityMessages).toHaveLength(480)
+    expect(state.messages.filter((message) => message.type === 'conversation_message')).toHaveLength(120)
 
     client.destroy()
   })
@@ -472,6 +473,7 @@ describe('ManagerWsClient', () => {
     })
 
     expect(client.getState().messages).toHaveLength(0)
+    expect(client.getState().activityMessages).toHaveLength(0)
 
     emitServerEvent(socket, {
       type: 'conversation_log',
@@ -547,10 +549,10 @@ describe('ManagerWsClient', () => {
       text: '{"path":"README.md"}',
     })
 
-    const messages = client.getState().messages
-    expect(messages).toHaveLength(2)
-    expect(messages[0]?.type).toBe('agent_message')
-    expect(messages[1]?.type).toBe('agent_tool_call')
+    const activityMessages = client.getState().activityMessages
+    expect(activityMessages).toHaveLength(2)
+    expect(activityMessages[0]?.type).toBe('agent_message')
+    expect(activityMessages[1]?.type).toBe('agent_tool_call')
 
     client.destroy()
   })
@@ -707,6 +709,17 @@ describe('ManagerWsClient', () => {
     })
 
     emitServerEvent(socket, {
+      type: 'agent_tool_call',
+      agentId: 'manager',
+      actorAgentId: 'manager',
+      timestamp: new Date().toISOString(),
+      kind: 'tool_execution_update',
+      toolName: 'read',
+      toolCallId: 'call-3',
+      text: '{"ok":true}',
+    })
+
+    emitServerEvent(socket, {
       type: 'error',
       code: 'TEST_ERROR',
       message: 'transient error',
@@ -714,6 +727,7 @@ describe('ManagerWsClient', () => {
 
     const beforeReset = snapshots.at(-1)
     expect(beforeReset?.messages.length).toBeGreaterThan(0)
+    expect(beforeReset?.activityMessages.length).toBeGreaterThan(0)
     expect(beforeReset?.agents.length).toBeGreaterThan(0)
     expect(Object.keys(beforeReset?.statuses ?? {})).toContain('manager')
     expect(beforeReset?.lastError).toBe('transient error')
@@ -729,6 +743,7 @@ describe('ManagerWsClient', () => {
     expect(afterReset?.connected).toBe(true)
     expect(afterReset?.subscribedAgentId).toBe('manager')
     expect(afterReset?.messages).toHaveLength(0)
+    expect(afterReset?.activityMessages).toHaveLength(0)
     expect(afterReset?.agents).toHaveLength(1)
     expect(Object.keys(afterReset?.statuses ?? {})).toContain('manager')
     expect(afterReset?.lastError).toBeNull()
