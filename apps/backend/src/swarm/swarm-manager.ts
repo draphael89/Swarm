@@ -1570,6 +1570,12 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   private shouldRestoreRuntimeForDescriptor(descriptor: AgentDescriptor): boolean {
+    // Only restore manager runtimes on boot. Worker runtimes are created
+    // on-demand when they receive a message — restoring them eagerly can
+    // cause the SDK to resume in-flight work from a previous session.
+    if (descriptor.role !== "manager") {
+      return false;
+    }
     return descriptor.status === "idle" || descriptor.status === "streaming";
   }
 
