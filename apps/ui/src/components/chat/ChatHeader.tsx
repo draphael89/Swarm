@@ -1,4 +1,4 @@
-import { Loader2, Menu, Minimize2, PanelRight, Trash2 } from 'lucide-react'
+import { Loader2, Menu, Minimize2, PanelRight, Square, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ContextWindowIndicator } from '@/components/chat/ContextWindowIndicator'
@@ -19,6 +19,10 @@ interface ChatHeaderProps {
   showCompact: boolean
   compactInProgress: boolean
   onCompact: () => void
+  showStopAll: boolean
+  stopAllInProgress: boolean
+  stopAllDisabled: boolean
+  onStopAll: () => void
   showNewChat: boolean
   onNewChat: () => void
   isArtifactsPanelOpen: boolean
@@ -79,6 +83,10 @@ export function ChatHeader({
   showCompact,
   compactInProgress,
   onCompact,
+  showStopAll,
+  stopAllInProgress,
+  stopAllDisabled,
+  onStopAll,
   showNewChat,
   onNewChat,
   isArtifactsPanelOpen,
@@ -171,6 +179,21 @@ export function ChatHeader({
               contextWindow={contextWindowUsage.contextWindow}
             />
           </span>
+        ) : null}
+
+        {showStopAll ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 gap-1.5 border-destructive/50 bg-destructive/5 px-2 text-[11px] font-medium text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={onStopAll}
+            disabled={stopAllDisabled || stopAllInProgress}
+            title={stopAllInProgress ? 'Stopping manager and workers...' : 'Stop manager and all workers'}
+            aria-label={stopAllInProgress ? 'Stopping manager and all workers' : 'Stop manager and all workers'}
+          >
+            {stopAllInProgress ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}
+            <span>Stop All</span>
+          </Button>
         ) : null}
 
         {showCompact ? (

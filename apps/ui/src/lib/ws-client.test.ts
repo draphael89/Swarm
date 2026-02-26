@@ -498,6 +498,47 @@ describe('ManagerWsClient', () => {
     client.destroy()
   })
 
+  it('sends stop_all_agents and resolves from stop_all_agents_result event', async () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('open')
+
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
+    })
+
+    const stopPromise = client.stopAllAgents('manager')
+    const stopPayload = JSON.parse(socket.sentPayloads.at(-1) ?? '{}')
+
+    expect(stopPayload).toMatchObject({
+      type: 'stop_all_agents',
+      managerId: 'manager',
+    })
+    expect(typeof stopPayload.requestId).toBe('string')
+
+    emitServerEvent(socket, {
+      type: 'stop_all_agents_result',
+      requestId: stopPayload.requestId,
+      managerId: 'manager',
+      terminatedWorkerIds: ['worker-1', 'worker-2'],
+      managerTerminated: true,
+    })
+
+    await expect(stopPromise).resolves.toEqual({
+      managerId: 'manager',
+      terminatedWorkerIds: ['worker-1', 'worker-2'],
+      managerTerminated: true,
+    })
+
+    client.destroy()
+  })
+
   it('clears only the current thread messages on conversation_reset', () => {
     const client = new ManagerWsClient('ws://127.0.0.1:47187', 'manager')
     const snapshots: ReturnType<typeof client.getState>[] = []

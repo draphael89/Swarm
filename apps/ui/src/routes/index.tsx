@@ -293,6 +293,7 @@ export function IndexPage() {
   const [isArtifactsPanelOpen, setIsArtifactsPanelOpen] = useState(false)
   const [channelView, setChannelView] = useState<ChannelView>('web')
   const [isCompactingManager, setIsCompactingManager] = useState(false)
+  const [isStoppingAllAgents, setIsStoppingAllAgents] = useState(false)
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false)
   const [pendingResponseStart, setPendingResponseStart] = useState<PendingResponseStart | null>(null)
   const dragDepthRef = useRef(0)
@@ -376,6 +377,8 @@ export function IndexPage() {
   const isAwaitingResponseStart =
     pendingResponseStart !== null && pendingResponseStart.agentId === activeAgentId
   const isLoading = activeAgentStatus === 'streaming' || isAwaitingResponseStart
+  const canStopAllAgents =
+    isActiveManager && (activeAgentStatus === 'idle' || activeAgentStatus === 'streaming')
 
   const visibleMessages = useMemo(() => {
     if (channelView === 'all') {
@@ -503,6 +506,33 @@ export function IndexPage() {
     },
     [activeAgentId, isActiveManager, wsUrl],
   )
+
+  const handleStopAllAgents = useCallback(async () => {
+    const client = clientRef.current
+    if (!client || activeAgent?.role !== 'manager') {
+      return
+    }
+
+    setIsStoppingAllAgents(true)
+
+    try {
+      await client.stopAllAgents(activeAgent.agentId)
+      setPendingResponseStart((previous) =>
+        previous?.agentId === activeAgent.agentId ? null : previous,
+      )
+      setState((previous) => ({
+        ...previous,
+        lastError: null,
+      }))
+    } catch (error) {
+      setState((previous) => ({
+        ...previous,
+        lastError: `Failed to stop manager and workers: ${toErrorMessage(error)}`,
+      }))
+    } finally {
+      setIsStoppingAllAgents(false)
+    }
+  }, [activeAgent])
 
   const handleSend = (text: string, attachments?: ConversationAttachment[]) => {
     if (!activeAgentId) return
@@ -800,6 +830,10 @@ export function IndexPage() {
                   showCompact={isActiveManager}
                   compactInProgress={isCompactingManager}
                   onCompact={() => void handleCompactManager()}
+                  showStopAll={isActiveManager}
+                  stopAllInProgress={isStoppingAllAgents}
+                  stopAllDisabled={!state.connected || !canStopAllAgents}
+                  onStopAll={() => void handleStopAllAgents()}
                   showNewChat={isActiveManager}
                   onNewChat={handleNewChat}
                   isArtifactsPanelOpen={isArtifactsPanelOpen}

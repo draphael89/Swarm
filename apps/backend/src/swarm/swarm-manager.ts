@@ -510,6 +510,72 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.emitAgentsSnapshot();
   }
 
+  async stopAllAgents(
+    callerAgentId: string,
+    targetManagerId: string
+  ): Promise<{ managerId: string; terminatedWorkerIds: string[]; managerTerminated: boolean }> {
+    const manager = this.assertManager(callerAgentId, "stop all agents");
+
+    const target = this.descriptors.get(targetManagerId);
+    if (!target || target.role !== "manager") {
+      throw new Error(`Unknown manager: ${targetManagerId}`);
+    }
+
+    if (target.agentId !== manager.agentId) {
+      throw new Error(`Only selected manager can stop all agents for ${targetManagerId}`);
+    }
+
+    const terminatedWorkers: AgentDescriptor[] = [];
+
+    for (const descriptor of Array.from(this.descriptors.values())) {
+      if (descriptor.role !== "worker") {
+        continue;
+      }
+
+      if (descriptor.managerId !== targetManagerId) {
+        continue;
+      }
+
+      if (descriptor.status === "terminated" || descriptor.status === "stopped_on_restart") {
+        continue;
+      }
+
+      await this.terminateDescriptor(descriptor, { abort: true, emitStatus: false });
+      terminatedWorkers.push(descriptor);
+    }
+
+    let managerTerminated = false;
+    if (target.status !== "terminated" && target.status !== "stopped_on_restart") {
+      await this.terminateDescriptor(target, { abort: true, emitStatus: false });
+      managerTerminated = true;
+    }
+
+    await this.saveStore();
+
+    for (const worker of terminatedWorkers) {
+      this.emitStatus(worker.agentId, worker.status, 0);
+    }
+
+    if (managerTerminated) {
+      this.emitStatus(target.agentId, target.status, 0);
+    }
+
+    this.emitAgentsSnapshot();
+
+    this.logDebug("manager:stop_all", {
+      callerAgentId,
+      targetManagerId,
+      terminatedWorkerIds: terminatedWorkers.map((worker) => worker.agentId),
+      managerTerminated
+    });
+
+    return {
+      managerId: targetManagerId,
+      terminatedWorkerIds: terminatedWorkers.map((worker) => worker.agentId),
+      managerTerminated
+    };
+  }
+
   async createManager(
     callerAgentId: string,
     input: { name: string; cwd: string; model?: SwarmModelPreset }

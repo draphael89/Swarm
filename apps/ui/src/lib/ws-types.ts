@@ -84,6 +84,7 @@ export type ClientCommand =
       delivery?: DeliveryMode
     }
   | { type: 'kill_agent'; agentId: string }
+  | { type: 'stop_all_agents'; managerId: string; requestId?: string }
   | { type: 'create_manager'; name: string; cwd: string; model: ManagerModelPreset; requestId?: string }
   | { type: 'delete_manager'; managerId: string; requestId?: string }
   | { type: 'list_directories'; path?: string; requestId?: string }
@@ -131,6 +132,14 @@ export interface ManagerCreatedEvent {
 export interface ManagerDeletedEvent {
   type: 'manager_deleted'
   managerId: string
+  requestId?: string
+}
+
+export interface StopAllAgentsResultEvent {
+  type: 'stop_all_agents_result'
+  managerId: string
+  terminatedWorkerIds: string[]
+  managerTerminated: boolean
   requestId?: string
 }
 
@@ -201,6 +210,7 @@ export type ServerEvent =
   | { type: 'agents_snapshot'; agents: AgentDescriptor[] }
   | ManagerCreatedEvent
   | ManagerDeletedEvent
+  | StopAllAgentsResultEvent
   | DirectoriesListedEvent
   | DirectoryValidatedEvent
   | DirectoryPickedEvent

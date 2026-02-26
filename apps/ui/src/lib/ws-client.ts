@@ -79,6 +79,10 @@ export class ManagerWsClient {
   private requestCounter = 0
   private readonly pendingCreateManagerRequests = new Map<string, PendingRequest<AgentDescriptor>>()
   private readonly pendingDeleteManagerRequests = new Map<string, PendingRequest<{ managerId: string }>>()
+  private readonly pendingStopAllAgentsRequests = new Map<
+    string,
+    PendingRequest<{ managerId: string; terminatedWorkerIds: string[]; managerTerminated: boolean }>
+  >()
   private readonly pendingListDirectoriesRequests = new Map<string, PendingRequest<DirectoriesListedResult>>()
   private readonly pendingValidateDirectoryRequests = new Map<string, PendingRequest<DirectoryValidationResult>>()
   private readonly pendingPickDirectoryRequests = new Map<string, PendingRequest<string | null>>()
@@ -221,6 +225,41 @@ export class ManagerWsClient {
       type: 'kill_agent',
       agentId: trimmed,
     })
+  }
+
+  async stopAllAgents(
+    managerId: string,
+  ): Promise<{ managerId: string; terminatedWorkerIds: string[]; managerTerminated: boolean }> {
+    const trimmed = managerId.trim()
+    if (!trimmed) {
+      throw new Error('Manager id is required.')
+    }
+
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket is disconnected. Reconnecting...')
+    }
+
+    const requestId = this.nextRequestId('stop_all_agents')
+
+    return new Promise<{ managerId: string; terminatedWorkerIds: string[]; managerTerminated: boolean }>(
+      (resolve, reject) => {
+        this.trackPendingRequest(this.pendingStopAllAgentsRequests, requestId, resolve, reject)
+
+        const sent = this.send({
+          type: 'stop_all_agents',
+          managerId: trimmed,
+          requestId,
+        })
+
+        if (!sent) {
+          this.rejectPendingRequest(
+            this.pendingStopAllAgentsRequests,
+            requestId,
+            new Error('WebSocket is disconnected. Reconnecting...'),
+          )
+        }
+      },
+    )
   }
 
   async createManager(input: { name: string; cwd: string; model: ManagerModelPreset }): Promise<AgentDescriptor> {
@@ -520,6 +559,19 @@ export class ManagerWsClient {
         break
       }
 
+      case 'stop_all_agents_result': {
+        this.resolvePendingRequest(
+          this.pendingStopAllAgentsRequests,
+          event.requestId,
+          {
+            managerId: event.managerId,
+            terminatedWorkerIds: event.terminatedWorkerIds,
+            managerTerminated: event.managerTerminated,
+          },
+        )
+        break
+      }
+
       case 'directories_listed': {
         this.resolvePendingRequest(
           this.pendingListDirectoriesRequests,
@@ -763,6 +815,7 @@ export class ManagerWsClient {
       const resolvedById =
         this.rejectPendingByRequestId(this.pendingCreateManagerRequests, requestId, fullError) ||
         this.rejectPendingByRequestId(this.pendingDeleteManagerRequests, requestId, fullError) ||
+        this.rejectPendingByRequestId(this.pendingStopAllAgentsRequests, requestId, fullError) ||
         this.rejectPendingByRequestId(this.pendingListDirectoriesRequests, requestId, fullError) ||
         this.rejectPendingByRequestId(this.pendingValidateDirectoryRequests, requestId, fullError) ||
         this.rejectPendingByRequestId(this.pendingPickDirectoryRequests, requestId, fullError)
@@ -782,6 +835,10 @@ export class ManagerWsClient {
       if (this.rejectOldestPendingRequest(this.pendingDeleteManagerRequests, fullError)) return
     }
 
+    if (loweredCode.includes('stop_all_agents')) {
+      if (this.rejectOldestPendingRequest(this.pendingStopAllAgentsRequests, fullError)) return
+    }
+
     if (loweredCode.includes('list_directories')) {
       if (this.rejectOldestPendingRequest(this.pendingListDirectoriesRequests, fullError)) return
     }
@@ -797,6 +854,7 @@ export class ManagerWsClient {
     const totalPending =
       this.pendingCreateManagerRequests.size +
       this.pendingDeleteManagerRequests.size +
+      this.pendingStopAllAgentsRequests.size +
       this.pendingListDirectoriesRequests.size +
       this.pendingValidateDirectoryRequests.size +
       this.pendingPickDirectoryRequests.size
@@ -807,6 +865,7 @@ export class ManagerWsClient {
 
     this.rejectOldestPendingRequest(this.pendingCreateManagerRequests, fullError)
     this.rejectOldestPendingRequest(this.pendingDeleteManagerRequests, fullError)
+    this.rejectOldestPendingRequest(this.pendingStopAllAgentsRequests, fullError)
     this.rejectOldestPendingRequest(this.pendingListDirectoriesRequests, fullError)
     this.rejectOldestPendingRequest(this.pendingValidateDirectoryRequests, fullError)
     this.rejectOldestPendingRequest(this.pendingPickDirectoryRequests, fullError)
@@ -831,6 +890,7 @@ export class ManagerWsClient {
 
     this.rejectPendingMap(this.pendingCreateManagerRequests, error)
     this.rejectPendingMap(this.pendingDeleteManagerRequests, error)
+    this.rejectPendingMap(this.pendingStopAllAgentsRequests, error)
     this.rejectPendingMap(this.pendingListDirectoriesRequests, error)
     this.rejectPendingMap(this.pendingValidateDirectoryRequests, error)
     this.rejectPendingMap(this.pendingPickDirectoryRequests, error)

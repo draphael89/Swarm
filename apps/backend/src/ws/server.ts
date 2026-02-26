@@ -1481,6 +1481,38 @@ export class SwarmWebSocketServer {
       return;
     }
 
+    if (command.type === "stop_all_agents") {
+      const managerContextId = this.resolveManagerContextAgentId(subscribedAgentId);
+      if (!managerContextId) {
+        this.send(socket, {
+          type: "error",
+          code: "UNKNOWN_AGENT",
+          message: `Agent ${subscribedAgentId} does not exist.`,
+          requestId: command.requestId
+        });
+        return;
+      }
+
+      try {
+        const stopped = await this.swarmManager.stopAllAgents(managerContextId, command.managerId);
+        this.send(socket, {
+          type: "stop_all_agents_result",
+          managerId: stopped.managerId,
+          terminatedWorkerIds: stopped.terminatedWorkerIds,
+          managerTerminated: stopped.managerTerminated,
+          requestId: command.requestId
+        });
+      } catch (error) {
+        this.send(socket, {
+          type: "error",
+          code: "STOP_ALL_AGENTS_FAILED",
+          message: error instanceof Error ? error.message : String(error),
+          requestId: command.requestId
+        });
+      }
+      return;
+    }
+
     if (command.type === "create_manager") {
       const managerContextId = this.resolveManagerContextAgentId(subscribedAgentId);
       if (!managerContextId) {
@@ -1822,6 +1854,7 @@ export class SwarmWebSocketServer {
     switch (command.type) {
       case "create_manager":
       case "delete_manager":
+      case "stop_all_agents":
       case "list_directories":
       case "validate_directory":
       case "pick_directory":
@@ -1911,6 +1944,27 @@ export class SwarmWebSocketServer {
         command: {
           type: "kill_agent",
           agentId: maybe.agentId.trim()
+        }
+      };
+    }
+
+    if (maybe.type === "stop_all_agents") {
+      const managerId = (maybe as { managerId?: unknown }).managerId;
+      const requestId = (maybe as { requestId?: unknown }).requestId;
+
+      if (typeof managerId !== "string" || managerId.trim().length === 0) {
+        return { ok: false, error: "stop_all_agents.managerId must be a non-empty string" };
+      }
+      if (requestId !== undefined && typeof requestId !== "string") {
+        return { ok: false, error: "stop_all_agents.requestId must be a string when provided" };
+      }
+
+      return {
+        ok: true,
+        command: {
+          type: "stop_all_agents",
+          managerId: managerId.trim(),
+          requestId
         }
       };
     }

@@ -31,6 +31,7 @@ export type ClientCommand =
       delivery?: "auto" | "followUp" | "steer";
     }
   | { type: "kill_agent"; agentId: string }
+  | { type: "stop_all_agents"; managerId: string; requestId?: string }
   | { type: "create_manager"; name: string; cwd: string; model?: SwarmModelPreset; requestId?: string }
   | { type: "delete_manager"; managerId: string; requestId?: string }
   | { type: "list_directories"; path?: string; requestId?: string }
@@ -58,6 +59,13 @@ export type ServerEvent =
   | { type: "agents_snapshot"; agents: AgentDescriptor[] }
   | { type: "manager_created"; manager: AgentDescriptor; requestId?: string }
   | { type: "manager_deleted"; managerId: string; terminatedWorkerIds: string[]; requestId?: string }
+  | {
+      type: "stop_all_agents_result";
+      managerId: string;
+      terminatedWorkerIds: string[];
+      managerTerminated: boolean;
+      requestId?: string;
+    }
   | {
       type: "directories_listed";
       path: string;
