@@ -446,6 +446,66 @@ describe('ManagerWsClient', () => {
     client.destroy()
   })
 
+  it('stores agent activity events for the selected agent and ignores other threads', () => {
+    const client = new ManagerWsClient('ws://127.0.0.1:8787', 'manager')
+
+    client.start()
+    vi.advanceTimersByTime(60)
+
+    const socket = FakeWebSocket.instances[0]
+    socket.emit('open')
+
+    emitServerEvent(socket, {
+      type: 'ready',
+      serverTime: new Date().toISOString(),
+      subscribedAgentId: 'manager',
+    })
+
+    emitServerEvent(socket, {
+      type: 'agent_message',
+      agentId: 'other-manager',
+      timestamp: new Date().toISOString(),
+      source: 'agent_to_agent',
+      fromAgentId: 'worker-a',
+      toAgentId: 'worker-b',
+      text: 'ignore me',
+      requestedDelivery: 'auto',
+      acceptedMode: 'steer',
+    })
+
+    expect(client.getState().messages).toHaveLength(0)
+
+    emitServerEvent(socket, {
+      type: 'agent_message',
+      agentId: 'manager',
+      timestamp: new Date().toISOString(),
+      source: 'agent_to_agent',
+      fromAgentId: 'manager',
+      toAgentId: 'worker-1',
+      text: 'run this task',
+      requestedDelivery: 'auto',
+      acceptedMode: 'steer',
+    })
+
+    emitServerEvent(socket, {
+      type: 'agent_tool_call',
+      agentId: 'manager',
+      actorAgentId: 'worker-1',
+      timestamp: new Date().toISOString(),
+      kind: 'tool_execution_start',
+      toolName: 'read',
+      toolCallId: 'call-2',
+      text: '{"path":"README.md"}',
+    })
+
+    const messages = client.getState().messages
+    expect(messages).toHaveLength(2)
+    expect(messages[0]?.type).toBe('agent_message')
+    expect(messages[1]?.type).toBe('agent_tool_call')
+
+    client.destroy()
+  })
+
   it('sends explicit followUp delivery when requested', () => {
     const client = new ManagerWsClient('ws://127.0.0.1:8787', 'worker-1')
 

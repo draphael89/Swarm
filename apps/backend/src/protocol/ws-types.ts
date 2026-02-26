@@ -3,8 +3,6 @@ import type {
   AgentDescriptor,
   ConversationAttachment,
   ConversationEntryEvent,
-  ConversationLogEvent,
-  ConversationMessageEvent,
   SwarmModelPreset
 } from "../swarm/types.js";
 import type { SlackStatusEvent } from "../integrations/slack/slack-status.js";
@@ -46,8 +44,7 @@ export type ServerEvent =
       agentId: string;
       messages: ConversationEntryEvent[];
     }
-  | ConversationMessageEvent
-  | ConversationLogEvent
+  | ConversationEntryEvent
   | {
       type: "agent_status";
       agentId: string;

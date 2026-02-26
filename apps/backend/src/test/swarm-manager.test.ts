@@ -1456,8 +1456,22 @@ describe('SwarmManager', () => {
     await secondBoot.boot()
 
     const history = secondBoot.getConversationHistory('manager')
-    expect(history.some((message) => message.text === 'persist this' && message.source === 'user_input')).toBe(true)
-    expect(history.some((message) => message.text === 'saved reply' && message.source === 'speak_to_user')).toBe(true)
+    expect(
+      history.some(
+        (message) =>
+          message.type === 'conversation_message' &&
+          message.text === 'persist this' &&
+          message.source === 'user_input',
+      ),
+    ).toBe(true)
+    expect(
+      history.some(
+        (message) =>
+          message.type === 'conversation_message' &&
+          message.text === 'saved reply' &&
+          message.source === 'speak_to_user',
+      ),
+    ).toBe(true)
   })
 
   it('resetManagerSession recreates manager runtime and clears manager history', async () => {

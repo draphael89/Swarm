@@ -133,6 +133,16 @@ export class SwarmWebSocketServer {
     this.broadcastToSubscribed(event);
   };
 
+  private readonly onAgentMessage = (event: ServerEvent): void => {
+    if (event.type !== "agent_message") return;
+    this.broadcastToSubscribed(event);
+  };
+
+  private readonly onAgentToolCall = (event: ServerEvent): void => {
+    if (event.type !== "agent_tool_call") return;
+    this.broadcastToSubscribed(event);
+  };
+
   private readonly onConversationReset = (event: ServerEvent): void => {
     if (event.type !== "conversation_reset") return;
     this.broadcastToSubscribed(event);
@@ -224,6 +234,8 @@ export class SwarmWebSocketServer {
 
     this.swarmManager.on("conversation_message", this.onConversationMessage);
     this.swarmManager.on("conversation_log", this.onConversationLog);
+    this.swarmManager.on("agent_message", this.onAgentMessage);
+    this.swarmManager.on("agent_tool_call", this.onAgentToolCall);
     this.swarmManager.on("conversation_reset", this.onConversationReset);
     this.swarmManager.on("agent_status", this.onAgentStatus);
     this.swarmManager.on("agents_snapshot", this.onAgentsSnapshot);
@@ -234,6 +246,8 @@ export class SwarmWebSocketServer {
   async stop(): Promise<void> {
     this.swarmManager.off("conversation_message", this.onConversationMessage);
     this.swarmManager.off("conversation_log", this.onConversationLog);
+    this.swarmManager.off("agent_message", this.onAgentMessage);
+    this.swarmManager.off("agent_tool_call", this.onAgentToolCall);
     this.swarmManager.off("conversation_reset", this.onConversationReset);
     this.swarmManager.off("agent_status", this.onAgentStatus);
     this.swarmManager.off("agents_snapshot", this.onAgentsSnapshot);
@@ -1847,6 +1861,8 @@ export class SwarmWebSocketServer {
       if (
         event.type === "conversation_message" ||
         event.type === "conversation_log" ||
+        event.type === "agent_message" ||
+        event.type === "agent_tool_call" ||
         event.type === "conversation_reset"
       ) {
         if (subscribedAgent !== event.agentId) {

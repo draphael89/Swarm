@@ -187,7 +187,42 @@ export interface ConversationLogEvent {
   isError?: boolean;
 }
 
-export type ConversationEntryEvent = ConversationMessageEvent | ConversationLogEvent;
+export interface AgentMessageEvent {
+  type: "agent_message";
+  agentId: string;
+  timestamp: string;
+  source: "user_to_agent" | "agent_to_agent";
+  fromAgentId?: string;
+  toAgentId: string;
+  text: string;
+  sourceContext?: MessageSourceContext;
+  requestedDelivery?: RequestedDeliveryMode;
+  acceptedMode?: AcceptedDeliveryMode;
+  attachmentCount?: number;
+}
+
+export type AgentToolCallKind = Extract<
+  ConversationLogKind,
+  "tool_execution_start" | "tool_execution_update" | "tool_execution_end"
+>;
+
+export interface AgentToolCallEvent {
+  type: "agent_tool_call";
+  agentId: string;
+  actorAgentId: string;
+  timestamp: string;
+  kind: AgentToolCallKind;
+  toolName?: string;
+  toolCallId?: string;
+  text: string;
+  isError?: boolean;
+}
+
+export type ConversationEntryEvent =
+  | ConversationMessageEvent
+  | ConversationLogEvent
+  | AgentMessageEvent
+  | AgentToolCallEvent;
 
 export interface AgentStatusEvent {
   type: "agent_status";

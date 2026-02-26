@@ -48,6 +48,8 @@ import type {
 import { buildSwarmTools, type SwarmToolHost } from "./swarm-tools.js";
 import type {
   AcceptedDeliveryMode,
+  AgentMessageEvent,
+  AgentToolCallEvent,
   AgentContextUsage,
   AgentDescriptor,
   AgentModelDescriptor,
@@ -656,6 +658,24 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     return validateDirectoryPath(pickedPath, this.getCwdPolicy());
   }
 
+  private resolveActivityManagerContextIds(...agents: AgentDescriptor[]): string[] {
+    const managerContextIds = new Set<string>();
+
+    for (const descriptor of agents) {
+      if (descriptor.role === "manager") {
+        managerContextIds.add(descriptor.agentId);
+        continue;
+      }
+
+      const managerId = descriptor.managerId.trim();
+      if (managerId.length > 0) {
+        managerContextIds.add(managerId);
+      }
+    }
+
+    return Array.from(managerContextIds);
+  }
+
   async sendMessage(
     fromAgentId: string,
     targetAgentId: string,
@@ -680,6 +700,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error(`Manager ${sender.agentId} does not own worker ${targetAgentId}`);
     }
 
+    const managerContextIds = this.resolveActivityManagerContextIds(sender, target);
     const runtime = this.runtimes.get(targetAgentId);
     if (!runtime) {
       throw new Error(`Target runtime is not available: ${targetAgentId}`);
@@ -707,6 +728,23 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       attachmentCount: attachments.length,
       modelTextPreview: previewForLog(extractRuntimeMessageText(modelMessage))
     });
+
+    if (origin !== "user" && fromAgentId !== targetAgentId) {
+      for (const managerContextId of managerContextIds) {
+        this.emitAgentMessage({
+          type: "agent_message",
+          agentId: managerContextId,
+          timestamp: this.now(),
+          source: "agent_to_agent",
+          fromAgentId,
+          toAgentId: targetAgentId,
+          text: message,
+          requestedDelivery: delivery,
+          acceptedMode: receipt.acceptedMode,
+          attachmentCount: attachments.length > 0 ? attachments.length : undefined
+        });
+      }
+    }
 
     return receipt;
   }
@@ -1016,9 +1054,23 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.emitConversationMessage(userEvent);
 
     if (target.role !== "manager") {
-      await this.sendMessage(managerContextId, targetAgentId, trimmed, options?.delivery ?? "auto", {
+      const requestedDelivery = options?.delivery ?? "auto";
+      const receipt = await this.sendMessage(managerContextId, targetAgentId, trimmed, requestedDelivery, {
         origin: "user",
         attachments
+      });
+
+      this.emitAgentMessage({
+        type: "agent_message",
+        agentId: managerContextId,
+        timestamp: this.now(),
+        source: "user_to_agent",
+        toAgentId: targetAgentId,
+        text: trimmed,
+        sourceContext,
+        requestedDelivery,
+        acceptedMode: receipt.acceptedMode,
+        attachmentCount: attachments.length > 0 ? attachments.length : undefined
       });
       return;
     }
@@ -1245,6 +1297,16 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private emitConversationLog(event: ConversationLogEvent): void {
     this.emitConversationEntry(event);
     this.emit("conversation_log", event satisfies ServerEvent);
+  }
+
+  private emitAgentMessage(event: AgentMessageEvent): void {
+    this.emitConversationEntry(event);
+    this.emit("agent_message", event satisfies ServerEvent);
+  }
+
+  private emitAgentToolCall(event: AgentToolCallEvent): void {
+    this.emitConversationEntry(event);
+    this.emit("agent_tool_call", event satisfies ServerEvent);
   }
 
   private emitConversationEntry(event: ConversationEntryEvent): void {
@@ -2383,14 +2445,80 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
   }
 
+  private captureToolCallActivityFromRuntime(
+    managerContextId: string,
+    actorAgentId: string,
+    event: RuntimeSessionEvent,
+    timestamp: string
+  ): void {
+    switch (event.type) {
+      case "tool_execution_start":
+        this.emitAgentToolCall({
+          type: "agent_tool_call",
+          agentId: managerContextId,
+          actorAgentId,
+          timestamp,
+          kind: "tool_execution_start",
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          text: safeJson(event.args)
+        });
+        return;
+
+      case "tool_execution_update":
+        this.emitAgentToolCall({
+          type: "agent_tool_call",
+          agentId: managerContextId,
+          actorAgentId,
+          timestamp,
+          kind: "tool_execution_update",
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          text: safeJson(event.partialResult)
+        });
+        return;
+
+      case "tool_execution_end":
+        this.emitAgentToolCall({
+          type: "agent_tool_call",
+          agentId: managerContextId,
+          actorAgentId,
+          timestamp,
+          kind: "tool_execution_end",
+          toolName: event.toolName,
+          toolCallId: event.toolCallId,
+          text: safeJson(event.result),
+          isError: event.isError
+        });
+        return;
+
+      case "agent_start":
+      case "agent_end":
+      case "turn_start":
+      case "turn_end":
+      case "message_start":
+      case "message_update":
+      case "message_end":
+      case "auto_compaction_start":
+      case "auto_compaction_end":
+      case "auto_retry_start":
+      case "auto_retry_end":
+        return;
+    }
+  }
+
   private captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent): void {
     const descriptor = this.descriptors.get(agentId);
+    const timestamp = this.now();
+    if (descriptor) {
+      const managerContextId = descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId;
+      this.captureToolCallActivityFromRuntime(managerContextId, agentId, event, timestamp);
+    }
+
     if (descriptor?.role === "manager") {
       this.captureManagerRuntimeErrorConversationEvent(agentId, event);
       return;
     }
-
-    const timestamp = this.now();
 
     switch (event.type) {
       case "message_start": {
@@ -3532,7 +3660,12 @@ function normalizeThinkingLevel(level: string): string {
 }
 
 function isConversationEntryEvent(value: unknown): value is ConversationEntryEvent {
-  return isConversationMessageEvent(value) || isConversationLogEvent(value);
+  return (
+    isConversationMessageEvent(value) ||
+    isConversationLogEvent(value) ||
+    isAgentMessageEvent(value) ||
+    isAgentToolCallEvent(value)
+  );
 }
 
 function isConversationMessageEvent(value: unknown): value is ConversationMessageEvent {
@@ -3731,6 +3864,69 @@ function isConversationLogEvent(value: unknown): value is ConversationLogEvent {
     return false;
   }
 
+  if (maybe.toolName !== undefined && typeof maybe.toolName !== "string") return false;
+  if (maybe.toolCallId !== undefined && typeof maybe.toolCallId !== "string") return false;
+  if (typeof maybe.text !== "string") return false;
+  if (maybe.isError !== undefined && typeof maybe.isError !== "boolean") return false;
+
+  return true;
+}
+
+function isAgentMessageEvent(value: unknown): value is AgentMessageEvent {
+  if (!value || typeof value !== "object") return false;
+
+  const maybe = value as Partial<AgentMessageEvent>;
+  if (maybe.type !== "agent_message") return false;
+  if (typeof maybe.agentId !== "string" || maybe.agentId.length === 0) return false;
+  if (typeof maybe.timestamp !== "string") return false;
+  if (maybe.source !== "user_to_agent" && maybe.source !== "agent_to_agent") return false;
+  if (maybe.fromAgentId !== undefined && typeof maybe.fromAgentId !== "string") return false;
+  if (typeof maybe.toAgentId !== "string" || maybe.toAgentId.length === 0) return false;
+  if (typeof maybe.text !== "string") return false;
+  if (maybe.sourceContext !== undefined && !isMessageSourceContext(maybe.sourceContext)) return false;
+  if (
+    maybe.requestedDelivery !== undefined &&
+    maybe.requestedDelivery !== "auto" &&
+    maybe.requestedDelivery !== "followUp" &&
+    maybe.requestedDelivery !== "steer"
+  ) {
+    return false;
+  }
+  if (
+    maybe.acceptedMode !== undefined &&
+    maybe.acceptedMode !== "prompt" &&
+    maybe.acceptedMode !== "followUp" &&
+    maybe.acceptedMode !== "steer"
+  ) {
+    return false;
+  }
+  if (
+    maybe.attachmentCount !== undefined &&
+    (typeof maybe.attachmentCount !== "number" ||
+      !Number.isFinite(maybe.attachmentCount) ||
+      maybe.attachmentCount < 0)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isAgentToolCallEvent(value: unknown): value is AgentToolCallEvent {
+  if (!value || typeof value !== "object") return false;
+
+  const maybe = value as Partial<AgentToolCallEvent>;
+  if (maybe.type !== "agent_tool_call") return false;
+  if (typeof maybe.agentId !== "string" || maybe.agentId.length === 0) return false;
+  if (typeof maybe.actorAgentId !== "string" || maybe.actorAgentId.length === 0) return false;
+  if (typeof maybe.timestamp !== "string") return false;
+  if (
+    maybe.kind !== "tool_execution_start" &&
+    maybe.kind !== "tool_execution_update" &&
+    maybe.kind !== "tool_execution_end"
+  ) {
+    return false;
+  }
   if (maybe.toolName !== undefined && typeof maybe.toolName !== "string") return false;
   if (maybe.toolCallId !== undefined && typeof maybe.toolCallId !== "string") return false;
   if (typeof maybe.text !== "string") return false;
