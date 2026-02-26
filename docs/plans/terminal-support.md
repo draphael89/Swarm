@@ -33,7 +33,7 @@ The solution should fit the current architecture:
 
 ## 4) Security baseline
 - App is local-first, but terminal execution is still high-risk.
-- Backend already has cwd allowlist concepts (`SWARM_CWD_ALLOWLIST_ROOTS`) and directory validation utilities.
+- Backend already has cwd allowlist concepts and directory validation utilities.
 - No dedicated terminal isolation exists yet.
 
 ## 5) Reference audit (`~/do-browser`)

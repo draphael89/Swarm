@@ -365,7 +365,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       this.config.defaultCwd = await this.resolveAndValidateCwd(this.config.defaultCwd);
     } catch (error) {
       if (error instanceof Error) {
-        throw new Error(`Invalid SWARM_DEFAULT_CWD: ${error.message}`);
+        throw new Error(`Invalid default working directory: ${error.message}`);
       }
       throw error;
     }
@@ -2271,7 +2271,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     if (!model) {
       throw new Error(
         `Unable to resolve model ${descriptor.model.provider}/${descriptor.model.modelId}. ` +
-          "Set SWARM_MODEL_PROVIDER/SWARM_MODEL_ID or install a model supported by @mariozechner/pi-ai."
+          "Install a model supported by @mariozechner/pi-ai."
       );
     }
 

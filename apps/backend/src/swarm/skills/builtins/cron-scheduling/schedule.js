@@ -3,45 +3,15 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { CronExpressionParser } from "cron-parser";
 
 const SCHEDULES_DIR_NAME = "schedules";
 const AGENTS_STORE_RELATIVE_PATH = "swarm/agents.json";
-const DEFAULT_MANAGER_CANDIDATES = [
-  process.env.SWARM_MANAGER_ID?.trim(),
-  "manager",
-  "opus-manager"
-].filter(Boolean);
-
-function resolvePathLike(rawPath) {
-  if (rawPath === "~") {
-    return homedir();
-  }
-
-  if (rawPath.startsWith("~/")) {
-    return resolve(homedir(), rawPath.slice(2));
-  }
-
-  if (isAbsolute(rawPath)) {
-    return resolve(rawPath);
-  }
-
-  return resolve(process.cwd(), rawPath);
-}
+const DEFAULT_MANAGER_CANDIDATES = ["manager", "opus-manager"];
 
 function resolveDataDir() {
-  const dataDirEnv = process.env.SWARM_DATA_DIR?.trim();
-  if (dataDirEnv) {
-    return resolvePathLike(dataDirEnv);
-  }
-
-  const nodeEnv = process.env.NODE_ENV?.trim().toLowerCase();
-  if (nodeEnv === "production") {
-    return resolve(homedir(), ".swarm");
-  }
-
-  return resolve(homedir(), ".swarm-dev");
+  return resolve(homedir(), ".swarm");
 }
 
 function resolveSchedulesFilePath(dataDir, managerId) {
