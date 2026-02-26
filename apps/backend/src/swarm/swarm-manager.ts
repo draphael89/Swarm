@@ -1088,6 +1088,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     const compactCommand =
       target.role === "manager" && attachments.length === 0 ? parseCompactSlashCommand(trimmed) : undefined;
     if (compactCommand) {
+      this.logDebug("manager:user_message_compact_command", {
+        targetAgentId: target.agentId,
+        sourceContext,
+        customInstructionsPreview: previewForLog(compactCommand.customInstructions ?? "")
+      });
       await this.compactAgentContext(target.agentId, {
         customInstructions: compactCommand.customInstructions,
         sourceContext,
@@ -1121,9 +1126,35 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     if (target.role !== "manager") {
       const requestedDelivery = options?.delivery ?? "auto";
-      const receipt = await this.sendMessage(managerContextId, targetAgentId, trimmed, requestedDelivery, {
-        origin: "user",
-        attachments
+      let receipt: SendMessageReceipt;
+      try {
+        receipt = await this.sendMessage(managerContextId, targetAgentId, trimmed, requestedDelivery, {
+          origin: "user",
+          attachments
+        });
+      } catch (error) {
+        this.logDebug("manager:user_message_dispatch_error", {
+          managerContextId,
+          targetAgentId,
+          targetRole: target.role,
+          requestedDelivery,
+          sourceContext,
+          textPreview: previewForLog(trimmed),
+          attachmentCount: attachments.length,
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        });
+        throw error;
+      }
+
+      this.logDebug("manager:user_message_dispatch_complete", {
+        managerContextId,
+        targetAgentId,
+        targetRole: target.role,
+        requestedDelivery,
+        acceptedMode: receipt.acceptedMode,
+        sourceContext,
+        attachmentCount: attachments.length
       });
 
       this.emitAgentMessage({
@@ -1143,6 +1174,16 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
     const managerRuntime = this.runtimes.get(managerContextId);
     if (!managerRuntime) {
+      this.logDebug("manager:user_message_dispatch_error", {
+        managerContextId,
+        targetAgentId: managerContextId,
+        targetRole: target.role,
+        requestedDelivery: "steer",
+        sourceContext,
+        textPreview: previewForLog(trimmed),
+        attachmentCount: attachments.length,
+        message: `Manager runtime is not initialized: ${managerContextId}`
+      });
       throw new Error(`Manager runtime is not initialized: ${managerContextId}`);
     }
 
@@ -1158,7 +1199,45 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       "user"
     );
 
-    await managerRuntime.sendMessage(runtimeMessage, "steer");
+    this.logDebug("manager:user_message_dispatch_start", {
+      managerContextId,
+      targetAgentId: managerContextId,
+      targetRole: target.role,
+      requestedDelivery: "steer",
+      sourceContext,
+      textPreview: previewForLog(trimmed),
+      attachmentCount: attachments.length,
+      runtimeTextPreview: previewForLog(extractRuntimeMessageText(runtimeMessage)),
+      runtimeImageCount: typeof runtimeMessage === "string" ? 0 : (runtimeMessage.images?.length ?? 0)
+    });
+
+    try {
+      const receipt = await managerRuntime.sendMessage(runtimeMessage, "steer");
+      this.logDebug("manager:user_message_dispatch_complete", {
+        managerContextId,
+        targetAgentId: managerContextId,
+        targetRole: target.role,
+        requestedDelivery: "steer",
+        acceptedMode: receipt.acceptedMode,
+        sourceContext,
+        attachmentCount: attachments.length
+      });
+    } catch (error) {
+      this.logDebug("manager:user_message_dispatch_error", {
+        managerContextId,
+        targetAgentId: managerContextId,
+        targetRole: target.role,
+        requestedDelivery: "steer",
+        sourceContext,
+        textPreview: previewForLog(trimmed),
+        attachmentCount: attachments.length,
+        runtimeTextPreview: previewForLog(extractRuntimeMessageText(runtimeMessage)),
+        runtimeImageCount: typeof runtimeMessage === "string" ? 0 : (runtimeMessage.images?.length ?? 0),
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      throw error;
+    }
   }
 
   async resetManagerSession(

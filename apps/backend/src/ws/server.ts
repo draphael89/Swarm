@@ -1437,6 +1437,9 @@ export class SwarmWebSocketServer {
   private async handleSocketMessage(socket: WebSocket, raw: RawData): Promise<void> {
     const parsed = this.parseClientCommand(raw);
     if (!parsed.ok) {
+      this.logDebug("command:invalid", {
+        message: parsed.error
+      });
       this.send(socket, {
         type: "error",
         code: "INVALID_COMMAND",
@@ -1446,6 +1449,10 @@ export class SwarmWebSocketServer {
     }
 
     const command = parsed.command;
+    this.logDebug("command:received", {
+      type: command.type,
+      requestId: this.extractRequestId(command)
+    });
 
     if (command.type === "ping") {
       this.send(socket, {
@@ -1463,6 +1470,9 @@ export class SwarmWebSocketServer {
 
     const subscribedAgentId = this.resolveSubscribedAgentId(socket);
     if (!subscribedAgentId) {
+      this.logDebug("command:rejected:not_subscribed", {
+        type: command.type
+      });
       this.send(socket, {
         type: "error",
         code: "NOT_SUBSCRIBED",
@@ -1667,7 +1677,20 @@ export class SwarmWebSocketServer {
       const managerId = this.resolveConfiguredManagerId();
       const targetAgentId = command.agentId ?? subscribedAgentId;
 
+      this.logDebug("user_message:received", {
+        subscribedAgentId,
+        targetAgentId,
+        managerId,
+        requestedDelivery: command.delivery ?? "auto",
+        textPreview: previewForLog(command.text),
+        attachmentCount: command.attachments?.length ?? 0
+      });
+
       if (!this.allowNonManagerSubscriptions && managerId && targetAgentId !== managerId) {
+        this.logDebug("user_message:rejected:subscription_not_supported", {
+          targetAgentId,
+          managerId
+        });
         this.send(socket, {
           type: "error",
           code: "SUBSCRIPTION_NOT_SUPPORTED",
@@ -1678,6 +1701,9 @@ export class SwarmWebSocketServer {
 
       const targetDescriptor = this.swarmManager.getAgent(targetAgentId);
       if (!targetDescriptor) {
+        this.logDebug("user_message:rejected:unknown_agent", {
+          targetAgentId
+        });
         this.send(socket, {
           type: "error",
           code: "UNKNOWN_AGENT",
@@ -1688,6 +1714,9 @@ export class SwarmWebSocketServer {
 
       try {
         if (targetDescriptor.role === "manager" && command.text.trim() === "/new") {
+          this.logDebug("user_message:manager_reset", {
+            targetAgentId: targetDescriptor.agentId
+          });
           await this.swarmManager.resetManagerSession(targetDescriptor.agentId, "user_new_command");
           return;
         }
@@ -1697,13 +1726,30 @@ export class SwarmWebSocketServer {
             ? await persistConversationAttachments(command.attachments, config.paths.uploadsDir)
             : undefined;
 
+        this.logDebug("user_message:dispatch:start", {
+          targetAgentId,
+          targetRole: targetDescriptor.role,
+          persistedAttachmentCount: persistedAttachments?.length ?? 0
+        });
+
         await this.swarmManager.handleUserMessage(command.text, {
           targetAgentId,
           delivery: command.delivery,
           attachments: persistedAttachments,
           sourceContext: { channel: "web" }
         });
+
+        this.logDebug("user_message:dispatch:complete", {
+          targetAgentId,
+          targetRole: targetDescriptor.role
+        });
       } catch (error) {
+        this.logDebug("user_message:dispatch:error", {
+          targetAgentId,
+          targetRole: targetDescriptor.role,
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined
+        });
         this.send(socket, {
           type: "error",
           code: "USER_MESSAGE_FAILED",
@@ -1862,6 +1908,18 @@ export class SwarmWebSocketServer {
 
   private isSubscribable(status: string): boolean {
     return status === "idle" || status === "streaming";
+  }
+
+  private logDebug(message: string, details?: unknown): void {
+    if (!this.swarmManager.getConfig().debug) return;
+
+    const prefix = `[swarm][${new Date().toISOString()}] ws:${message}`;
+    if (details === undefined) {
+      console.log(prefix);
+      return;
+    }
+
+    console.log(prefix, details);
   }
 
   private extractRequestId(command: ClientCommand): string | undefined {
@@ -2956,6 +3014,15 @@ function extensionFromFileName(fileName: string | undefined): string | undefined
 
   const extension = extname(fileName).trim().toLowerCase().replace(/^\./, "").replace(/[^a-z0-9]/g, "");
   return extension.length > 0 ? extension : undefined;
+}
+
+function previewForLog(value: string, maxLength = 180): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength)}…`;
 }
 
 const MIME_TYPE_EXTENSIONS: Record<string, string> = {
