@@ -4,65 +4,71 @@ export const Route = createFileRoute('/')({ component: LandingPage })
 
 const features = [
   {
-    title: 'Delegation & Oversight',
+    title: 'Parallel Execution',
     description:
-      'Swarm plans work and delegates to focused AI workers in isolated worktrees. You stay informed, not involved.',
+      'Spawn multiple workers at once. Codex handles backend, Opus handles UI — all running simultaneously in isolated git worktrees.',
+  },
+  {
+    title: 'Agentic Merge Queue',
+    description:
+      'A dedicated merger agent serializes all completed work into main. One integration point, no conflicts, no babysitting.',
+  },
+  {
+    title: 'Persistent Memory',
+    description:
+      'Your manager remembers preferences, routing decisions, and project context across sessions. The knowledge compounds over time.',
+  },
+  {
+    title: 'Event-Driven Manager',
+    description:
+      'The manager is never blocked. It dispatches work, handles status updates, and steers agents — all without waiting on any single worker.',
   },
   {
     title: 'Multi-Model Teams',
     description:
-      'Mix Claude Opus, Codex, and Codex App Server. Swarm assigns each worker based on their strengths.',
+      'Route tasks to the right model. Codex App for backend features, Opus for UI polish, Codex for code generation. Your manager picks.',
   },
   {
-    title: 'Live Status Reports',
+    title: 'Voice or Text',
     description:
-      'Watch every message, tool call, and decision stream in real time. Transparent middle management.',
+      'Dump a list of tasks via text or voice. The manager breaks it down, parallelizes what it can, and sequences the rest.',
   },
   {
-    title: 'Deliverables & Scheduling',
+    title: 'Works for Real Code',
     description:
-      'Track generated files, follow references, and automate recurring tasks with built-in cron.',
+      'Not just vibe coding. Git worktrees, proper branch isolation, automated merges — production-grade workflows out of the box.',
   },
   {
-    title: 'Multi-Channel Updates',
+    title: 'Local-First & Open Source',
     description:
-      'Get reports via web dashboard, Slack, or Telegram. Same orchestration, your preferred inbox.',
-  },
-  {
-    title: 'Built-In Skills',
-    description:
-      'Web search, browser automation, G Suite workflows, image generation, and persistent memory.',
-  },
-  {
-    title: 'Isolated Workspaces',
-    description:
-      'Each manager keeps its own memory, integrations, and schedules. No cross-contamination between projects.',
-  },
-  {
-    title: 'Local-First + Open Source',
-    description:
-      'Self-hosted by default, Apache 2.0 licensed. Your data never leaves your machine.',
+      'Self-hosted daemon on your machine. Apache 2.0 licensed. Your code and API keys never leave localhost.',
   },
 ]
 
 const flow = [
   {
     num: '01',
-    title: 'Brief',
+    title: 'Create a manager',
     description:
-      'Tell Swarm what you need. It plans the work and picks the right agents for the job.',
+      'One persistent manager per project. Point it at a repo, pick a model, and give it context about how you like to work.',
   },
   {
     num: '02',
-    title: 'Delegate',
+    title: 'Describe what needs to be done',
     description:
-      'Swarm assigns scoped tasks to workers, monitors progress, and streams updates back to you.',
+      'Tell the manager your tasks — a feature, a bug, a refactor. It plans the work and spins up workers in git worktree branches.',
   },
   {
     num: '03',
-    title: 'Report',
+    title: 'Workers execute in parallel',
     description:
-      'Results, artifacts, and context are stored locally. Ready for your review.',
+      'Each worker gets a scoped task and an isolated branch. Codex for code, Opus for UI. They implement, validate, and report back.',
+  },
+  {
+    num: '04',
+    title: 'Merger handles integration',
+    description:
+      'A dedicated merger agent reviews completed work and merges to main. One serialization point — no merge conflicts, no manual rebasing.',
   },
 ]
 
@@ -98,14 +104,15 @@ function LandingPage() {
         {/* ── Hero ── */}
         <section className="pb-20 pt-24 sm:pt-32 lg:pt-40">
           <h1 className="reveal-1 font-display max-w-[52rem] text-[clamp(2.4rem,5.6vw,4.2rem)] font-normal italic leading-[1.1] tracking-[-0.025em]">
-            The middle manager{' '}
-            <span className="text-muted">for your AI agents.</span>
+            Stop managing your agents.{' '}
+            <span className="text-muted">Hire a middle manager.</span>
           </h1>
 
           <p className="reveal-2 mt-8 max-w-xl text-[1.05rem] leading-[1.7] text-muted">
-            You set the direction. Swarm handles delegation, coordination,
-            and status updates. Your AI workers do the actual work — on your
-            machine, under your control.
+            You&rsquo;re not an IC anymore. You spend your day doing project
+            management — dispatching tasks, checking status, rebasing branches.
+            Swarm gives you a persistent AI manager that handles the
+            coordination so you can focus on direction.
           </p>
 
           <div className="reveal-3 mt-10 flex items-center gap-8">
@@ -149,6 +156,50 @@ function LandingPage() {
 
         <Rule />
 
+        {/* ── The pitch ── */}
+        <section className="py-20 sm:py-24">
+          <SectionLabel>The problem</SectionLabel>
+
+          <div className="mt-8 max-w-2xl space-y-5">
+            <p className="text-[1.05rem] leading-[1.7] text-muted">
+              AI agents are good at focused work — writing code, fixing bugs,
+              refactoring modules. But someone still has to play project manager.
+              You&rsquo;re the one creating branches, assigning tasks, watching
+              terminals, merging PRs, and context-switching between five
+              different agent sessions.
+            </p>
+            <p className="text-[1.05rem] leading-[1.7] text-ink">
+              Swarm introduces a layer of middle management. One persistent
+              manager per project. You tell it what needs to get done — it
+              dispatches workers, tracks progress, and handles the merge queue.
+              You stay informed, not involved.
+            </p>
+          </div>
+        </section>
+
+        <Rule />
+
+        {/* ── How it works ── */}
+        <section className="py-20 sm:py-24">
+          <SectionLabel>How it works</SectionLabel>
+
+          <div className="mt-12 grid gap-10 sm:grid-cols-2 sm:gap-x-20 sm:gap-y-14">
+            {flow.map((step) => (
+              <div key={step.num}>
+                <span className="font-display block text-[2.8rem] font-normal italic leading-none text-rule">
+                  {step.num}
+                </span>
+                <h3 className="mt-5 text-[15px] font-medium">{step.title}</h3>
+                <p className="mt-2 text-[13px] leading-[1.7] text-muted">
+                  {step.description}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <Rule />
+
         {/* ── Features ── */}
         <section className="py-20 sm:py-24">
           <SectionLabel>Capabilities</SectionLabel>
@@ -179,27 +230,6 @@ function LandingPage() {
 
         <Rule />
 
-        {/* ── How it works ── */}
-        <section className="py-20 sm:py-24">
-          <SectionLabel>How it works</SectionLabel>
-
-          <div className="mt-12 grid gap-10 sm:grid-cols-3 sm:gap-16">
-            {flow.map((step) => (
-              <div key={step.num}>
-                <span className="font-display block text-[2.8rem] font-normal italic leading-none text-rule">
-                  {step.num}
-                </span>
-                <h3 className="mt-5 text-[15px] font-medium">{step.title}</h3>
-                <p className="mt-2 text-[13px] leading-[1.7] text-muted">
-                  {step.description}
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <Rule />
-
         {/* ── Quick start ── */}
         <section id="quick-start" className="py-20 sm:py-24">
           <SectionLabel>Quick start</SectionLabel>
@@ -215,7 +245,8 @@ function LandingPage() {
           </div>
           <p className="mt-5 text-[13px] text-muted">
             Opens at{' '}
-            <span className="text-ink">localhost:47188</span>. All data stays
+            <span className="text-ink">localhost:47188</span>. Create a
+            manager, point it at a repo, and start delegating. All data stays
             local.
           </p>
         </section>
