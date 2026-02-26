@@ -29,6 +29,7 @@ export interface AgentContextUsage {
 }
 
 export type DeliveryMode = 'auto' | 'followUp' | 'steer'
+export type AcceptedDeliveryMode = 'prompt' | 'followUp' | 'steer'
 
 export type MessageChannel = 'web' | 'slack' | 'telegram'
 
@@ -123,6 +124,37 @@ export interface ConversationLogEvent {
   isError?: boolean
 }
 
+export interface AgentMessageEvent {
+  type: 'agent_message'
+  agentId: string
+  timestamp: string
+  source: 'user_to_agent' | 'agent_to_agent'
+  fromAgentId?: string
+  toAgentId: string
+  text: string
+  sourceContext?: MessageSourceContext
+  requestedDelivery?: DeliveryMode
+  acceptedMode?: AcceptedDeliveryMode
+  attachmentCount?: number
+}
+
+export type AgentToolCallKind = Extract<
+  ConversationLogKind,
+  'tool_execution_start' | 'tool_execution_update' | 'tool_execution_end'
+>
+
+export interface AgentToolCallEvent {
+  type: 'agent_tool_call'
+  agentId: string
+  actorAgentId: string
+  timestamp: string
+  kind: AgentToolCallKind
+  toolName?: string
+  toolCallId?: string
+  text: string
+  isError?: boolean
+}
+
 export interface ManagerCreatedEvent {
   type: 'manager_created'
   manager: AgentDescriptor
@@ -188,7 +220,11 @@ export interface TelegramStatusEvent {
   botUsername?: string
 }
 
-export type ConversationEntry = ConversationMessageEvent | ConversationLogEvent
+export type ConversationEntry =
+  | ConversationMessageEvent
+  | ConversationLogEvent
+  | AgentMessageEvent
+  | AgentToolCallEvent
 
 export type ServerEvent =
   | { type: 'ready'; serverTime: string; subscribedAgentId: string }
@@ -198,8 +234,7 @@ export type ServerEvent =
       agentId: string
       messages: ConversationEntry[]
     }
-  | ConversationMessageEvent
-  | ConversationLogEvent
+  | ConversationEntry
   | {
       type: 'agent_status'
       agentId: string

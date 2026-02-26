@@ -237,10 +237,14 @@ function isAssistantResponseSignal(entry: ConversationEntry): boolean {
     return entry.role === 'assistant' || entry.role === 'system'
   }
 
-  return (
+  if (entry.type === 'conversation_log') {
+    return (
     entry.role === 'assistant' &&
     (entry.kind === 'message_start' || entry.kind === 'message_end')
-  )
+    )
+  }
+
+  return false
 }
 
 interface PendingResponseStart {
@@ -386,6 +390,10 @@ export function IndexPage() {
     }
 
     return state.messages.filter((entry) => {
+      if (entry.type === 'agent_message' || entry.type === 'agent_tool_call') {
+        return false
+      }
+
       if (entry.type !== 'conversation_message') {
         return true
       }
