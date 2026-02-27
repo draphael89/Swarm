@@ -13,7 +13,6 @@ import type {
 } from "@mariozechner/pi-ai/dist/utils/oauth/types.js";
 import { AuthStorage, type AuthCredential } from "@mariozechner/pi-coding-agent";
 import { WebSocketServer, type RawData, WebSocket } from "ws";
-import type { GsuiteIntegrationService } from "../integrations/gsuite/gsuite-integration.js";
 import type { IntegrationRegistryService } from "../integrations/registry.js";
 import type { ClientCommand, ServerEvent } from "../protocol/ws-types.js";
 import { getScheduleFilePath } from "../scheduler/schedule-storage.js";
@@ -42,11 +41,6 @@ const MANAGER_SLACK_INTEGRATION_CHANNELS_ENDPOINT_PATTERN =
 const MANAGER_TELEGRAM_INTEGRATION_ENDPOINT_PATTERN = /^\/api\/managers\/([^/]+)\/integrations\/telegram$/;
 const MANAGER_TELEGRAM_INTEGRATION_TEST_ENDPOINT_PATTERN =
   /^\/api\/managers\/([^/]+)\/integrations\/telegram\/test$/;
-const GSUITE_INTEGRATION_ENDPOINT_PATH = "/api/integrations/gsuite";
-const GSUITE_INTEGRATION_OAUTH_CREDENTIALS_ENDPOINT_PATH = "/api/integrations/gsuite/oauth/credentials";
-const GSUITE_INTEGRATION_OAUTH_START_ENDPOINT_PATH = "/api/integrations/gsuite/oauth/start";
-const GSUITE_INTEGRATION_OAUTH_COMPLETE_ENDPOINT_PATH = "/api/integrations/gsuite/oauth/complete";
-const GSUITE_INTEGRATION_TEST_ENDPOINT_PATH = "/api/integrations/gsuite/test";
 const RESTART_SIGNAL: NodeJS.Signals = "SIGUSR1";
 const MAX_HTTP_BODY_SIZE_BYTES = 64 * 1024;
 const MAX_READ_FILE_BODY_BYTES = 64 * 1024;
@@ -116,7 +110,6 @@ export class SwarmWebSocketServer {
   private readonly port: number;
   private readonly allowNonManagerSubscriptions: boolean;
   private readonly integrationRegistry: IntegrationRegistryService | null;
-  private readonly gsuiteIntegration: GsuiteIntegrationService | null;
 
   private httpServer: HttpServer | null = null;
   private wss: WebSocketServer | null = null;
@@ -174,14 +167,12 @@ export class SwarmWebSocketServer {
     port: number;
     allowNonManagerSubscriptions: boolean;
     integrationRegistry?: IntegrationRegistryService;
-    gsuiteIntegration?: GsuiteIntegrationService;
   }) {
     this.swarmManager = options.swarmManager;
     this.host = options.host;
     this.port = options.port;
     this.allowNonManagerSubscriptions = options.allowNonManagerSubscriptions;
     this.integrationRegistry = options.integrationRegistry ?? null;
-    this.gsuiteIntegration = options.gsuiteIntegration ?? null;
   }
 
   async start(): Promise<void> {
@@ -330,17 +321,6 @@ export class SwarmWebSocketServer {
         return;
       }
 
-      if (
-        requestUrl.pathname === GSUITE_INTEGRATION_ENDPOINT_PATH ||
-        requestUrl.pathname === GSUITE_INTEGRATION_OAUTH_CREDENTIALS_ENDPOINT_PATH ||
-        requestUrl.pathname === GSUITE_INTEGRATION_OAUTH_START_ENDPOINT_PATH ||
-        requestUrl.pathname === GSUITE_INTEGRATION_OAUTH_COMPLETE_ENDPOINT_PATH ||
-        requestUrl.pathname === GSUITE_INTEGRATION_TEST_ENDPOINT_PATH
-      ) {
-        await this.handleGsuiteIntegrationHttpRequest(request, response, requestUrl);
-        return;
-      }
-
       response.statusCode = 404;
       response.end("Not Found");
     } catch (error) {
@@ -378,14 +358,6 @@ export class SwarmWebSocketServer {
       } else if (isSlackIntegrationPath(requestUrl.pathname)) {
         this.applyCorsHeaders(request, response, "GET, PUT, DELETE, POST, OPTIONS");
       } else if (isTelegramIntegrationPath(requestUrl.pathname)) {
-        this.applyCorsHeaders(request, response, "GET, PUT, DELETE, POST, OPTIONS");
-      } else if (
-        requestUrl.pathname === GSUITE_INTEGRATION_ENDPOINT_PATH ||
-        requestUrl.pathname === GSUITE_INTEGRATION_OAUTH_CREDENTIALS_ENDPOINT_PATH ||
-        requestUrl.pathname === GSUITE_INTEGRATION_OAUTH_START_ENDPOINT_PATH ||
-        requestUrl.pathname === GSUITE_INTEGRATION_OAUTH_COMPLETE_ENDPOINT_PATH ||
-        requestUrl.pathname === GSUITE_INTEGRATION_TEST_ENDPOINT_PATH
-      ) {
         this.applyCorsHeaders(request, response, "GET, PUT, DELETE, POST, OPTIONS");
       }
 
@@ -1268,79 +1240,6 @@ export class SwarmWebSocketServer {
   private isManagerAgent(managerId: string): boolean {
     const descriptor = this.swarmManager.getAgent(managerId);
     return Boolean(descriptor && descriptor.role === "manager");
-  }
-
-  private async handleGsuiteIntegrationHttpRequest(
-    request: IncomingMessage,
-    response: ServerResponse,
-    requestUrl: URL
-  ): Promise<void> {
-    const methods = "GET, PUT, DELETE, POST, OPTIONS";
-
-    if (request.method === "OPTIONS") {
-      this.applyCorsHeaders(request, response, methods);
-      response.statusCode = 204;
-      response.end();
-      return;
-    }
-
-    this.applyCorsHeaders(request, response, methods);
-
-    if (!this.gsuiteIntegration) {
-      this.sendJson(response, 501, { error: "G Suite integration is unavailable" });
-      return;
-    }
-
-    if (request.method === "GET" && requestUrl.pathname === GSUITE_INTEGRATION_ENDPOINT_PATH) {
-      const snapshot = await this.gsuiteIntegration.getSnapshot();
-      this.sendJson(response, 200, { ...snapshot });
-      return;
-    }
-
-    if (request.method === "PUT" && requestUrl.pathname === GSUITE_INTEGRATION_ENDPOINT_PATH) {
-      const payload = parseGsuiteConfigUpdateBody(await this.readJsonBody(request));
-      const snapshot = await this.gsuiteIntegration.updateConfig(payload);
-      this.sendJson(response, 200, { ok: true, ...snapshot });
-      return;
-    }
-
-    if (request.method === "DELETE" && requestUrl.pathname === GSUITE_INTEGRATION_ENDPOINT_PATH) {
-      const snapshot = await this.gsuiteIntegration.disable();
-      this.sendJson(response, 200, { ok: true, ...snapshot });
-      return;
-    }
-
-    if (request.method === "POST" && requestUrl.pathname === GSUITE_INTEGRATION_OAUTH_CREDENTIALS_ENDPOINT_PATH) {
-      const payload = parseGsuiteOAuthCredentialsBody(await this.readJsonBody(request));
-      const snapshot = await this.gsuiteIntegration.storeOAuthCredentials(payload);
-      this.sendJson(response, 200, { ok: true, ...snapshot });
-      return;
-    }
-
-    if (request.method === "POST" && requestUrl.pathname === GSUITE_INTEGRATION_OAUTH_START_ENDPOINT_PATH) {
-      const payload = parseGsuiteOAuthStartBody(await this.readJsonBody(request));
-      const started = await this.gsuiteIntegration.startOAuth(payload);
-      this.sendJson(response, 200, { ok: true, ...started.snapshot, result: started.result });
-      return;
-    }
-
-    if (request.method === "POST" && requestUrl.pathname === GSUITE_INTEGRATION_OAUTH_COMPLETE_ENDPOINT_PATH) {
-      const payload = parseGsuiteOAuthCompleteBody(await this.readJsonBody(request));
-      const completed = await this.gsuiteIntegration.completeOAuth(payload);
-      this.sendJson(response, 200, { ok: true, ...completed.snapshot, result: completed.result });
-      return;
-    }
-
-    if (request.method === "POST" && requestUrl.pathname === GSUITE_INTEGRATION_TEST_ENDPOINT_PATH) {
-      const payload = parseGsuiteConnectionTestBody(await this.readJsonBody(request));
-      const result = await this.gsuiteIntegration.testConnection(payload);
-      const snapshot = await this.gsuiteIntegration.getSnapshot();
-      this.sendJson(response, 200, { ok: true, ...snapshot, result });
-      return;
-    }
-
-    response.setHeader("Allow", methods);
-    this.sendJson(response, 405, { error: "Method Not Allowed" });
   }
 
   private async readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -2438,188 +2337,6 @@ function parseSettingsAuthLoginRespondBody(value: unknown): { value: string } {
   }
 
   return { value: normalized };
-}
-
-function parseGsuiteConfigUpdateBody(value: unknown): {
-  enabled?: boolean;
-  accountEmail?: string;
-  services?: string[];
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Request body must be a JSON object");
-  }
-
-  const patch = value as {
-    enabled?: unknown;
-    accountEmail?: unknown;
-    services?: unknown;
-  };
-
-  const normalized: {
-    enabled?: boolean;
-    accountEmail?: string;
-    services?: string[];
-  } = {};
-
-  if (patch.enabled !== undefined) {
-    if (typeof patch.enabled !== "boolean") {
-      throw new Error("gsuite.enabled must be a boolean");
-    }
-    normalized.enabled = patch.enabled;
-  }
-
-  if (patch.accountEmail !== undefined) {
-    if (typeof patch.accountEmail !== "string") {
-      throw new Error("gsuite.accountEmail must be a string");
-    }
-    normalized.accountEmail = patch.accountEmail.trim();
-  }
-
-  if (patch.services !== undefined) {
-    if (!Array.isArray(patch.services)) {
-      throw new Error("gsuite.services must be an array of strings");
-    }
-
-    const services = patch.services
-      .filter((entry): entry is string => typeof entry === "string")
-      .map((entry) => entry.trim().toLowerCase())
-      .filter((entry) => entry.length > 0);
-
-    if (services.length === 0) {
-      throw new Error("gsuite.services must include at least one service");
-    }
-
-    normalized.services = [...new Set(services)];
-  }
-
-  return normalized;
-}
-
-function parseGsuiteOAuthCredentialsBody(value: unknown): {
-  oauthClientJson: string;
-  clientName?: string;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Request body must be a JSON object");
-  }
-
-  const payload = value as { oauthClientJson?: unknown; clientName?: unknown };
-  if (typeof payload.oauthClientJson !== "string" || payload.oauthClientJson.trim().length === 0) {
-    throw new Error("oauthClientJson must be a non-empty string");
-  }
-
-  if (payload.clientName !== undefined && typeof payload.clientName !== "string") {
-    throw new Error("clientName must be a string when provided");
-  }
-
-  return {
-    oauthClientJson: payload.oauthClientJson,
-    clientName: typeof payload.clientName === "string" ? payload.clientName.trim() || undefined : undefined
-  };
-}
-
-function parseGsuiteOAuthStartBody(value: unknown): {
-  email?: string;
-  services?: string[];
-  forceConsent?: boolean;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  const payload = value as {
-    email?: unknown;
-    services?: unknown;
-    forceConsent?: unknown;
-  };
-
-  if (payload.email !== undefined && typeof payload.email !== "string") {
-    throw new Error("email must be a string when provided");
-  }
-
-  if (payload.forceConsent !== undefined && typeof payload.forceConsent !== "boolean") {
-    throw new Error("forceConsent must be a boolean when provided");
-  }
-
-  let services: string[] | undefined;
-  if (payload.services !== undefined) {
-    if (!Array.isArray(payload.services)) {
-      throw new Error("services must be an array of strings when provided");
-    }
-    services = payload.services
-      .filter((entry): entry is string => typeof entry === "string")
-      .map((entry) => entry.trim().toLowerCase())
-      .filter((entry) => entry.length > 0);
-  }
-
-  return {
-    email: typeof payload.email === "string" ? payload.email.trim() : undefined,
-    services,
-    forceConsent: payload.forceConsent
-  };
-}
-
-function parseGsuiteOAuthCompleteBody(value: unknown): {
-  email?: string;
-  authUrl: string;
-  services?: string[];
-  forceConsent?: boolean;
-} {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Request body must be a JSON object");
-  }
-
-  const payload = value as {
-    email?: unknown;
-    authUrl?: unknown;
-    services?: unknown;
-    forceConsent?: unknown;
-  };
-
-  if (typeof payload.authUrl !== "string" || payload.authUrl.trim().length === 0) {
-    throw new Error("authUrl must be a non-empty string");
-  }
-
-  if (payload.email !== undefined && typeof payload.email !== "string") {
-    throw new Error("email must be a string when provided");
-  }
-
-  if (payload.forceConsent !== undefined && typeof payload.forceConsent !== "boolean") {
-    throw new Error("forceConsent must be a boolean when provided");
-  }
-
-  let services: string[] | undefined;
-  if (payload.services !== undefined) {
-    if (!Array.isArray(payload.services)) {
-      throw new Error("services must be an array of strings when provided");
-    }
-    services = payload.services
-      .filter((entry): entry is string => typeof entry === "string")
-      .map((entry) => entry.trim().toLowerCase())
-      .filter((entry) => entry.length > 0);
-  }
-
-  return {
-    email: typeof payload.email === "string" ? payload.email.trim() : undefined,
-    authUrl: payload.authUrl.trim(),
-    services,
-    forceConsent: payload.forceConsent
-  };
-}
-
-function parseGsuiteConnectionTestBody(value: unknown): { email?: string } {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-
-  const payload = value as { email?: unknown };
-  if (payload.email !== undefined && typeof payload.email !== "string") {
-    throw new Error("email must be a string when provided");
-  }
-
-  return {
-    email: typeof payload.email === "string" ? payload.email.trim() : undefined
-  };
 }
 
 type SlackIntegrationRoute = {

@@ -57,7 +57,7 @@ swarm/
 - `swarm/agent-runtime.ts`: session execution wrapper.
 - `swarm/codex-agent-runtime.ts`: Codex app-server runtime integration.
 - `ws/server.ts`: WebSocket transport + HTTP API surface.
-- `integrations/*`: Slack, Telegram, and G Suite integrations.
+- `integrations/*`: Slack and Telegram integrations.
 - `scheduler/*`: cron schedule persistence and execution.
 
 ### HTTP Surface (selected)
@@ -73,7 +73,7 @@ Implemented in `apps/backend/src/ws/server.ts`:
 - `GET|PUT|DELETE /api/settings/env` and `/api/settings/env/:key`
 - `GET|PUT|DELETE /api/settings/auth` and `/api/settings/auth/:provider`
 - `POST /api/settings/auth/login` and `/api/settings/auth/login/:provider`
-- Slack/Telegram/GSuite integration settings and test endpoints under `/api/settings/*` and `/api/integrations/*`
+- Slack/Telegram integration settings and test endpoints under `/api/managers/:managerId/integrations/*`
 
 ### WebSocket Protocol
 
@@ -153,7 +153,6 @@ Built-in skills live under `apps/backend/src/swarm/skills/builtins/`:
 - `cron-scheduling`
 - `agent-browser`
 - `image-generation`
-- `gsuite`
 
 Archetype prompts live under `apps/backend/src/swarm/archetypes/builtins/`.
 Repository-local overrides can be provided in `.swarm/skills/` and `.swarm/archetypes/`.
