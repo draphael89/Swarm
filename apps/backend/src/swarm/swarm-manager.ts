@@ -367,6 +367,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     for (const descriptor of loaded.agents) {
       this.descriptors.set(descriptor.agentId, descriptor);
     }
+    this.bootstrapDefaultManagerForBoot();
+    this.normalizeDescriptorsForBoot();
 
     await this.ensureMemoryFilesForBoot();
     await this.saveStore();
@@ -1508,6 +1510,45 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 
   private getConfiguredManagerId(): string | undefined {
     return normalizeOptionalAgentId(this.config.managerId);
+  }
+
+  private bootstrapDefaultManagerForBoot(): void {
+    if (this.descriptors.size > 0) {
+      return;
+    }
+
+    const configuredManagerId = this.getConfiguredManagerId();
+    const displayName = this.config.managerDisplayName.trim();
+    const normalizedDisplayNameId = normalizeAgentId(displayName);
+    const managerId = configuredManagerId ?? (normalizedDisplayNameId || "manager");
+    const createdAt = this.now();
+
+    this.descriptors.set(managerId, {
+      agentId: managerId,
+      displayName: displayName.length > 0 ? displayName : managerId,
+      role: "manager",
+      managerId,
+      archetypeId: MANAGER_ARCHETYPE_ID,
+      status: "idle",
+      createdAt,
+      updatedAt: createdAt,
+      cwd: this.config.defaultCwd,
+      model: this.resolveDefaultModelDescriptor(),
+      sessionFile: join(this.config.paths.sessionsDir, `${managerId}.jsonl`)
+    });
+  }
+
+  private normalizeDescriptorsForBoot(): void {
+    const timestamp = this.now();
+
+    for (const descriptor of this.descriptors.values()) {
+      if (descriptor.status !== "streaming") {
+        continue;
+      }
+
+      descriptor.status = "idle";
+      descriptor.updatedAt = timestamp;
+    }
   }
 
   private resolvePreferredManagerId(options?: { includeStoppedOnRestart?: boolean }): string | undefined {
