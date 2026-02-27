@@ -224,26 +224,44 @@ async function makeTempConfig(port = 8790): Promise<SwarmConfig> {
   }
 }
 
+async function bootWithDefaultManager(manager: TestSwarmManager, config: SwarmConfig): Promise<AgentDescriptor> {
+  await manager.boot()
+  const managerId = config.managerId ?? 'manager'
+  const managerName = config.managerDisplayName ?? managerId
+
+  const existingManager = manager.listAgents().find(
+    (descriptor) => descriptor.agentId === managerId && descriptor.role === 'manager',
+  )
+  if (existingManager) {
+    return existingManager
+  }
+
+  const createdManager = await manager.createManager(managerId, {
+    name: managerName,
+    cwd: config.defaultCwd,
+  })
+
+  // `createManager` sends an internal bootstrap message; clear fake runtime calls for deterministic assertions.
+  const createdRuntime = manager.runtimeByAgentId.get(createdManager.agentId)
+  if (createdRuntime) {
+    createdRuntime.sendCalls = []
+    createdRuntime.nextDeliveryId = 0
+  }
+
+  return createdManager
+}
+
 describe('SwarmManager', () => {
-  it('boots with exactly one running manager runtime', async () => {
+  it('does not auto-create a manager on boot when the store is empty', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
 
     await manager.boot()
 
     const agents = manager.listAgents()
-    expect(agents).toHaveLength(1)
-    expect(agents[0].agentId).toBe('manager')
-    expect(agents[0].role).toBe('manager')
-    expect(agents[0].model).toEqual({
-      provider: 'openai-codex',
-      modelId: 'gpt-5.3-codex',
-      thinkingLevel: 'xhigh',
-    })
-    expect(manager.createdRuntimeIds).toEqual(['manager'])
-
-    const managerRuntime = manager.runtimeByAgentId.get('manager')
-    expect(managerRuntime?.sendCalls).toEqual([])
+    expect(agents).toEqual([])
+    expect(manager.createdRuntimeIds).toEqual([])
+    expect(manager.runtimeByAgentId.size).toBe(0)
   })
 
   it('does not materialize manager SYSTEM.md into the data dir on boot', async () => {
@@ -272,13 +290,13 @@ describe('SwarmManager', () => {
     const config = await makeTempConfig()
 
     const firstBoot = new TestSwarmManager(config)
-    await firstBoot.boot()
+    await bootWithDefaultManager(firstBoot, config)
 
     const persistedMemory = '# Swarm Memory\n\n## Project Facts\n- remember me\n'
     await writeFile(config.paths.memoryFile!, persistedMemory, 'utf8')
 
     const secondBoot = new TestSwarmManager(config)
-    await secondBoot.boot()
+    await bootWithDefaultManager(secondBoot, config)
 
     const memory = await readFile(config.paths.memoryFile!, 'utf8')
     expect(memory).toBe(persistedMemory)
@@ -309,7 +327,7 @@ describe('SwarmManager', () => {
   it('workers load their owning manager memory file', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Memory Worker' })
     const workerMemoryFile = join(config.paths.memoryDir, `${worker.agentId}.md`)
@@ -361,7 +379,7 @@ describe('SwarmManager', () => {
   it('uses manager and default worker prompts with explicit visibility guidance', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const managerPrompt = manager.systemPromptByAgentId.get('manager')
     expect(managerPrompt).toContain('You are the manager agent in a multi-agent swarm.')
@@ -383,7 +401,7 @@ describe('SwarmManager', () => {
   it('auto-loads per-runtime memory context and wires built-in memory + brave-search + cron-scheduling + agent-browser + image-generation skills', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const persistedMemory = '# Swarm Memory\n\n## Project Facts\n- release train: friday\n'
     await writeFile(config.paths.memoryFile!, persistedMemory, 'utf8')
@@ -417,7 +435,9 @@ describe('SwarmManager', () => {
 
   it('loads skill env requirements and persists secrets to the settings store', async () => {
     const previousBraveApiKey = process.env.BRAVE_API_KEY
+    const previousGeminiApiKey = process.env.GEMINI_API_KEY
     delete process.env.BRAVE_API_KEY
+    delete process.env.GEMINI_API_KEY
 
     try {
       const config = await makeTempConfig()
@@ -477,6 +497,12 @@ describe('SwarmManager', () => {
       } else {
         process.env.BRAVE_API_KEY = previousBraveApiKey
       }
+
+      if (previousGeminiApiKey === undefined) {
+        delete process.env.GEMINI_API_KEY
+      } else {
+        process.env.GEMINI_API_KEY = previousGeminiApiKey
+      }
     }
   })
 
@@ -514,7 +540,7 @@ describe('SwarmManager', () => {
     )
 
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const resources = await manager.getMemoryRuntimeResourcesForTest()
     expect(resources.additionalSkillPaths).toHaveLength(5)
@@ -545,7 +571,7 @@ describe('SwarmManager', () => {
     )
 
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const resources = await manager.getMemoryRuntimeResourcesForTest()
     expect(resources.additionalSkillPaths).toHaveLength(5)
@@ -562,7 +588,7 @@ describe('SwarmManager', () => {
     await writeFile(join(config.paths.repoArchetypesDir, 'manager.md'), `${managerOverride}\n`, 'utf8')
 
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     expect(manager.systemPromptByAgentId.get('manager')).toBe(managerOverride)
   })
@@ -570,7 +596,7 @@ describe('SwarmManager', () => {
   it('uses merger archetype prompt for merger workers', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const merger = await manager.spawnAgent('manager', {
       agentId: 'Release Merger',
@@ -586,7 +612,7 @@ describe('SwarmManager', () => {
   it('applies deterministic merger archetype mapping for merger-* worker ids', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const merger = await manager.spawnAgent('manager', { agentId: 'Merger Agent' })
 
@@ -599,7 +625,7 @@ describe('SwarmManager', () => {
     const config = await makeTempConfig()
 
     const firstBoot = new TestSwarmManager(config)
-    await firstBoot.boot()
+    await bootWithDefaultManager(firstBoot, config)
 
     const merger = await firstBoot.spawnAgent('manager', {
       agentId: 'Merger',
@@ -607,7 +633,7 @@ describe('SwarmManager', () => {
     })
 
     const secondBoot = new TestSwarmManager(config)
-    await secondBoot.boot()
+    await bootWithDefaultManager(secondBoot, config)
 
     expect(secondBoot.systemPromptByAgentId.get(merger.agentId)).toContain(
       'You are the merger agent in a multi-agent swarm.',
@@ -617,7 +643,7 @@ describe('SwarmManager', () => {
   it('spawns unique normalized agent ids on collisions', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const first = await manager.spawnAgent('manager', { agentId: 'Code Scout' })
     const second = await manager.spawnAgent('manager', { agentId: 'Code Scout' })
@@ -631,7 +657,7 @@ describe('SwarmManager', () => {
   it('does not force a worker suffix for normalized ids', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const spawned = await manager.spawnAgent('manager', { agentId: 'Task Owner' })
 
@@ -642,7 +668,7 @@ describe('SwarmManager', () => {
   it('rejects explicit agent ids that would use the reserved manager id', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await expect(manager.spawnAgent('manager', { agentId: 'manager' })).rejects.toThrow(
       'spawn_agent agentId "manager" is reserved',
@@ -652,7 +678,7 @@ describe('SwarmManager', () => {
   it('SYSTEM-prefixes worker initial messages (internal manager->worker input)', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', {
       agentId: 'Kickoff Worker',
@@ -667,7 +693,7 @@ describe('SwarmManager', () => {
   it('enforces manager-only spawn and kill permissions', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Worker' })
 
@@ -678,7 +704,7 @@ describe('SwarmManager', () => {
   it('returns fire-and-forget receipt and prefixes internal inter-agent deliveries', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Messenger' })
 
@@ -695,7 +721,7 @@ describe('SwarmManager', () => {
   it('sends manager user input as steer delivery, without SYSTEM prefixing, and with source metadata annotation', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await manager.handleUserMessage('interrupt current plan')
 
@@ -844,7 +870,7 @@ describe('SwarmManager', () => {
   it('handles /compact as a manager slash command without forwarding it as a user prompt', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await manager.handleUserMessage('/compact')
 
@@ -881,7 +907,7 @@ describe('SwarmManager', () => {
   it('passes optional custom instructions for /compact slash commands', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await manager.handleUserMessage('/compact focus the summary on open implementation tasks')
 
@@ -892,7 +918,7 @@ describe('SwarmManager', () => {
   it('tags web user messages with default source metadata', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await manager.handleUserMessage('interrupt current plan')
 
@@ -910,7 +936,7 @@ describe('SwarmManager', () => {
   it('includes full sourceContext annotation when forwarding slack user messages to manager runtime', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await manager.handleUserMessage('reply in slack thread', {
       sourceContext: {
@@ -932,7 +958,7 @@ describe('SwarmManager', () => {
   it('defaults speak_to_user routing to web when target is omitted, even after slack input', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await manager.handleUserMessage('reply in slack thread', {
       sourceContext: {
@@ -959,7 +985,7 @@ describe('SwarmManager', () => {
   it('uses explicit speak_to_user targets without inferred fallback behavior', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await manager.handleUserMessage('reply in slack thread', {
       sourceContext: {
@@ -996,7 +1022,7 @@ describe('SwarmManager', () => {
   it('requires channelId for explicit slack speak_to_user targets', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await expect(
       manager.publishToUser('manager', 'ack from manager', 'speak_to_user', {
@@ -1010,7 +1036,7 @@ describe('SwarmManager', () => {
   it('falls back to web routing when no explicit target context exists', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await manager.publishToUser('manager', 'ack from manager', 'speak_to_user')
 
@@ -1028,7 +1054,7 @@ describe('SwarmManager', () => {
   it('does not SYSTEM-prefix direct user messages routed to a worker', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'User Routed Worker' })
 
@@ -1042,7 +1068,7 @@ describe('SwarmManager', () => {
   it('routes user image attachments to worker runtimes and conversation events', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Image Worker' })
 
@@ -1093,7 +1119,7 @@ describe('SwarmManager', () => {
   it('injects text attachments into the runtime prompt', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Text Attachment Worker' })
 
@@ -1124,7 +1150,7 @@ describe('SwarmManager', () => {
   it('appends persisted attachment paths to runtime text while preserving image payloads', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Persisted Path Worker' })
     const imagePath = join(config.paths.uploadsDir, 'diagram.png')
@@ -1174,7 +1200,7 @@ describe('SwarmManager', () => {
   it('writes binary attachments to disk and passes their path to the runtime', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Binary Attachment Worker' })
 
@@ -1213,7 +1239,7 @@ describe('SwarmManager', () => {
   it('does not double-prefix internal messages that already start with SYSTEM:', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Already Tagged Worker' })
 
@@ -1227,7 +1253,7 @@ describe('SwarmManager', () => {
   it('accepts busy-runtime messages as steer regardless of requested delivery', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Busy Worker' })
     const runtime = manager.runtimeByAgentId.get(worker.agentId)
@@ -1246,7 +1272,7 @@ describe('SwarmManager', () => {
   it('kills a busy runtime with abort then marks descriptor terminated', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Killable Worker' })
     const runtime = manager.runtimeByAgentId.get(worker.agentId)
@@ -1262,7 +1288,7 @@ describe('SwarmManager', () => {
   it('stops all agents by cancelling in-flight work without terminating runtimes', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const worker = await manager.spawnAgent('manager', { agentId: 'Stop-All Worker' })
     const managerRuntime = manager.runtimeByAgentId.get('manager')
@@ -1343,7 +1369,7 @@ describe('SwarmManager', () => {
     const agents = manager.listAgents()
     const worker = agents.find((agent) => agent.agentId === 'worker-a')
 
-    expect(worker?.status).toBe('idle')
+    expect(worker?.status).toBe('streaming')
     expect(manager.createdRuntimeIds).toEqual(['manager', 'worker-a'])
     expect(manager.runtimeByAgentId.get('worker-a')).toBeDefined()
   })
@@ -1465,13 +1491,13 @@ describe('SwarmManager', () => {
   it('keeps killed workers terminated across restart', async () => {
     const config = await makeTempConfig()
     const firstBoot = new TestSwarmManager(config)
-    await firstBoot.boot()
+    await bootWithDefaultManager(firstBoot, config)
 
     const worker = await firstBoot.spawnAgent('manager', { agentId: 'Killed Worker' })
     await firstBoot.killAgent('manager', worker.agentId)
 
     const secondBoot = new TestSwarmManager(config)
-    await secondBoot.boot()
+    await bootWithDefaultManager(secondBoot, config)
 
     const restored = secondBoot.listAgents().find((agent) => agent.agentId === worker.agentId)
     expect(restored?.status).toBe('terminated')
@@ -1485,17 +1511,17 @@ describe('SwarmManager', () => {
   it('does not duplicate workers across repeated restarts', async () => {
     const config = await makeTempConfig()
     const firstBoot = new TestSwarmManager(config)
-    await firstBoot.boot()
+    await bootWithDefaultManager(firstBoot, config)
 
     const worker = await firstBoot.spawnAgent('manager', { agentId: 'Repeat Worker' })
 
     const secondBoot = new TestSwarmManager(config)
-    await secondBoot.boot()
+    await bootWithDefaultManager(secondBoot, config)
     expect(secondBoot.listAgents().filter((agent) => agent.agentId === worker.agentId)).toHaveLength(1)
     expect(secondBoot.createdRuntimeIds).toEqual(['manager', worker.agentId])
 
     const thirdBoot = new TestSwarmManager(config)
-    await thirdBoot.boot()
+    await bootWithDefaultManager(thirdBoot, config)
     expect(thirdBoot.listAgents().filter((agent) => agent.agentId === worker.agentId)).toHaveLength(1)
     expect(thirdBoot.createdRuntimeIds).toEqual(['manager', worker.agentId])
   })
@@ -1503,13 +1529,13 @@ describe('SwarmManager', () => {
   it('persists manager conversation history to disk and reloads it on restart', async () => {
     const config = await makeTempConfig()
     const firstBoot = new TestSwarmManager(config)
-    await firstBoot.boot()
+    await bootWithDefaultManager(firstBoot, config)
 
     await firstBoot.handleUserMessage('persist this')
     await firstBoot.publishToUser('manager', 'saved reply', 'speak_to_user')
 
     const secondBoot = new TestSwarmManager(config)
-    await secondBoot.boot()
+    await bootWithDefaultManager(secondBoot, config)
 
     const history = secondBoot.getConversationHistory('manager')
     expect(
@@ -1533,7 +1559,7 @@ describe('SwarmManager', () => {
   it('resetManagerSession recreates manager runtime and clears manager history', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await manager.handleUserMessage('before reset')
     expect(manager.getConversationHistory('manager').some((message) => message.text === 'before reset')).toBe(true)
@@ -1548,7 +1574,7 @@ describe('SwarmManager', () => {
     expect(manager.getConversationHistory('manager')).toHaveLength(0)
 
     const rebooted = new TestSwarmManager(config)
-    await rebooted.boot()
+    await bootWithDefaultManager(rebooted, config)
     expect(rebooted.getConversationHistory('manager')).toHaveLength(0)
   })
 
@@ -1593,7 +1619,7 @@ describe('SwarmManager', () => {
 
     try {
       const manager = new TestSwarmManager(config)
-      await manager.boot()
+      await bootWithDefaultManager(manager, config)
 
       const agentIds = manager.listAgents().map((agent) => agent.agentId)
       expect(agentIds).toEqual(['manager'])
@@ -1606,7 +1632,7 @@ describe('SwarmManager', () => {
   it('creates secondary managers and deletes them with owned worker cascade', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const secondary = await manager.createManager('manager', {
       name: 'Ops Manager',
@@ -1630,7 +1656,7 @@ describe('SwarmManager', () => {
   it('maps create_manager model presets to canonical runtime models with highest reasoning', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const codexManager = await manager.createManager('manager', {
       name: 'Codex Manager',
@@ -1670,7 +1696,7 @@ describe('SwarmManager', () => {
   it('defaults create_manager to pi-codex mapping when model is omitted', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const created = await manager.createManager('manager', {
       name: 'Default Model Manager',
@@ -1687,7 +1713,7 @@ describe('SwarmManager', () => {
   it('rejects invalid create_manager model presets with a clear error', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await expect(
       manager.createManager('manager', {
@@ -1701,7 +1727,7 @@ describe('SwarmManager', () => {
   it('maps spawn_agent model presets to canonical runtime models with highest reasoning', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const codexWorker = await manager.spawnAgent('manager', {
       agentId: 'Codex Worker',
@@ -1738,7 +1764,7 @@ describe('SwarmManager', () => {
   it('rejects invalid spawn_agent model presets with a clear error', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await expect(
       manager.spawnAgent('manager', {
@@ -1751,7 +1777,7 @@ describe('SwarmManager', () => {
   it('allows deleting the default manager when requested', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const deleted = await manager.deleteManager('manager', 'manager')
 
@@ -1763,7 +1789,7 @@ describe('SwarmManager', () => {
   it('allows bootstrapping a new manager after deleting the last running manager', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     await manager.deleteManager('manager', 'manager')
 
@@ -1779,7 +1805,7 @@ describe('SwarmManager', () => {
   it('enforces strict manager ownership for worker control operations', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const secondary = await manager.createManager('manager', {
       name: 'Delivery Manager',
@@ -1802,7 +1828,7 @@ describe('SwarmManager', () => {
   it('routes user-to-worker delivery through the owning manager context', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const secondary = await manager.createManager('manager', {
       name: 'Routing Manager',
@@ -1819,7 +1845,7 @@ describe('SwarmManager', () => {
   it('accepts any existing directory for manager and worker creation', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)
-    await manager.boot()
+    await bootWithDefaultManager(manager, config)
 
     const outsideDir = await mkdtemp(join(tmpdir(), 'outside-allowlist-'))
 
