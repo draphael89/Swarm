@@ -233,7 +233,6 @@ function LandingPage() {
               [
                 ['GitHub', 'https://github.com/SawyerHood/middleman'],
                 ['License', 'https://github.com/SawyerHood/middleman/blob/main/LICENSE'],
-                ['Docs', 'https://github.com/SawyerHood/middleman/tree/main/docs'],
               ] as const
             ).map(([label, href]) => (
               <a
