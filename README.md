@@ -34,10 +34,7 @@ pnpm dev
 - **Persistent managers.** Onboard once, work for days. Managers remember your preferences, workflow, and project context across sessions via compacting memory.
 - **Worker dispatch.** The manager spawns workers (Codex, Pi/Opus, etc.) and routes messages between them. You describe work at a high level; it handles the breakdown.
 - **Parallel execution.** Dump a list of tasks and the manager figures out what can run concurrently. Stream-of-thought voice dumps welcome.
-- **Agentic merge queue.** A dedicated merger agent serializes branches, resolves conflicts, and makes sure tests pass. Without this, parallel agents are chaos.
-- **Git worktree native.** All agent work happens in isolated worktrees. No clobbering.
-- **Conversational onboarding.** Rather than hand-editing config files, just talk to the manager. Tell it how you like to work and it remembers.
-- **Real-time dashboard.** A Conductor-style UI for watching agents work, chatting with your manager, and managing settings.
+- **Dashboard.** A Conductor-style UI for watching agents work, chatting with your manager, and managing settings.
 - **Skills & integrations.** Built-in skills for web search, image generation, browser automation, cron scheduling, Google Workspace, and more. Extensible via the pi skill system.
 
 ## Architecture
@@ -73,18 +70,11 @@ Middleman is three things running on your machine:
 2. **Onboard it** by chatting. Tell it your preferred workflow, what tools to use, how you want work sequenced.
 3. **Dump tasks** on it. A feature spec, a list of bugs, a vague idea. Voice or text.
 4. The manager **spawns workers**, assigns tasks, and orchestrates execution in parallel where possible.
-5. Completed work flows through the **merge queue**. One agent merges, resolves conflicts, runs tests.
-6. You **review** when you want, or let it roll.
+5. You **review** when you want, or let it roll.
 
-## Scripts
+## A Note
 
-| Command | What it does |
-|---|---|
-| `pnpm prod:daemon` | Build and run in production mode (daemonized) |
-| `pnpm prod` | Build and start production (foreground) |
-| `pnpm dev` | Start backend + UI in dev mode |
-| `pnpm build` | Build all packages |
-| `pnpm test` | Run all tests |
+This is a vibecoded project. It's here to inspire, not to be a polished product. Fork it, tear it apart, or use it as a starting point to build your own middle manager.
 
 ## License
 
