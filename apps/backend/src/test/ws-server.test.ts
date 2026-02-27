@@ -414,9 +414,8 @@ describe('SwarmWebSocketServer', () => {
 
     await server.start()
 
-    const outsideDir = await mkdtemp(join(tmpdir(), 'swarm-ws-outside-file-'))
-    const outsideFile = join(outsideDir, 'outside.txt')
-    await writeFile(outsideFile, 'outside', 'utf8')
+    const outsideFile =
+      process.platform === 'win32' ? 'C:\\Windows\\System32\\drivers\\etc\\hosts' : '/etc/hosts'
 
     try {
       const response = await fetch(`http://${config.host}:${config.port}/api/read-file`, {
@@ -434,7 +433,6 @@ describe('SwarmWebSocketServer', () => {
       const payload = (await response.json()) as { error: string }
       expect(payload.error).toContain('outside allowed roots')
     } finally {
-      await rm(outsideDir, { recursive: true, force: true })
       await server.stop()
     }
   })
