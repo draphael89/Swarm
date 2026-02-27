@@ -474,7 +474,8 @@ export class SwarmWebSocketServer {
       const allowedRoots = normalizeAllowlistRoots([
         ...config.cwdAllowlistRoots,
         config.paths.rootDir,
-        homedir()
+        homedir(),
+        "/tmp"
       ]);
 
       if (!isPathWithinRoots(resolvedPath, allowedRoots)) {
