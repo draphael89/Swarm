@@ -2,6 +2,14 @@
 
 A local-first multi-agent orchestration platform. One manager, many workers, zero tab-juggling.
 
+If you're using agentic coding tools, you've probably hit this wall: you start with one agent, then two, then five. You're branching, worktree-ing, reviewing, merging, context-switching. The agents are cranking out code. But your entire day is spent *managing them*, sequencing work, checking output, nudging things along.
+
+You're not an IC anymore. You've become a project manager. You need a middle manager.
+
+**Middleman gives you one.** You talk to a single persistent manager agent per project. You describe what needs to be done, whether it's a feature, a batch of bug fixes, or a refactor, and the manager dispatches workers, parallelizes where it makes sense, and surfaces only the things that need your attention.
+
+![Middleman UI](docs/images/ui-screenshot.png)
+
 ## Setup
 
 ```bash
@@ -21,26 +29,16 @@ pnpm dev
 # UI:      http://127.0.0.1:47188
 ```
 
-## What Is This?
-
-If you're using agentic coding tools, you've probably hit this wall: you start with one agent, then two, then five. You're branching, worktree-ing, reviewing, merging, context-switching. The agents are cranking out code. But your entire day is spent *managing them* — sequencing work, checking output, nudging things along.
-
-You're not an IC anymore. You've become a project manager. You need a middle manager.
-
-**Middleman gives you one.** You talk to a single persistent manager agent per project. You describe what needs to be done — a feature, a batch of bug fixes, a refactor — and the manager dispatches workers, parallelizes where it makes sense, and surfaces only the things that need your attention.
-
-![Middleman UI](docs/images/ui-screenshot.png)
-
 ## Key Features
 
-- **Persistent managers** — onboard once, work for days. Managers remember your preferences, workflow, and project context across sessions via compacting memory.
-- **Worker dispatch** — the manager spawns workers (Codex, Pi/Opus, etc.) and routes messages between them. You describe work at a high level; it handles the breakdown.
-- **Parallel execution** — dump a list of tasks and the manager figures out what can run concurrently. Stream-of-thought voice dumps welcome.
-- **Agentic merge queue** — a dedicated merger agent serializes branches, resolves conflicts, and makes sure tests pass. Without this, parallel agents are chaos.
-- **Git worktree native** — all agent work happens in isolated worktrees. No clobbering.
-- **Conversational onboarding** — rather than hand-editing config files, just talk to the manager. Tell it how you like to work and it remembers.
-- **Real-time dashboard** — a Conductor-style UI for watching agents work, chatting with your manager, and managing settings.
-- **Skills & integrations** — built-in skills for web search, image generation, browser automation, cron scheduling, Google Workspace, and more. Extensible via the pi skill system.
+- **Persistent managers.** Onboard once, work for days. Managers remember your preferences, workflow, and project context across sessions via compacting memory.
+- **Worker dispatch.** The manager spawns workers (Codex, Pi/Opus, etc.) and routes messages between them. You describe work at a high level; it handles the breakdown.
+- **Parallel execution.** Dump a list of tasks and the manager figures out what can run concurrently. Stream-of-thought voice dumps welcome.
+- **Agentic merge queue.** A dedicated merger agent serializes branches, resolves conflicts, and makes sure tests pass. Without this, parallel agents are chaos.
+- **Git worktree native.** All agent work happens in isolated worktrees. No clobbering.
+- **Conversational onboarding.** Rather than hand-editing config files, just talk to the manager. Tell it how you like to work and it remembers.
+- **Real-time dashboard.** A Conductor-style UI for watching agents work, chatting with your manager, and managing settings.
+- **Skills & integrations.** Built-in skills for web search, image generation, browser automation, cron scheduling, Google Workspace, and more. Extensible via the pi skill system.
 
 ## Architecture
 
@@ -65,17 +63,17 @@ Middleman is three things running on your machine:
 └─────────────────────────────────────────────┘
 ```
 
-- **`apps/backend`** — the daemon. HTTP + WebSocket server, swarm orchestration runtime, integrations, and scheduler.
-- **`apps/ui`** — the dashboard. Real-time agent monitoring, chat interface, and settings management.
-- The **manager agent** is built on [pi](https://github.com/badlogic/pi-mono), is event-driven, and never blocks — always ready for the next message.
+- **`apps/backend`** is the daemon. HTTP + WebSocket server, swarm orchestration runtime, integrations, and scheduler.
+- **`apps/ui`** is the dashboard. Real-time agent monitoring, chat interface, and settings management.
+- The **manager agent** is built on [pi](https://github.com/badlogic/pi-mono), is event-driven, and never blocks. Always ready for the next message.
 
 ## How It Works in Practice
 
 1. **Create a manager** for your project from the dashboard.
-2. **Onboard it** by chatting — tell it your preferred workflow, what tools to use, how you want work sequenced.
+2. **Onboard it** by chatting. Tell it your preferred workflow, what tools to use, how you want work sequenced.
 3. **Dump tasks** on it. A feature spec, a list of bugs, a vague idea. Voice or text.
 4. The manager **spawns workers**, assigns tasks, and orchestrates execution in parallel where possible.
-5. Completed work flows through the **merge queue** — one agent merges, resolves conflicts, runs tests.
+5. Completed work flows through the **merge queue**. One agent merges, resolves conflicts, runs tests.
 6. You **review** when you want, or let it roll.
 
 ## Scripts
