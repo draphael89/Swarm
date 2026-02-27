@@ -293,6 +293,39 @@ function mergeConversationAndActivityMessages(
   return merged
 }
 
+function buildManagerScopedAgentIds(agents: AgentDescriptor[], managerId: string): Set<string> {
+  const scopedAgentIds = new Set<string>([managerId])
+
+  for (const agent of agents) {
+    if (agent.agentId === managerId || agent.managerId === managerId) {
+      scopedAgentIds.add(agent.agentId)
+    }
+  }
+
+  return scopedAgentIds
+}
+
+function isManagerScopedAllViewEntry(
+  entry: ConversationEntry,
+  managerId: string,
+  scopedAgentIds: ReadonlySet<string>,
+): boolean {
+  if (entry.type === 'agent_tool_call') {
+    return entry.agentId === managerId && scopedAgentIds.has(entry.actorAgentId)
+  }
+
+  if (entry.type === 'agent_message') {
+    if (entry.agentId !== managerId) {
+      return false
+    }
+
+    const fromAgentId = entry.fromAgentId?.trim()
+    return scopedAgentIds.has(entry.toAgentId) || (!!fromAgentId && scopedAgentIds.has(fromAgentId))
+  }
+
+  return scopedAgentIds.has(entry.agentId)
+}
+
 interface PendingResponseStart {
   agentId: string
   messageCount: number
@@ -431,6 +464,14 @@ export function IndexPage() {
   const canStopAllAgents =
     isActiveManager && (activeAgentStatus === 'idle' || activeAgentStatus === 'streaming')
 
+  const managerScopedAgentIds = useMemo(() => {
+    if (activeAgent?.role !== 'manager') {
+      return null
+    }
+
+    return buildManagerScopedAgentIds(state.agents, activeAgent.agentId)
+  }, [activeAgent, state.agents])
+
   const allMessages = useMemo(
     () => mergeConversationAndActivityMessages(state.messages, state.activityMessages),
     [state.activityMessages, state.messages],
@@ -438,7 +479,13 @@ export function IndexPage() {
 
   const visibleMessages = useMemo(() => {
     if (channelView === 'all') {
-      return allMessages
+      if (activeAgent?.role !== 'manager' || !managerScopedAgentIds) {
+        return allMessages
+      }
+
+      return allMessages.filter((entry) =>
+        isManagerScopedAllViewEntry(entry, activeAgent.agentId, managerScopedAgentIds),
+      )
     }
 
     const filtered = state.messages.filter((entry) => {
@@ -449,7 +496,7 @@ export function IndexPage() {
       return (entry.sourceContext?.channel ?? 'web') === 'web'
     })
     return filtered
-  }, [allMessages, channelView, state.messages])
+  }, [activeAgent, allMessages, channelView, managerScopedAgentIds, state.messages])
 
   const collectedArtifacts = useMemo(
     () => collectArtifactsFromMessages(allMessages),
