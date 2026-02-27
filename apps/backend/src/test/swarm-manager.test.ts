@@ -1556,6 +1556,128 @@ describe('SwarmManager', () => {
     ).toBe(true)
   })
 
+  it('preserves web user and speak_to_user history when internal activity overflows history limits', async () => {
+    const config = await makeTempConfig()
+    const createdAt = '2026-01-01T00:00:00.000Z'
+    await writeFile(
+      config.paths.agentsStoreFile,
+      JSON.stringify(
+        {
+          agents: [
+            {
+              agentId: 'manager',
+              displayName: 'Manager',
+              role: 'manager',
+              managerId: 'manager',
+              status: 'idle',
+              createdAt,
+              updatedAt: createdAt,
+              cwd: config.defaultCwd,
+              model: config.defaultModel,
+              sessionFile: join(config.paths.sessionsDir, 'manager.jsonl'),
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    )
+
+    const sessionManager = SessionManager.open(join(config.paths.sessionsDir, 'manager.jsonl'))
+    sessionManager.appendMessage({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'seed' }],
+    } as any)
+    sessionManager.appendCustomEntry('swarm_conversation_entry', {
+      type: 'conversation_message',
+      agentId: 'manager',
+      role: 'user',
+      text: 'web message that must persist',
+      timestamp: new Date(1).toISOString(),
+      source: 'user_input',
+      sourceContext: {
+        channel: 'web',
+      },
+    })
+    sessionManager.appendCustomEntry('swarm_conversation_entry', {
+      type: 'conversation_message',
+      agentId: 'manager',
+      role: 'assistant',
+      text: 'web reply that must persist',
+      timestamp: new Date(2).toISOString(),
+      source: 'speak_to_user',
+      sourceContext: {
+        channel: 'web',
+      },
+    })
+    for (let index = 0; index < 2_200; index += 1) {
+      sessionManager.appendCustomEntry('swarm_conversation_entry', {
+        type: 'agent_message',
+        agentId: 'manager',
+        timestamp: new Date(3 + index).toISOString(),
+        source: 'agent_to_agent',
+        fromAgentId: 'manager',
+        toAgentId: 'worker',
+        text: `internal-message-${index}`,
+      })
+    }
+
+    const firstBoot = new TestSwarmManager(config)
+    await firstBoot.boot()
+
+    const inMemoryHistory = firstBoot.getConversationHistory('manager')
+    expect(
+      inMemoryHistory.some(
+        (entry) =>
+          entry.type === 'conversation_message' &&
+          entry.source === 'user_input' &&
+          entry.text === 'web message that must persist',
+      ),
+    ).toBe(true)
+    expect(
+      inMemoryHistory.some(
+        (entry) =>
+          entry.type === 'conversation_message' &&
+          entry.source === 'speak_to_user' &&
+          entry.text === 'web reply that must persist',
+      ),
+    ).toBe(true)
+    expect(
+      inMemoryHistory.some((entry) => entry.type === 'agent_message' && entry.text === 'internal-message-0'),
+    ).toBe(false)
+    expect(
+      inMemoryHistory.some((entry) => entry.type === 'agent_message' && entry.text === 'internal-message-2199'),
+    ).toBe(true)
+
+    const secondBoot = new TestSwarmManager(config)
+    await secondBoot.boot()
+
+    const restoredHistory = secondBoot.getConversationHistory('manager')
+    expect(
+      restoredHistory.some(
+        (entry) =>
+          entry.type === 'conversation_message' &&
+          entry.source === 'user_input' &&
+          entry.text === 'web message that must persist',
+      ),
+    ).toBe(true)
+    expect(
+      restoredHistory.some(
+        (entry) =>
+          entry.type === 'conversation_message' &&
+          entry.source === 'speak_to_user' &&
+          entry.text === 'web reply that must persist',
+      ),
+    ).toBe(true)
+    expect(
+      restoredHistory.some((entry) => entry.type === 'agent_message' && entry.text === 'internal-message-0'),
+    ).toBe(false)
+    expect(
+      restoredHistory.some((entry) => entry.type === 'agent_message' && entry.text === 'internal-message-2199'),
+    ).toBe(true)
+  })
+
   it('resetManagerSession recreates manager runtime and clears manager history', async () => {
     const config = await makeTempConfig()
     const manager = new TestSwarmManager(config)

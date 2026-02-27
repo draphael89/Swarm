@@ -118,6 +118,7 @@ This is just one example — ask the user how they'd like to work and adapt to t
 
 Close by asking if they want you to save their preferences to memory for future sessions.
 If they agree, summarize the choices and persist them using the memory workflow.`;
+// Retain recent non-web activity while preserving the full user-facing web transcript.
 const MAX_CONVERSATION_HISTORY = 2000;
 const CONVERSATION_ENTRY_TYPE = "swarm_conversation_entry";
 const SWARM_CONTEXT_FILE_NAME = "SWARM.md";
@@ -1464,9 +1465,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   private emitConversationEntry(event: ConversationEntryEvent): void {
     const history = this.conversationEntriesByAgentId.get(event.agentId) ?? [];
     history.push(event);
-    if (history.length > MAX_CONVERSATION_HISTORY) {
-      history.splice(0, history.length - MAX_CONVERSATION_HISTORY);
-    }
+    trimConversationHistory(history);
     this.conversationEntriesByAgentId.set(event.agentId, history);
 
     const runtime = this.runtimes.get(event.agentId);
@@ -2944,9 +2943,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         entriesForAgent.push(entry.data);
       }
 
-      if (entriesForAgent.length > MAX_CONVERSATION_HISTORY) {
-        entriesForAgent.splice(0, entriesForAgent.length - MAX_CONVERSATION_HISTORY);
-      }
+      trimConversationHistory(entriesForAgent);
 
       this.logDebug("history:load:ready", {
         agentId: descriptor.agentId,
@@ -3796,6 +3793,44 @@ function isCodexAppServerModelDescriptor(descriptor: Pick<AgentModelDescriptor, 
 
 function normalizeThinkingLevel(level: string): string {
   return level === "x-high" ? "xhigh" : level;
+}
+
+function isPreservedWebTranscriptEntry(entry: ConversationEntryEvent): boolean {
+  if (entry.type !== "conversation_message") {
+    return false;
+  }
+
+  if (entry.source !== "user_input" && entry.source !== "speak_to_user") {
+    return false;
+  }
+
+  return (entry.sourceContext?.channel ?? "web") === "web";
+}
+
+function trimConversationHistory(entries: ConversationEntryEvent[]): void {
+  const overflow = entries.length - MAX_CONVERSATION_HISTORY;
+  if (overflow <= 0) {
+    return;
+  }
+
+  const removableIndexes: number[] = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    if (removableIndexes.length >= overflow) {
+      break;
+    }
+
+    if (!isPreservedWebTranscriptEntry(entries[index])) {
+      removableIndexes.push(index);
+    }
+  }
+
+  if (removableIndexes.length === 0) {
+    return;
+  }
+
+  for (let index = removableIndexes.length - 1; index >= 0; index -= 1) {
+    entries.splice(removableIndexes[index], 1);
+  }
 }
 
 function isConversationEntryEvent(value: unknown): value is ConversationEntryEvent {

@@ -311,7 +311,7 @@ function isManagerScopedAllViewEntry(
   scopedAgentIds: ReadonlySet<string>,
 ): boolean {
   if (entry.type === 'agent_tool_call') {
-    return entry.agentId === managerId && scopedAgentIds.has(entry.actorAgentId)
+    return entry.agentId === managerId && entry.actorAgentId === managerId
   }
 
   if (entry.type === 'agent_message') {

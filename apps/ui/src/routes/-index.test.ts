@@ -229,7 +229,7 @@ describe('IndexPage create manager model selection', () => {
     await vi.advanceTimersByTimeAsync(0)
   })
 
-  it('scopes all-tab activity to the selected manager context', async () => {
+  it('hides worker tool calls in all-tab activity for the selected manager context', async () => {
     const socket = await renderPage()
 
     emitServerEvent(socket, {
@@ -262,6 +262,16 @@ describe('IndexPage create manager model selection', () => {
           fromAgentId: 'worker-owned',
           toAgentId: 'worker-owned',
           text: 'owned worker chatter',
+        },
+        {
+          type: 'agent_tool_call',
+          agentId: 'manager',
+          actorAgentId: 'manager',
+          timestamp: new Date().toISOString(),
+          kind: 'tool_execution_start',
+          toolName: 'speak_to_user',
+          toolCallId: 'manager-call',
+          text: '{"text":"hello"}',
         },
         {
           type: 'agent_tool_call',
@@ -300,7 +310,8 @@ describe('IndexPage create manager model selection', () => {
     click(getByRole(container, 'button', { name: 'All' }))
 
     expect(queryByText(container, 'owned worker chatter')).not.toBeNull()
-    expect(queryByText(container, /owned-call/)).not.toBeNull()
+    expect(queryByText(container, /manager-call/)).not.toBeNull()
+    expect(queryByText(container, /owned-call/)).toBeNull()
     expect(queryByText(container, 'foreign worker chatter')).toBeNull()
     expect(queryByText(container, /foreign-call/)).toBeNull()
   })
