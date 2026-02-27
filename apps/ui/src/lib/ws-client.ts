@@ -656,11 +656,12 @@ export class ManagerWsClient {
     const statuses = Object.fromEntries(
       agents.map((agent) => {
         const previous = this.state.statuses[agent.agentId]
+        const status = agent.status
         return [
           agent.agentId,
           {
-            status: previous?.status ?? agent.status,
-            pendingCount: previous?.pendingCount ?? 0,
+            status,
+            pendingCount: previous && previous.status === status ? previous.pendingCount : 0,
             contextUsage: agent.contextUsage,
           },
         ]

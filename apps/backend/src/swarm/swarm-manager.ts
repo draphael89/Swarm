@@ -775,10 +775,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     const managerContextIds = this.resolveActivityManagerContextIds(sender, target);
-    const runtime = this.runtimes.get(targetAgentId);
-    if (!runtime) {
-      throw new Error(`Target runtime is not available: ${targetAgentId}`);
-    }
+    const runtime = await this.getOrCreateRuntimeForDescriptor(target);
 
     const origin = options?.origin ?? "internal";
     const attachments = normalizeConversationAttachments(options?.attachments);
@@ -999,10 +996,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error(`Compaction is only supported for manager agents: ${agentId}`);
     }
 
-    const runtime = this.runtimes.get(agentId);
-    if (!runtime) {
-      throw new Error(`Target runtime is not available: ${agentId}`);
-    }
+    const runtime = await this.getOrCreateRuntimeForDescriptor(descriptor);
 
     const sourceContext = normalizeMessageSourceContext(options?.sourceContext ?? { channel: "web" });
     const customInstructions = options?.customInstructions?.trim() || undefined;
@@ -1180,8 +1174,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       return;
     }
 
-    const managerRuntime = this.runtimes.get(managerContextId);
-    if (!managerRuntime) {
+    let managerRuntime: SwarmAgentRuntime;
+    try {
+      managerRuntime = await this.getOrCreateRuntimeForDescriptor(target);
+    } catch (error) {
       this.logDebug("manager:user_message_dispatch_error", {
         managerContextId,
         targetAgentId: managerContextId,
@@ -1190,9 +1186,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         sourceContext,
         textPreview: previewForLog(trimmed),
         attachmentCount: attachments.length,
-        message: `Manager runtime is not initialized: ${managerContextId}`
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
       });
-      throw new Error(`Manager runtime is not initialized: ${managerContextId}`);
+      throw error;
     }
 
     const managerVisibleMessage = formatInboundUserMessageForManager(trimmed, sourceContext);
@@ -1469,12 +1466,18 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.conversationEntriesByAgentId.set(event.agentId, history);
 
     const runtime = this.runtimes.get(event.agentId);
-    if (!runtime) {
-      return;
-    }
-
     try {
-      runtime.appendCustomEntry(CONVERSATION_ENTRY_TYPE, event);
+      if (runtime) {
+        runtime.appendCustomEntry(CONVERSATION_ENTRY_TYPE, event);
+        return;
+      }
+
+      const descriptor = this.descriptors.get(event.agentId);
+      if (!descriptor) {
+        return;
+      }
+
+      SessionManager.open(descriptor.sessionFile).appendCustomEntry(CONVERSATION_ENTRY_TYPE, event);
     } catch (error) {
       this.logDebug("history:save:error", {
         message: error instanceof Error ? error.message : String(error)
@@ -1605,14 +1608,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         continue;
       }
 
-      const systemPrompt = this.resolveSystemPromptForDescriptor(descriptor);
-
       try {
-        const runtime = await this.createRuntimeForDescriptor(descriptor, systemPrompt);
-        this.runtimes.set(descriptor.agentId, runtime);
-        const contextUsage = runtime.getContextUsage();
-        descriptor.contextUsage = contextUsage;
-        this.emitStatus(descriptor.agentId, descriptor.status, runtime.getPendingCount(), contextUsage);
+        await this.getOrCreateRuntimeForDescriptor(descriptor);
       } catch (error) {
         if (
           descriptor.role === "manager" &&
@@ -1646,7 +1643,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       if (
         primaryManager &&
         primaryManager.role === "manager" &&
-        primaryManager.status !== "terminated" &&
+        primaryManager.status === "streaming" &&
         !this.runtimes.has(configuredManagerId)
       ) {
         throw new Error("Primary manager runtime is not initialized");
@@ -1655,7 +1652,35 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
   }
 
   private shouldRestoreRuntimeForDescriptor(descriptor: AgentDescriptor): boolean {
-    return descriptor.status === "idle" || descriptor.status === "streaming";
+    return descriptor.status === "streaming";
+  }
+
+  private async getOrCreateRuntimeForDescriptor(descriptor: AgentDescriptor): Promise<SwarmAgentRuntime> {
+    const existingRuntime = this.runtimes.get(descriptor.agentId);
+    if (existingRuntime) {
+      return existingRuntime;
+    }
+
+    const runtime = await this.createRuntimeForDescriptor(descriptor, this.resolveSystemPromptForDescriptor(descriptor));
+
+    const latestDescriptor = this.descriptors.get(descriptor.agentId);
+    if (!latestDescriptor || latestDescriptor.status === "terminated" || latestDescriptor.status === "stopped_on_restart") {
+      await runtime.terminate({ abort: true });
+      throw new Error(`Target agent is not running: ${descriptor.agentId}`);
+    }
+
+    const concurrentRuntime = this.runtimes.get(descriptor.agentId);
+    if (concurrentRuntime) {
+      await runtime.terminate({ abort: true });
+      return concurrentRuntime;
+    }
+
+    this.runtimes.set(descriptor.agentId, runtime);
+    const contextUsage = runtime.getContextUsage();
+    latestDescriptor.contextUsage = contextUsage;
+    this.descriptors.set(descriptor.agentId, latestDescriptor);
+    this.emitStatus(descriptor.agentId, latestDescriptor.status, runtime.getPendingCount(), contextUsage);
+    return runtime;
   }
 
   private getBootLogManagerDescriptor(): AgentDescriptor | undefined {

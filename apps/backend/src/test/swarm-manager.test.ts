@@ -635,6 +635,9 @@ describe('SwarmManager', () => {
     const secondBoot = new TestSwarmManager(config)
     await bootWithDefaultManager(secondBoot, config)
 
+    expect(secondBoot.systemPromptByAgentId.get(merger.agentId)).toBeUndefined()
+    await secondBoot.sendMessage('manager', merger.agentId, 'resume merge')
+
     expect(secondBoot.systemPromptByAgentId.get(merger.agentId)).toContain(
       'You are the merger agent in a multi-agent swarm.',
     )
@@ -1329,7 +1332,7 @@ describe('SwarmManager', () => {
     expect(manager.runtimeByAgentId.has(worker.agentId)).toBe(true)
   })
 
-  it('restores non-terminated workers on restart', async () => {
+  it('restores streaming workers on restart without recreating idle runtimes', async () => {
     const config = await makeTempConfig()
 
     const seedAgents = {
@@ -1370,8 +1373,57 @@ describe('SwarmManager', () => {
     const worker = agents.find((agent) => agent.agentId === 'worker-a')
 
     expect(worker?.status).toBe('streaming')
-    expect(manager.createdRuntimeIds).toEqual(['manager', 'worker-a'])
+    expect(manager.createdRuntimeIds).toEqual(['worker-a'])
+    expect(manager.runtimeByAgentId.get('manager')).toBeUndefined()
     expect(manager.runtimeByAgentId.get('worker-a')).toBeDefined()
+  })
+
+  it('lazily creates idle runtimes when a restored agent receives work', async () => {
+    const config = await makeTempConfig()
+
+    const seedAgents = {
+      agents: [
+        {
+          agentId: 'manager',
+          displayName: 'Manager',
+          role: 'manager',
+          managerId: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'manager.jsonl'),
+        },
+        {
+          agentId: 'worker-idle',
+          displayName: 'Worker Idle',
+          role: 'worker',
+          managerId: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'worker-idle.jsonl'),
+        },
+      ],
+    }
+
+    await writeFile(config.paths.agentsStoreFile, JSON.stringify(seedAgents, null, 2), 'utf8')
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    expect(manager.createdRuntimeIds).toEqual([])
+    expect(manager.runtimeByAgentId.get('worker-idle')).toBeUndefined()
+
+    await manager.sendMessage('manager', 'worker-idle', 'start now')
+
+    const runtime = manager.runtimeByAgentId.get('worker-idle')
+    expect(runtime).toBeDefined()
+    expect(runtime?.sendCalls.at(-1)?.message).toBe('SYSTEM: start now')
+    expect(manager.createdRuntimeIds).toEqual(['worker-idle'])
   })
 
   it('skips terminated histories at boot and lazy-loads them on demand', async () => {
@@ -1435,7 +1487,7 @@ describe('SwarmManager', () => {
     const manager = new TestSwarmManager(config)
     await manager.boot()
 
-    expect(manager.createdRuntimeIds).toEqual(['manager', 'worker-active'])
+    expect(manager.createdRuntimeIds).toEqual([])
     expect(manager.getLoadedConversationAgentIdsForTest()).toEqual(['manager', 'worker-active'])
 
     const terminatedHistory = manager.getConversationHistory('worker-terminated')
@@ -1485,7 +1537,7 @@ describe('SwarmManager', () => {
 
     expect(agents.some((agent) => agent.agentId === 'manager')).toBe(false)
     expect(restoredWorker?.managerId).toBe('ops-manager')
-    expect(manager.createdRuntimeIds).toEqual(['ops-manager', 'ops-worker'])
+    expect(manager.createdRuntimeIds).toEqual([])
   })
 
   it('keeps killed workers terminated across restart', async () => {
@@ -1501,7 +1553,7 @@ describe('SwarmManager', () => {
 
     const restored = secondBoot.listAgents().find((agent) => agent.agentId === worker.agentId)
     expect(restored?.status).toBe('terminated')
-    expect(secondBoot.createdRuntimeIds).toEqual(['manager'])
+    expect(secondBoot.createdRuntimeIds).toEqual([])
 
     await expect(secondBoot.sendMessage('manager', worker.agentId, 'still there?')).rejects.toThrow(
       `Target agent is not running: ${worker.agentId}`,
@@ -1518,12 +1570,12 @@ describe('SwarmManager', () => {
     const secondBoot = new TestSwarmManager(config)
     await bootWithDefaultManager(secondBoot, config)
     expect(secondBoot.listAgents().filter((agent) => agent.agentId === worker.agentId)).toHaveLength(1)
-    expect(secondBoot.createdRuntimeIds).toEqual(['manager', worker.agentId])
+    expect(secondBoot.createdRuntimeIds).toEqual([])
 
     const thirdBoot = new TestSwarmManager(config)
     await bootWithDefaultManager(thirdBoot, config)
     expect(thirdBoot.listAgents().filter((agent) => agent.agentId === worker.agentId)).toHaveLength(1)
-    expect(thirdBoot.createdRuntimeIds).toEqual(['manager', worker.agentId])
+    expect(thirdBoot.createdRuntimeIds).toEqual([])
   })
 
   it('persists manager conversation history to disk and reloads it on restart', async () => {
