@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { fireEvent, getAllByRole, getByLabelText, getByRole } from '@testing-library/dom'
+import { fireEvent, getAllByRole, getByLabelText, getByRole, queryByText } from '@testing-library/dom'
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
@@ -69,9 +69,28 @@ function changeValue(element: HTMLInputElement, value: string): void {
 function buildManager(agentId: string, cwd: string) {
   return {
     agentId,
-    managerId: 'manager',
+    managerId: agentId,
     displayName: agentId,
     role: 'manager' as const,
+    status: 'idle' as const,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    cwd,
+    model: {
+      provider: 'openai-codex',
+      modelId: 'gpt-5.3-codex',
+      thinkingLevel: 'high',
+    },
+    sessionFile: `/tmp/${agentId}.jsonl`,
+  }
+}
+
+function buildWorker(agentId: string, managerId: string, cwd: string) {
+  return {
+    agentId,
+    managerId,
+    displayName: agentId,
+    role: 'worker' as const,
     status: 'idle' as const,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -208,5 +227,81 @@ describe('IndexPage create manager model selection', () => {
     })
 
     await vi.advanceTimersByTimeAsync(0)
+  })
+
+  it('scopes all-tab activity to the selected manager context', async () => {
+    const socket = await renderPage()
+
+    emitServerEvent(socket, {
+      type: 'agents_snapshot',
+      agents: [
+        buildManager('manager', '/tmp/manager'),
+        buildWorker('worker-owned', 'manager', '/tmp/manager'),
+        buildManager('other-manager', '/tmp/other-manager'),
+        buildWorker('worker-foreign', 'other-manager', '/tmp/other-manager'),
+      ],
+    })
+
+    emitServerEvent(socket, {
+      type: 'conversation_history',
+      agentId: 'manager',
+      messages: [
+        {
+          type: 'conversation_message',
+          agentId: 'manager',
+          role: 'assistant',
+          text: 'manager reply',
+          timestamp: new Date().toISOString(),
+          source: 'speak_to_user',
+        },
+        {
+          type: 'agent_message',
+          agentId: 'manager',
+          timestamp: new Date().toISOString(),
+          source: 'agent_to_agent',
+          fromAgentId: 'worker-owned',
+          toAgentId: 'worker-owned',
+          text: 'owned worker chatter',
+        },
+        {
+          type: 'agent_tool_call',
+          agentId: 'manager',
+          actorAgentId: 'worker-owned',
+          timestamp: new Date().toISOString(),
+          kind: 'tool_execution_start',
+          toolName: 'read',
+          toolCallId: 'owned-call',
+          text: '{"path":"README.md"}',
+        },
+        {
+          type: 'agent_message',
+          agentId: 'manager',
+          timestamp: new Date().toISOString(),
+          source: 'agent_to_agent',
+          fromAgentId: 'worker-foreign',
+          toAgentId: 'worker-foreign',
+          text: 'foreign worker chatter',
+        },
+        {
+          type: 'agent_tool_call',
+          agentId: 'manager',
+          actorAgentId: 'worker-foreign',
+          timestamp: new Date().toISOString(),
+          kind: 'tool_execution_start',
+          toolName: 'read',
+          toolCallId: 'foreign-call',
+          text: '{"path":"SECRET.md"}',
+        },
+      ],
+    })
+
+    await vi.advanceTimersByTimeAsync(0)
+
+    click(getByRole(container, 'button', { name: 'All' }))
+
+    expect(queryByText(container, 'owned worker chatter')).not.toBeNull()
+    expect(queryByText(container, /owned-call/)).not.toBeNull()
+    expect(queryByText(container, 'foreign worker chatter')).toBeNull()
+    expect(queryByText(container, /foreign-call/)).toBeNull()
   })
 })
