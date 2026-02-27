@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/middleman-header.png" alt="Middleman" width="100%">
+</p>
+
 # 👔 Middleman
 
 A local-first multi-agent orchestration platform. One manager, many workers, zero tab-juggling.
