@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { normalizeManagerId } from "../../utils/normalize.js";
 import type {
   TelegramIntegrationConfig,
   TelegramIntegrationConfigPublic,
@@ -336,15 +337,6 @@ function maskToken(value: string): string {
   }
 
   return `${trimmed.slice(0, 5)}…${trimmed.slice(-3)}`;
-}
-
-function normalizeManagerId(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    throw new Error("managerId is required");
-  }
-
-  return trimmed;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
