@@ -10,6 +10,7 @@ import {
   normalizeRuntimeUserMessage,
   previewForLog
 } from "./runtime-utils.js";
+import { transitionAgentStatus } from "./agent-state-machine.js";
 import type {
   RuntimeImageAttachment,
   RuntimeErrorEvent,
@@ -129,8 +130,8 @@ export class AgentRuntime implements SwarmAgentRuntime {
     this.promptDispatchPending = false;
     this.ignoreNextAgentStart = false;
     this.inFlightPrompts.clear();
-    this.status = "terminated";
-    this.descriptor.status = "terminated";
+    this.status = transitionAgentStatus(this.status, "terminated");
+    this.descriptor.status = this.status;
     this.descriptor.updatedAt = this.now();
     await this.emitStatus();
   }
@@ -369,10 +370,11 @@ export class AgentRuntime implements SwarmAgentRuntime {
       return;
     }
 
-    this.status = status;
-    this.descriptor.status = status;
+    const nextStatus = transitionAgentStatus(this.status, status);
+    this.status = nextStatus;
+    this.descriptor.status = nextStatus;
     this.descriptor.updatedAt = this.now();
-    this.lastStreamingStatusEmitAtMs = status === "streaming" ? Date.now() : 0;
+    this.lastStreamingStatusEmitAtMs = nextStatus === "streaming" ? Date.now() : 0;
     await this.emitStatus();
   }
 

@@ -15,6 +15,7 @@ import {
   normalizeRuntimeUserMessage,
   previewForLog
 } from "./runtime-utils.js";
+import { transitionAgentStatus } from "./agent-state-machine.js";
 import type {
   RuntimeImageAttachment,
   RuntimeErrorEvent,
@@ -237,8 +238,8 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     this.activeTurnId = undefined;
     this.startRequestPending = false;
 
-    this.status = "terminated";
-    this.descriptor.status = "terminated";
+    this.status = transitionAgentStatus(this.status, "terminated");
+    this.descriptor.status = this.status;
     this.descriptor.updatedAt = this.now();
 
     await this.emitStatus();
@@ -747,8 +748,8 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     this.activeTurnId = undefined;
     this.threadId = undefined;
 
-    this.status = "terminated";
-    this.descriptor.status = "terminated";
+    this.status = transitionAgentStatus(this.status, "terminated");
+    this.descriptor.status = this.status;
     this.descriptor.updatedAt = this.now();
 
     await this.emitStatus();
@@ -774,8 +775,9 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
       return;
     }
 
-    this.status = status;
-    this.descriptor.status = status;
+    const nextStatus = transitionAgentStatus(this.status, status);
+    this.status = nextStatus;
+    this.descriptor.status = nextStatus;
     this.descriptor.updatedAt = this.now();
 
     await this.emitStatus();
