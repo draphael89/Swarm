@@ -18,7 +18,7 @@ import type {
 import type { SwarmAgentRuntime } from '../swarm/runtime-types.js'
 import { getScheduleFilePath } from '../scheduler/schedule-storage.js'
 import { SwarmWebSocketServer } from '../ws/server.js'
-import type { ServerEvent } from '../protocol/ws-types.js'
+import type { ServerEvent } from '@middleman/protocol'
 
 class FakeRuntime {
   readonly descriptor: AgentDescriptor
@@ -1259,7 +1259,7 @@ describe('SwarmWebSocketServer', () => {
 
     expect(workerEvent.type).toBe('conversation_message')
 
-    ;(manager as any).emitConversationLog({
+    ;(manager as any).conversationProjector.emitConversationLog({
       type: 'conversation_log',
       agentId: worker.agentId,
       timestamp: new Date().toISOString(),

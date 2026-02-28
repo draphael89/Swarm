@@ -42,7 +42,7 @@ import {
   testTelegramConnection,
   toErrorMessage,
 } from './settings-api'
-import type { AgentDescriptor, SlackStatusEvent, TelegramStatusEvent } from '@/lib/ws-types'
+import type { AgentDescriptor, SlackStatusEvent, TelegramStatusEvent } from '@middleman/protocol'
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */
@@ -241,10 +241,7 @@ export function SettingsIntegrations({
   const managerOptions = useMemo(
     () =>
       managers.filter(
-        (agent) =>
-          agent.role === 'manager' &&
-          agent.status !== 'terminated' &&
-          agent.status !== 'stopped_on_restart',
+        (agent) => agent.role === 'manager' && (agent.status === 'idle' || agent.status === 'streaming'),
       ),
     [managers],
   )

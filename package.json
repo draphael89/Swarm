@@ -7,7 +7,8 @@
   "workspaces": [
     "apps/backend",
     "apps/ui",
-    "apps/site"
+    "apps/site",
+    "packages/protocol"
   ],
   "scripts": {
     "dev": "concurrently --kill-others-on-fail --names backend,ui \"pnpm --filter @middleman/backend dev\" \"pnpm --filter @middleman/ui dev -- --host ${MIDDLEMAN_HOST:-$(node --env-file-if-exists=.env -p 'process.env.MIDDLEMAN_HOST || \"127.0.0.1\"' 2>/dev/null)}\"",

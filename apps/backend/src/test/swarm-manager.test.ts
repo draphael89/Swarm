@@ -1383,6 +1383,53 @@ describe('SwarmManager', () => {
     expect(manager.runtimeByAgentId.get('worker-a')).toBeUndefined()
   })
 
+  it('migrates persisted stopped_on_restart statuses to stopped at boot', async () => {
+    const config = await makeTempConfig()
+
+    const seedAgents = {
+      agents: [
+        {
+          agentId: 'manager',
+          displayName: 'Manager',
+          role: 'manager',
+          managerId: 'manager',
+          status: 'idle',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'manager.jsonl'),
+        },
+        {
+          agentId: 'worker-stopped',
+          displayName: 'Worker Stopped',
+          role: 'worker',
+          managerId: 'manager',
+          status: 'stopped_on_restart',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          cwd: config.defaultCwd,
+          model: config.defaultModel,
+          sessionFile: join(config.paths.sessionsDir, 'worker-stopped.jsonl'),
+        },
+      ],
+    }
+
+    await writeFile(config.paths.agentsStoreFile, JSON.stringify(seedAgents, null, 2), 'utf8')
+
+    const manager = new TestSwarmManager(config)
+    await manager.boot()
+
+    const migrated = manager.listAgents().find((agent) => agent.agentId === 'worker-stopped')
+    const persistedStore = JSON.parse(await readFile(config.paths.agentsStoreFile, 'utf8')) as {
+      agents: Array<{ agentId: string; status: AgentDescriptor['status'] }>
+    }
+    const persistedWorker = persistedStore.agents.find((agent) => agent.agentId === 'worker-stopped')
+
+    expect(migrated?.status).toBe('stopped')
+    expect(persistedWorker?.status).toBe('stopped')
+  })
+
   it('lazily creates idle runtimes when a restored agent receives work', async () => {
     const config = await makeTempConfig()
 
