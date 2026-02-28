@@ -3,6 +3,18 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./bootstrap": {
+      "types": "./dist/bootstrap.d.ts",
+      "import": "./dist/bootstrap.js"
+    }
+  },
   "scripts": {
     "dev": "tsx watch --exclude \"../../data/**\" --exclude \"data/**\" src/index.ts",
     "build": "tsc -p tsconfig.build.json",

@@ -44,6 +44,33 @@ export const Route = createFileRoute('/')({
 const DEFAULT_MANAGER_MODEL: ManagerModelPreset = 'pi-codex'
 const DEFAULT_DEV_WS_URL = 'ws://127.0.0.1:47187'
 
+export function resolveWsUrl(options: {
+  electronWsUrl?: string
+  envWsUrl?: string
+  defaultWsUrl: string
+}): string {
+  const electronWsUrl = options.electronWsUrl?.trim()
+  if (electronWsUrl) {
+    return electronWsUrl
+  }
+
+  const envWsUrl = options.envWsUrl?.trim()
+  if (envWsUrl) {
+    return envWsUrl
+  }
+
+  return options.defaultWsUrl
+}
+
+function resolveElectronWsUrl(): string | undefined {
+  if (typeof window === 'undefined') {
+    return undefined
+  }
+
+  const runtimeWsUrl = window.middlemanRuntime?.wsUrl?.trim()
+  return runtimeWsUrl ? runtimeWsUrl : undefined
+}
+
 function resolveDefaultWsUrl(): string {
   if (typeof window === 'undefined') {
     return DEFAULT_DEV_WS_URL
@@ -61,7 +88,11 @@ function resolveDefaultWsUrl(): string {
 }
 
 export function IndexPage() {
-  const wsUrl = import.meta.env.VITE_MIDDLEMAN_WS_URL ?? resolveDefaultWsUrl()
+  const wsUrl = resolveWsUrl({
+    electronWsUrl: resolveElectronWsUrl(),
+    envWsUrl: import.meta.env.VITE_MIDDLEMAN_WS_URL,
+    defaultWsUrl: resolveDefaultWsUrl(),
+  })
   const messageInputRef = useRef<MessageInputHandle | null>(null)
   const navigate = useOptionalNavigate()
   const location = useOptionalLocation()

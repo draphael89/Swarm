@@ -7,6 +7,7 @@ import { flushSync } from 'react-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MANAGER_MODEL_PRESETS } from '@middleman/protocol'
 import { IndexPage } from './index'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 const CREATE_MANAGER_MODEL_PRESETS = MANAGER_MODEL_PRESETS.filter(
   (modelPreset) => modelPreset !== 'codex-app',
@@ -60,6 +61,10 @@ function click(element: HTMLElement): void {
   flushSync(() => {
     element.click()
   })
+}
+
+function getAddManagerButton(rootElement: HTMLElement): HTMLElement {
+  return getAllByRole(rootElement, 'button', { name: 'Add manager' })[0] as HTMLElement
 }
 
 function changeValue(element: HTMLInputElement, value: string): void {
@@ -151,7 +156,7 @@ async function renderPage(): Promise<FakeWebSocket> {
   root = createRoot(container)
 
   flushSync(() => {
-    root?.render(createElement(IndexPage))
+    root?.render(createElement(TooltipProvider, undefined, createElement(IndexPage)))
   })
 
   await Promise.resolve()
@@ -175,7 +180,7 @@ describe('IndexPage create manager model selection', () => {
   it('shows only allowed model presets and defaults to pi-codex', async () => {
     await renderPage()
 
-    click(getByRole(container, 'button', { name: 'Add manager' }))
+    click(getAddManagerButton(container))
 
     const modelSelect = getByRole(document.body, 'combobox', { name: 'Model' })
     expect(modelSelect.textContent).toContain('pi-codex')
@@ -189,7 +194,7 @@ describe('IndexPage create manager model selection', () => {
   it('sends selected model in create_manager payload', async () => {
     const socket = await renderPage()
 
-    click(getByRole(container, 'button', { name: 'Add manager' }))
+    click(getAddManagerButton(container))
 
     changeValue(getByLabelText(document.body, 'Name') as HTMLInputElement, 'release-manager')
     changeValue(getByLabelText(document.body, 'Working directory') as HTMLInputElement, '/tmp/release')

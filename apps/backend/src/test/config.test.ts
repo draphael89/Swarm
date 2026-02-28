@@ -130,4 +130,20 @@ describe('createConfig', () => {
       }
     )
   })
+
+  it('applies explicit overrides for root/data/host/port', async () => {
+    await withEnv({ MIDDLEMAN_HOST: '10.0.0.1', MIDDLEMAN_PORT: '7777' }, () => {
+      const config = createConfig({
+        rootDir: '/tmp/middleman-root',
+        dataDir: '/tmp/middleman-data',
+        host: '0.0.0.0',
+        port: 9000,
+      })
+
+      expect(config.paths.rootDir).toBe(resolve('/tmp/middleman-root'))
+      expect(config.paths.dataDir).toBe(resolve('/tmp/middleman-data'))
+      expect(config.host).toBe('0.0.0.0')
+      expect(config.port).toBe(9000)
+    })
+  })
 })

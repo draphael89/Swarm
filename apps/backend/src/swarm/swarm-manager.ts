@@ -339,6 +339,31 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     });
   }
 
+  async shutdown(options?: { abort?: boolean }): Promise<void> {
+    const abort = options?.abort ?? true;
+    const runtimeEntries = Array.from(this.runtimes.entries());
+    this.runtimes.clear();
+
+    if (runtimeEntries.length === 0) {
+      return;
+    }
+
+    const terminationResults = await Promise.allSettled(
+      runtimeEntries.map(async ([agentId, runtime]) => {
+        await runtime.terminate({ abort });
+        return agentId;
+      })
+    );
+
+    const failureMessages = terminationResults
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => (result.reason instanceof Error ? result.reason.message : String(result.reason)));
+
+    if (failureMessages.length > 0) {
+      throw new Error(`Failed to terminate one or more runtimes: ${failureMessages.join("; ")}`);
+    }
+  }
+
   listAgents(): AgentDescriptor[] {
     return this.sortedDescriptors().map((descriptor) => cloneDescriptor(descriptor));
   }

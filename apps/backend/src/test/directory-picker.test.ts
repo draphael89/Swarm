@@ -78,4 +78,37 @@ describe("pickDirectory", () => {
       })
     ).rejects.toThrow('Directory picker is not supported on platform "freebsd".');
   });
+
+  it("uses the Electron dialog when explicitly requested", async () => {
+    const electronDialogFn = vi.fn().mockResolvedValue({
+      canceled: false,
+      filePaths: ["/tmp/electron-picked"]
+    });
+
+    const pickedPath = await pickDirectory({
+      preferElectronDialog: true,
+      electronDialogFn
+    });
+
+    expect(pickedPath).toBe(resolve("/tmp/electron-picked"));
+    expect(electronDialogFn).toHaveBeenCalledWith({
+      title: "Select a manager working directory",
+      defaultPath: undefined,
+      properties: ["openDirectory", "createDirectory", "promptToCreate"]
+    });
+  });
+
+  it("returns null when Electron dialog selection is canceled", async () => {
+    const electronDialogFn = vi.fn().mockResolvedValue({
+      canceled: true,
+      filePaths: []
+    });
+
+    const pickedPath = await pickDirectory({
+      preferElectronDialog: true,
+      electronDialogFn
+    });
+
+    expect(pickedPath).toBeNull();
+  });
 });

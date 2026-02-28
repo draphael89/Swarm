@@ -2,6 +2,8 @@ reference/
 node_modules/
 **/node_modules/
 **/dist/
+apps/electron/release/
+apps/electron/apps/
 **/.tanstack/
 .DS_Store
 .env

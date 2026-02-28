@@ -5,9 +5,16 @@ import { normalizeAllowlistRoots } from "./swarm/cwd-policy.js";
 import { getMemoryDirPath } from "./swarm/memory-paths.js";
 import type { SwarmConfig } from "./swarm/types.js";
 
-export function createConfig(): SwarmConfig {
-  const rootDir = detectRootDir();
-  const dataDir = resolve(homedir(), ".middleman");
+export interface ConfigOverrides {
+  rootDir?: string;
+  dataDir?: string;
+  host?: string;
+  port?: number;
+}
+
+export function createConfig(overrides: ConfigOverrides = {}): SwarmConfig {
+  const rootDir = overrides.rootDir ? resolve(overrides.rootDir) : detectRootDir();
+  const dataDir = overrides.dataDir ? resolve(overrides.dataDir) : resolve(homedir(), ".middleman");
   const managerId = undefined;
   const swarmDir = resolve(dataDir, "swarm");
   const sessionsDir = resolve(dataDir, "sessions");
@@ -22,16 +29,16 @@ export function createConfig(): SwarmConfig {
   const memoryFile = undefined;
   const repoMemorySkillFile = resolve(rootDir, ".swarm", "skills", "memory", "SKILL.md");
   const secretsFile = resolve(dataDir, "secrets.json");
-  const defaultCwd = rootDir;
+  const defaultCwd = isSwarmRepoRoot(rootDir) ? rootDir : homedir();
 
   const cwdAllowlistRoots = normalizeAllowlistRoots([
-    rootDir,
+    defaultCwd,
     resolve(homedir(), "worktrees")
   ]);
 
   return {
-    host: process.env.MIDDLEMAN_HOST ?? "127.0.0.1",
-    port: Number.parseInt(process.env.MIDDLEMAN_PORT ?? "47187", 10),
+    host: overrides.host ?? process.env.MIDDLEMAN_HOST ?? "127.0.0.1",
+    port: overrides.port ?? Number.parseInt(process.env.MIDDLEMAN_PORT ?? "47187", 10),
     debug: true,
     allowNonManagerSubscriptions: true,
     managerId,
@@ -64,7 +71,7 @@ export function createConfig(): SwarmConfig {
   };
 }
 
-function detectRootDir(): string {
+export function detectRootDir(): string {
   let current = resolve(process.cwd());
 
   while (true) {

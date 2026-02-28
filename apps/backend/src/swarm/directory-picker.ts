@@ -17,12 +17,31 @@ interface PickerCommand {
   args: string[];
 }
 
+interface ElectronDialogOptions {
+  title: string;
+  defaultPath?: string;
+  properties: Array<"openDirectory" | "createDirectory" | "promptToCreate">;
+}
+
+interface ElectronDialogResult {
+  canceled: boolean;
+  filePaths: string[];
+}
+
+interface ElectronDialogModule {
+  dialog?: {
+    showOpenDialog?: (options: ElectronDialogOptions) => Promise<ElectronDialogResult>;
+  };
+}
+
 export interface PickDirectoryOptions {
   defaultPath?: string;
   prompt?: string;
   platform?: NodeJS.Platform;
   cwd?: string;
   execFileFn?: ExecFileFn;
+  electronDialogFn?: (options: ElectronDialogOptions) => Promise<ElectronDialogResult>;
+  preferElectronDialog?: boolean;
 }
 
 export async function pickDirectory(options: PickDirectoryOptions = {}): Promise<string | null> {
@@ -31,6 +50,20 @@ export async function pickDirectory(options: PickDirectoryOptions = {}): Promise
   const defaultPath = options.defaultPath?.trim() || undefined;
   const cwd = options.cwd ?? process.cwd();
   const execFileFn = options.execFileFn ?? execFileCommand;
+  const preferElectronDialog =
+    options.preferElectronDialog ?? isElectronMainProcess();
+
+  if (preferElectronDialog) {
+    const pickedFromElectron = await pickDirectoryFromElectronDialog({
+      defaultPath,
+      prompt,
+      electronDialogFn: options.electronDialogFn
+    });
+
+    if (pickedFromElectron !== undefined) {
+      return pickedFromElectron;
+    }
+  }
 
   switch (platform) {
     case "darwin":
@@ -106,6 +139,50 @@ export async function pickDirectory(options: PickDirectoryOptions = {}): Promise
   }
 }
 
+async function pickDirectoryFromElectronDialog(options: {
+  defaultPath?: string;
+  prompt: string;
+  electronDialogFn?: (options: ElectronDialogOptions) => Promise<ElectronDialogResult>;
+}): Promise<string | null | undefined> {
+  let dialogFn = options.electronDialogFn;
+
+  if (!dialogFn) {
+    try {
+      const electronSpecifier = "electron";
+      const electron = (await import(electronSpecifier)) as ElectronDialogModule;
+      const showOpenDialog = electron.dialog?.showOpenDialog;
+      if (typeof showOpenDialog !== "function") {
+        return undefined;
+      }
+
+      dialogFn = (dialogOptions) => showOpenDialog(dialogOptions);
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        (error as NodeJS.ErrnoException).code === "ERR_MODULE_NOT_FOUND"
+      ) {
+        return undefined;
+      }
+
+      throw error;
+    }
+  }
+
+  const result = await dialogFn({
+    title: options.prompt,
+    defaultPath: options.defaultPath,
+    properties: ["openDirectory", "createDirectory", "promptToCreate"]
+  });
+  const pickedPath = result.filePaths[0]?.trim();
+  if (result.canceled || !pickedPath) {
+    return null;
+  }
+
+  return resolve(pickedPath);
+}
+
 async function pickDirectoryFromCommands(
   commands: PickerCommand[],
   execFileFn: ExecFileFn
@@ -153,6 +230,11 @@ function isCommandMissing(error: unknown): boolean {
     "code" in error &&
     (error as NodeJS.ErrnoException).code === "ENOENT"
   );
+}
+
+function isElectronMainProcess(): boolean {
+  const runtimeProcess = process as NodeJS.Process & { type?: string };
+  return Boolean(runtimeProcess.versions?.electron) && runtimeProcess.type !== "renderer";
 }
 
 function isDirectoryPickerCanceled(error: unknown): boolean {

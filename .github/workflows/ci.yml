@@ -39,3 +39,9 @@ jobs:
 
       - name: Backend tests
         run: pnpm --filter @middleman/backend test
+
+      - name: UI tests
+        run: pnpm --filter @middleman/ui test
+
+      - name: Electron smoke tests
+        run: pnpm electron:smoke

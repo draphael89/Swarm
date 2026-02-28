@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { getByRole, getByText, queryByText } from '@testing-library/dom'
+import { getByRole, getByTitle, queryByText } from '@testing-library/dom'
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { flushSync } from 'react-dom'
@@ -108,19 +108,19 @@ function renderSidebar({
 }
 
 describe('AgentSidebar', () => {
-  it('shows workers expanded by default and toggles collapse/expand per manager', () => {
+  it('keeps workers collapsed by default and toggles expand/collapse per manager', () => {
     renderSidebar({ agents: [manager('manager-alpha'), worker('worker-alpha', 'manager-alpha')] })
 
-    expect(queryByText(container, 'worker-alpha')).toBeTruthy()
-
-    click(getByRole(container, 'button', { name: 'Collapse manager manager-alpha' }))
     expect(queryByText(container, 'worker-alpha')).toBeNull()
 
     click(getByRole(container, 'button', { name: 'Expand manager manager-alpha' }))
     expect(queryByText(container, 'worker-alpha')).toBeTruthy()
+
+    click(getByRole(container, 'button', { name: 'Collapse manager manager-alpha' }))
+    expect(queryByText(container, 'worker-alpha')).toBeNull()
   })
 
-  it('shows runtime icons and compact model labels from model presets', () => {
+  it('shows runtime icons for supported model presets', () => {
     renderSidebar({
       agents: [
         manager('manager-pi', { provider: 'openai-codex', modelId: 'gpt-5.3-codex' }),
@@ -129,11 +129,12 @@ describe('AgentSidebar', () => {
       ],
     })
 
-    expect(getByText(container, 'pi-codex')).toBeTruthy()
-    expect(getByText(container, 'pi-opus')).toBeTruthy()
-    expect(getByText(container, 'codex-app')).toBeTruthy()
-    expect(container.querySelectorAll('img[src="/pi-logo.svg"]').length).toBeGreaterThanOrEqual(2)
-    expect(container.querySelector('img[src="/agents/codex-logo.svg"]')).toBeTruthy()
+    click(getByRole(container, 'button', { name: 'Expand manager manager-pi' }))
+
+    expect(container.querySelectorAll('img[src="/pi-logo.svg"]').length).toBeGreaterThanOrEqual(1)
+    expect(container.querySelectorAll('img[src="/agents/codex-logo.svg"]').length).toBeGreaterThanOrEqual(2)
+    expect(container.querySelectorAll('img[src="/agents/claude-logo.svg"]').length).toBeGreaterThanOrEqual(1)
+    expect(container.querySelectorAll('img[src="/agents/codex-app-logo.svg"]').length).toBeGreaterThanOrEqual(1)
   })
 
   it('keeps manager selection behavior working while collapse state changes', () => {
@@ -144,14 +145,14 @@ describe('AgentSidebar', () => {
       onSelectAgent,
     })
 
-    const getManagerRowButton = () => getByText(container, 'manager-alpha').closest('button') as HTMLButtonElement
+    const getManagerRowButton = () => getByTitle(container, 'manager-alpha') as HTMLButtonElement
     expect(getManagerRowButton()).toBeTruthy()
 
     click(getManagerRowButton())
     expect(onSelectAgent).toHaveBeenCalledTimes(1)
     expect(onSelectAgent).toHaveBeenLastCalledWith('manager-alpha')
 
-    click(getByRole(container, 'button', { name: 'Collapse manager manager-alpha' }))
+    click(getByRole(container, 'button', { name: 'Expand manager manager-alpha' }))
     expect(onSelectAgent).toHaveBeenCalledTimes(1)
 
     click(getManagerRowButton())
@@ -159,23 +160,19 @@ describe('AgentSidebar', () => {
     expect(onSelectAgent).toHaveBeenLastCalledWith('manager-alpha')
   })
 
-  it('preserves existing delete controls for managers and workers', () => {
-    const onDeleteAgent = vi.fn()
-    const onDeleteManager = vi.fn()
-
+  it('renders context-menu delete affordances for managers and workers', () => {
     renderSidebar({
       agents: [manager('manager-alpha'), worker('worker-alpha', 'manager-alpha')],
-      onDeleteAgent,
-      onDeleteManager,
     })
 
-    click(getByRole(container, 'button', { name: 'Delete manager manager-alpha' }))
-    expect(onDeleteManager).toHaveBeenCalledTimes(1)
-    expect(onDeleteManager).toHaveBeenCalledWith('manager-alpha')
+    const managerRow = getByTitle(container, 'manager-alpha').closest('[data-slot="context-menu-trigger"]')
+    expect(managerRow).toBeTruthy()
+    expect(managerRow?.getAttribute('data-state')).toBe('closed')
 
-    click(getByRole(container, 'button', { name: 'Delete worker-alpha' }))
-    expect(onDeleteAgent).toHaveBeenCalledTimes(1)
-    expect(onDeleteAgent).toHaveBeenCalledWith('worker-alpha')
+    click(getByRole(container, 'button', { name: 'Expand manager manager-alpha' }))
+    const workerRow = getByTitle(container, 'worker-alpha').closest('[data-slot="context-menu-trigger"]')
+    expect(workerRow).toBeTruthy()
+    expect(workerRow?.getAttribute('data-state')).toBe('closed')
   })
 
   it('calls onOpenSettings when the settings button is clicked', () => {

@@ -1,0 +1,32 @@
+{
+  "name": "@middleman/electron",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "pnpm --filter @middleman/backend build && tsc -p tsconfig.json && concurrently \"pnpm --filter @middleman/backend exec tsc -p tsconfig.build.json -w --preserveWatchOutput\" \"tsc -w -p tsconfig.json --preserveWatchOutput\" \"electron .\"",
+    "build": "tsc -p tsconfig.json",
+    "build:all": "pnpm --filter @middleman/backend build && pnpm --filter @middleman/ui build && pnpm build",
+    "start": "electron .",
+    "test": "pnpm --filter @middleman/backend build && vitest run",
+    "smoke": "pnpm --filter @middleman/backend build && vitest run src/test/main.test.ts src/test/preload.test.ts src/test/lifecycle.test.ts",
+    "dist": "pnpm build:all && electron-builder --config electron-builder.yml --publish never",
+    "dist:dir": "pnpm build:all && electron-builder --config electron-builder.yml --dir --publish never",
+    "dist:mac": "pnpm build:all && electron-builder --config electron-builder.yml --mac --publish never",
+    "dist:win": "pnpm build:all && electron-builder --config electron-builder.yml --win --publish never",
+    "dist:linux": "pnpm build:all && electron-builder --config electron-builder.yml --linux --publish never"
+  },
+  "dependencies": {
+    "@middleman/backend": "workspace:*",
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "concurrently": "^9.2.1",
+    "electron": "^34.0.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

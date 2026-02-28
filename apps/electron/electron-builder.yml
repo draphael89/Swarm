@@ -1,0 +1,43 @@
+appId: com.middleman.desktop
+productName: Middleman
+directories:
+  app: ../..
+  output: release
+asar: true
+asarUnpack:
+  - "**/*.node"
+files:
+  - package.json
+  - pnpm-lock.yaml
+  - apps/electron/dist/**/*
+  - apps/electron/node_modules/**/*
+  - apps/electron/package.json
+  - apps/backend/dist/**/*
+  - apps/backend/node_modules/**/*
+  - apps/backend/package.json
+  - apps/ui/dist/**/*
+  - apps/ui/package.json
+  - packages/protocol/dist/**/*
+  - packages/protocol/package.json
+  - node_modules/.pnpm/**/*
+  - "!**/src/**"
+extraMetadata:
+  main: apps/electron/dist/main.js
+npmRebuild: false
+publish: null
+mac:
+  icon: resources/icon.icns
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+win:
+  icon: resources/icon.ico
+  target:
+    - nsis
+    - zip
+linux:
+  icon: resources/app-icon.png
+  target:
+    - AppImage
+    - tar.gz

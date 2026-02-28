@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { WebSocketServer } from "ws";
 import type { IntegrationRegistryService } from "../integrations/registry.js";
 import type { ServerEvent } from "@middleman/protocol";
@@ -19,6 +20,8 @@ export class SwarmWebSocketServer {
   private readonly host: string;
   private readonly port: number;
   private readonly integrationRegistry: IntegrationRegistryService | null;
+  private boundHost: string;
+  private boundPort: number;
 
   private httpServer: HttpServer | null = null;
   private wss: WebSocketServer | null = null;
@@ -83,6 +86,8 @@ export class SwarmWebSocketServer {
     this.host = options.host;
     this.port = options.port;
     this.integrationRegistry = options.integrationRegistry ?? null;
+    this.boundHost = options.host;
+    this.boundPort = options.port;
 
     this.wsHandler = new WsHandler({
       swarmManager: this.swarmManager,
@@ -107,9 +112,9 @@ export class SwarmWebSocketServer {
     ];
   }
 
-  async start(): Promise<void> {
+  async start(): Promise<{ host: string; port: number }> {
     if (this.httpServer || this.wss) {
-      return;
+      return resolveBoundAddress(this.httpServer, this.boundHost, this.boundPort);
     }
 
     const httpServer = createServer((request, response) => {
@@ -144,6 +149,9 @@ export class SwarmWebSocketServer {
       httpServer.on("error", onError);
       httpServer.listen(this.port, this.host);
     });
+    const { host, port } = resolveBoundAddress(httpServer, this.host, this.port);
+    this.boundHost = host;
+    this.boundPort = port;
 
     this.swarmManager.on("conversation_message", this.onConversationMessage);
     this.swarmManager.on("conversation_log", this.onConversationLog);
@@ -154,6 +162,8 @@ export class SwarmWebSocketServer {
     this.swarmManager.on("agents_snapshot", this.onAgentsSnapshot);
     this.integrationRegistry?.on("slack_status", this.onSlackStatus);
     this.integrationRegistry?.on("telegram_status", this.onTelegramStatus);
+
+    return { host: this.boundHost, port: this.boundPort };
   }
 
   async stop(): Promise<void> {
@@ -186,7 +196,7 @@ export class SwarmWebSocketServer {
   }
 
   private async handleHttpRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const requestUrl = resolveRequestUrl(request, `${this.host}:${this.port}`);
+    const requestUrl = resolveRequestUrl(request, `${this.boundHost}:${this.boundPort}`);
     const route = this.httpRoutes.find((candidate) => candidate.matches(requestUrl.pathname));
 
     if (!route) {
@@ -215,6 +225,25 @@ export class SwarmWebSocketServer {
       sendJson(response, statusCode, { error: message });
     }
   }
+}
+
+function resolveBoundAddress(
+  server: HttpServer | null,
+  fallbackHost: string,
+  fallbackPort: number
+): { host: string; port: number } {
+  if (!server) {
+    return { host: fallbackHost, port: fallbackPort };
+  }
+
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    return { host: fallbackHost, port: fallbackPort };
+  }
+
+  const info = address as AddressInfo;
+  const host = info.address === "::" || info.address === "" ? fallbackHost : info.address;
+  return { host, port: info.port };
 }
 
 async function closeWebSocketServer(server: WebSocketServer): Promise<void> {

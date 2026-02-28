@@ -33,6 +33,14 @@ pnpm dev
 # UI:      http://127.0.0.1:47188
 ```
 
+Electron shell development:
+
+```bash
+pnpm electron:dev
+# UI dev server: http://127.0.0.1:47188
+# Electron main + embedded backend: ws://127.0.0.1:47187 (default)
+```
+
 ## Key Features
 
 - **Persistent managers.** Onboard once, work for days. Managers remember your preferences, workflow, and project context across sessions via compacting memory.
