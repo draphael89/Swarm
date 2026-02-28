@@ -6,7 +6,6 @@ import {
   consumePendingDeliveryByMessageKey,
   extractMessageKeyFromRuntimeContent,
   normalizeRuntimeError,
-  normalizeRuntimeImageAttachments,
   normalizeRuntimeUserMessage,
   previewForLog
 } from "./runtime-utils.js";
