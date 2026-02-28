@@ -11,7 +11,7 @@ import type {
   SlackChannelDescriptor,
   TelegramSettingsConfig,
 } from './settings-types'
-import type { SlackStatusEvent, TelegramStatusEvent } from '@/lib/ws-types'
+import type { SlackStatusEvent, TelegramStatusEvent } from '@middleman/protocol'
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */

@@ -38,7 +38,7 @@ import {
   type ConversationAttachment,
   type ConversationEntry,
   type ManagerModelPreset,
-} from '@/lib/ws-types'
+} from '@middleman/protocol'
 
 export const Route = createFileRoute('/')({
   component: IndexPage,

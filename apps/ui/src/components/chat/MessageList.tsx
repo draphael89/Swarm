@@ -22,7 +22,7 @@ import type {
   ConversationEntry,
   ConversationImageAttachment,
   MessageSourceContext,
-} from '@/lib/ws-types'
+} from '@middleman/protocol'
 import { MarkdownMessage } from './MarkdownMessage'
 
 interface MessageListProps {
