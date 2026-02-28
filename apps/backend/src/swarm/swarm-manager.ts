@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { ServerEvent } from "@middleman/protocol";
 import {
@@ -8,8 +8,6 @@ import {
   normalizeArchetypeId,
   type ArchetypePromptRegistry
 } from "./archetypes/archetype-prompt-registry.js";
-import { AgentRuntime } from "./agent-runtime.js";
-import { CodexAgentRuntime } from "./codex-agent-runtime.js";
 import { ConversationProjector } from "./conversation-projector.js";
 import { getAgentMemoryPath as getAgentMemoryPathForDataDir } from "./memory-paths.js";
 import { PersistenceService } from "./persistence-service.js";
@@ -56,9 +54,7 @@ import type {
 } from "./runtime-types.js";
 import type { SwarmToolHost } from "./swarm-tools.js";
 import type {
-  AcceptedDeliveryMode,
   AgentMessageEvent,
-  AgentToolCallEvent,
   AgentContextUsage,
   AgentDescriptor,
   AgentModelDescriptor,
@@ -69,7 +65,6 @@ import type {
   ConversationAttachment,
   ConversationBinaryAttachment,
   ConversationEntryEvent,
-  ConversationLogEvent,
   ConversationMessageEvent,
   ConversationTextAttachment,
   MessageSourceContext,
@@ -1273,16 +1268,8 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.conversationProjector.emitConversationMessage(event);
   }
 
-  private emitConversationLog(event: ConversationLogEvent): void {
-    this.conversationProjector.emitConversationLog(event);
-  }
-
   private emitAgentMessage(event: AgentMessageEvent): void {
     this.conversationProjector.emitAgentMessage(event);
-  }
-
-  private emitAgentToolCall(event: AgentToolCallEvent): void {
-    this.conversationProjector.emitAgentToolCall(event);
   }
 
   private emitConversationReset(agentId: string, reason: "user_new_command" | "api_reset"): void {

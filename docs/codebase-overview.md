@@ -25,7 +25,6 @@ swarm/
 │   │       ├── index.ts
 │   │       ├── config.ts
 │   │       ├── ws/server.ts
-│   │       ├── protocol/ws-types.ts
 │   │       ├── swarm/
 │   │       ├── integrations/
 │   │       ├── scheduler/
@@ -36,6 +35,8 @@ swarm/
 │           ├── components/
 │           ├── lib/
 │           └── styles.css
+├── packages/
+│   └── protocol/
 ├── docs/
 └── scripts/
 ```
@@ -79,8 +80,7 @@ Implemented in `apps/backend/src/ws/server.ts`:
 
 Contracts are defined in:
 
-- `apps/backend/src/protocol/ws-types.ts`
-- `apps/ui/src/lib/ws-types.ts` (frontend mirror)
+- `packages/protocol/`
 
 Main client commands:
 

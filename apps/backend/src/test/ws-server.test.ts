@@ -1259,7 +1259,7 @@ describe('SwarmWebSocketServer', () => {
 
     expect(workerEvent.type).toBe('conversation_message')
 
-    ;(manager as any).emitConversationLog({
+    ;(manager as any).conversationProjector.emitConversationLog({
       type: 'conversation_log',
       agentId: worker.agentId,
       timestamp: new Date().toISOString(),
