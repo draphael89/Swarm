@@ -32,12 +32,33 @@ import {
 } from "./cwd-policy.js";
 import { pickDirectory as pickNativeDirectory } from "./directory-picker.js";
 import {
+  isConversationBinaryAttachment,
+  isConversationEntryEvent,
+  isConversationImageAttachment,
+  isConversationTextAttachment
+} from "./conversation-validators.js";
+import {
+  extractMessageErrorMessage,
+  extractMessageImageAttachments,
+  extractMessageStopReason,
+  extractMessageText,
+  extractRole,
+  hasMessageErrorMessageField,
+  isStrictContextOverflowMessage,
+  normalizeProviderErrorMessage
+} from "./message-utils.js";
+import {
   DEFAULT_SWARM_MODEL_PRESET,
   inferSwarmModelPresetFromDescriptor,
   normalizeSwarmModelDescriptor,
   parseSwarmModelPreset,
   resolveModelDescriptorFromPreset
 } from "./model-presets.js";
+import {
+  normalizeEnvVarName,
+  parseSkillFrontmatter,
+  type ParsedSkillEnvDeclaration
+} from "./skill-frontmatter.js";
 import type {
   RuntimeImageAttachment,
   RuntimeErrorEvent,
@@ -60,7 +81,6 @@ import type {
   ConversationAttachment,
   ConversationBinaryAttachment,
   ConversationEntryEvent,
-  ConversationImageAttachment,
   ConversationLogEvent,
   ConversationMessageEvent,
   ConversationTextAttachment,
@@ -196,13 +216,11 @@ const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
 ## Open Follow-ups
 - (none yet)
 `;
-const SKILL_FRONTMATTER_BLOCK_PATTERN = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/;
 const SETTINGS_ENV_MASK = "********";
 const SETTINGS_AUTH_MASK = "********";
 const SWARM_MANAGER_MAX_EVENT_LISTENERS = 64;
 const MANAGER_ERROR_CONTEXT_HINT = "Try compacting the conversation to free up context space.";
 const MANAGER_ERROR_GENERIC_HINT = "Please retry. If this persists, check provider auth and rate limits.";
-const VALID_ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SETTINGS_AUTH_PROVIDER_DEFINITIONS: Array<{
   provider: SettingsAuthProviderName;
   storageProvider: string;
@@ -216,13 +234,6 @@ const SETTINGS_AUTH_PROVIDER_DEFINITIONS: Array<{
     storageProvider: "openai-codex"
   }
 ];
-
-interface ParsedSkillEnvDeclaration {
-  name: string;
-  description?: string;
-  required: boolean;
-  helpUrl?: string;
-}
 
 interface SkillMetadata {
   skillName: string;
@@ -3129,15 +3140,6 @@ function normalizeOptionalAgentId(input: string | undefined): string | undefined
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function normalizeEnvVarName(name: string): string | undefined {
-  const normalized = name.trim();
-  if (!VALID_ENV_NAME_PATTERN.test(normalized)) {
-    return undefined;
-  }
-
-  return normalized;
-}
-
 function resolveSettingsAuthProvider(
   provider: string
 ): { provider: SettingsAuthProviderName; storageProvider: string } | undefined {
@@ -3216,202 +3218,6 @@ function maskSettingsAuthValue(value: string): string {
   return `${SETTINGS_AUTH_MASK}${suffix}`;
 }
 
-function parseSkillFrontmatter(markdown: string): { name?: string; env: ParsedSkillEnvDeclaration[] } {
-  const match = SKILL_FRONTMATTER_BLOCK_PATTERN.exec(markdown);
-  if (!match) {
-    return { env: [] };
-  }
-
-  const lines = match[1].split(/\r?\n/);
-  let skillName: string | undefined;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || countLeadingSpaces(line) > 0) {
-      continue;
-    }
-
-    const parsed = parseYamlKeyValue(trimmed);
-    if (!parsed) {
-      continue;
-    }
-
-    if (parsed.key === "name") {
-      const candidate = parseYamlStringValue(parsed.value);
-      if (candidate) {
-        skillName = candidate;
-      }
-      break;
-    }
-  }
-
-  return {
-    name: skillName,
-    env: parseSkillEnvDeclarations(lines)
-  };
-}
-
-function parseSkillEnvDeclarations(lines: string[]): ParsedSkillEnvDeclaration[] {
-  const envIndex = lines.findIndex((line) => {
-    const trimmed = line.trim();
-    return trimmed === "env:" || trimmed === "envVars:";
-  });
-  if (envIndex < 0) {
-    return [];
-  }
-
-  const envIndent = countLeadingSpaces(lines[envIndex]);
-  const declarations: ParsedSkillEnvDeclaration[] = [];
-  let current: Partial<ParsedSkillEnvDeclaration> | undefined;
-
-  const flushCurrent = (): void => {
-    if (!current) {
-      return;
-    }
-
-    const normalizedName =
-      typeof current.name === "string" ? normalizeEnvVarName(current.name) : undefined;
-    if (!normalizedName) {
-      current = undefined;
-      return;
-    }
-
-    declarations.push({
-      name: normalizedName,
-      description:
-        typeof current.description === "string" && current.description.trim().length > 0
-          ? current.description.trim()
-          : undefined,
-      required: current.required === true,
-      helpUrl:
-        typeof current.helpUrl === "string" && current.helpUrl.trim().length > 0
-          ? current.helpUrl.trim()
-          : undefined
-    });
-
-    current = undefined;
-  };
-
-  for (let index = envIndex + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    const trimmed = line.trim();
-
-    if (!trimmed) {
-      continue;
-    }
-
-    const lineIndent = countLeadingSpaces(line);
-    if (lineIndent <= envIndent) {
-      break;
-    }
-
-    if (trimmed.startsWith("-")) {
-      flushCurrent();
-      current = {};
-
-      const inline = trimmed.slice(1).trim();
-      if (inline.length > 0) {
-        const parsedInline = parseYamlKeyValue(inline);
-        if (parsedInline) {
-          assignSkillEnvField(current, parsedInline.key, parsedInline.value);
-        }
-      }
-
-      continue;
-    }
-
-    if (!current) {
-      continue;
-    }
-
-    const parsed = parseYamlKeyValue(trimmed);
-    if (!parsed) {
-      continue;
-    }
-
-    assignSkillEnvField(current, parsed.key, parsed.value);
-  }
-
-  flushCurrent();
-
-  return declarations;
-}
-
-function assignSkillEnvField(target: Partial<ParsedSkillEnvDeclaration>, key: string, value: string): void {
-  switch (key) {
-    case "name":
-      target.name = parseYamlStringValue(value);
-      return;
-
-    case "description":
-      target.description = parseYamlStringValue(value);
-      return;
-
-    case "required": {
-      const parsed = parseYamlBooleanValue(value);
-      if (parsed !== undefined) {
-        target.required = parsed;
-      }
-      return;
-    }
-
-    case "helpUrl":
-      target.helpUrl = parseYamlStringValue(value);
-      return;
-
-    default:
-      return;
-  }
-}
-
-function parseYamlKeyValue(line: string): { key: string; value: string } | undefined {
-  const separatorIndex = line.indexOf(":");
-  if (separatorIndex <= 0) {
-    return undefined;
-  }
-
-  const key = line.slice(0, separatorIndex).trim();
-  if (!key) {
-    return undefined;
-  }
-
-  return {
-    key,
-    value: line.slice(separatorIndex + 1).trim()
-  };
-}
-
-function parseYamlStringValue(value: string): string {
-  const trimmed = value.trim();
-
-  if (
-    (trimmed.startsWith("\"") && trimmed.endsWith("\"")) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1).trim();
-  }
-
-  return trimmed;
-}
-
-function parseYamlBooleanValue(value: string): boolean | undefined {
-  const normalized = parseYamlStringValue(value).toLowerCase();
-  if (normalized === "true" || normalized === "yes" || normalized === "on" || normalized === "1") {
-    return true;
-  }
-
-  if (normalized === "false" || normalized === "no" || normalized === "off" || normalized === "0") {
-    return false;
-  }
-
-  return undefined;
-}
-
-function countLeadingSpaces(value: string): number {
-  const match = /^\s*/.exec(value);
-  return match ? match[0].length : 0;
-}
-
 function previewForLog(text: string, maxLength = 160): string {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) return normalized;
@@ -3439,80 +3245,6 @@ function readPositiveIntegerDetail(details: Record<string, unknown> | undefined,
   return value;
 }
 
-function extractMessageStopReason(message: unknown): string | undefined {
-  if (!message || typeof message !== "object") return undefined;
-  const stopReason = (message as { stopReason?: unknown }).stopReason;
-  return typeof stopReason === "string" ? stopReason : undefined;
-}
-
-function extractMessageErrorMessage(message: unknown): string | undefined {
-  if (!message || typeof message !== "object") return undefined;
-  const errorMessage = (message as { errorMessage?: unknown }).errorMessage;
-  if (typeof errorMessage !== "string") {
-    return undefined;
-  }
-
-  const trimmed = errorMessage.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function hasMessageErrorMessageField(message: unknown): boolean {
-  if (!message || typeof message !== "object") {
-    return false;
-  }
-
-  return Object.prototype.hasOwnProperty.call(message, "errorMessage");
-}
-
-function normalizeProviderErrorMessage(errorMessage: string | undefined): string | undefined {
-  if (!errorMessage) {
-    return undefined;
-  }
-
-  const trimmed = errorMessage.trim();
-  if (trimmed.length === 0) {
-    return undefined;
-  }
-
-  const jsonStart = trimmed.indexOf("{");
-  if (jsonStart >= 0) {
-    const jsonCandidate = trimmed.slice(jsonStart);
-    try {
-      const parsed = JSON.parse(jsonCandidate) as { message?: unknown; error?: { message?: unknown } };
-      const nestedMessage = parseErrorMessageCandidate(parsed.error?.message) ?? parseErrorMessageCandidate(parsed.message);
-      if (nestedMessage) {
-        return nestedMessage;
-      }
-    } catch {
-      // fall through to regex and plain-text handling.
-    }
-  }
-
-  const overflowMatch = /prompt is too long:[^"}\n]+/i.exec(trimmed);
-  if (overflowMatch?.[0]) {
-    return overflowMatch[0];
-  }
-
-  return trimmed.length > 240 ? previewForLog(trimmed, 240) : trimmed;
-}
-
-function parseErrorMessageCandidate(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const normalized = value.replace(/\s+/g, " ").trim().replace(/[.!?]+$/, "");
-  return normalized.length > 0 ? normalized : undefined;
-}
-
-function isStrictContextOverflowMessage(message: string | undefined): boolean {
-  if (!message) {
-    return false;
-  }
-
-  return /\bprompt is too long\b/i.test(message) || /\bmaximum context length\b/i.test(message);
-}
-
 function buildManagerErrorConversationText(options: {
   errorMessage?: string;
   isContextOverflow: boolean;
@@ -3530,76 +3262,6 @@ function buildManagerErrorConversationText(options: {
   }
 
   return `⚠️ Manager reply failed. ${MANAGER_ERROR_GENERIC_HINT}`;
-}
-
-function extractRole(message: unknown): string | undefined {
-  if (!message || typeof message !== "object") return undefined;
-  const maybeRole = (message as { role?: unknown }).role;
-  return typeof maybeRole === "string" ? maybeRole : undefined;
-}
-
-function extractMessageText(message: unknown): string | undefined {
-  if (!message || typeof message !== "object") return undefined;
-
-  const content = (message as { content?: unknown }).content;
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return undefined;
-  }
-
-  const text = content
-    .map((item) => {
-      if (!item || typeof item !== "object") return "";
-      const maybeText = item as { type?: unknown; text?: unknown };
-      return maybeText.type === "text" && typeof maybeText.text === "string" ? maybeText.text : "";
-    })
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-
-  return text.length > 0 ? text : undefined;
-}
-
-function extractMessageImageAttachments(message: unknown): ConversationImageAttachment[] {
-  if (!message || typeof message !== "object") {
-    return [];
-  }
-
-  const content = (message as { content?: unknown }).content;
-  if (!Array.isArray(content)) {
-    return [];
-  }
-
-  const attachments: ConversationImageAttachment[] = [];
-
-  for (const item of content) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-
-    const maybeImage = item as { type?: unknown; data?: unknown; mimeType?: unknown };
-    if (maybeImage.type !== "image") {
-      continue;
-    }
-
-    if (typeof maybeImage.mimeType !== "string" || !maybeImage.mimeType.startsWith("image/")) {
-      continue;
-    }
-
-    if (typeof maybeImage.data !== "string" || maybeImage.data.length === 0) {
-      continue;
-    }
-
-    attachments.push({
-      mimeType: maybeImage.mimeType,
-      data: maybeImage.data
-    });
-  }
-
-  return attachments;
 }
 
 function normalizeConversationAttachments(
@@ -3876,280 +3538,4 @@ function trimConversationHistory(entries: ConversationEntryEvent[]): void {
   for (let index = removableIndexes.length - 1; index >= 0; index -= 1) {
     entries.splice(removableIndexes[index], 1);
   }
-}
-
-function isConversationEntryEvent(value: unknown): value is ConversationEntryEvent {
-  return (
-    isConversationMessageEvent(value) ||
-    isConversationLogEvent(value) ||
-    isAgentMessageEvent(value) ||
-    isAgentToolCallEvent(value)
-  );
-}
-
-function isConversationMessageEvent(value: unknown): value is ConversationMessageEvent {
-  if (!value || typeof value !== "object") return false;
-
-  const maybe = value as Partial<ConversationMessageEvent>;
-  if (maybe.type !== "conversation_message") return false;
-  if (typeof maybe.agentId !== "string" || maybe.agentId.length === 0) return false;
-  if (maybe.role !== "user" && maybe.role !== "assistant" && maybe.role !== "system") return false;
-  if (typeof maybe.text !== "string") return false;
-  if (typeof maybe.timestamp !== "string") return false;
-  if (maybe.source !== "user_input" && maybe.source !== "speak_to_user" && maybe.source !== "system") return false;
-
-  if (maybe.attachments !== undefined) {
-    if (!Array.isArray(maybe.attachments)) {
-      return false;
-    }
-
-    for (const attachment of maybe.attachments) {
-      if (!isConversationAttachment(attachment)) {
-        return false;
-      }
-    }
-  }
-
-  if (maybe.sourceContext !== undefined && !isMessageSourceContext(maybe.sourceContext)) {
-    return false;
-  }
-
-  return true;
-}
-
-function isMessageSourceContext(value: unknown): value is MessageSourceContext {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const maybe = value as Partial<MessageSourceContext>;
-
-  if (maybe.channel !== "web" && maybe.channel !== "slack" && maybe.channel !== "telegram") {
-    return false;
-  }
-
-  if (maybe.channelId !== undefined && typeof maybe.channelId !== "string") {
-    return false;
-  }
-
-  if (maybe.userId !== undefined && typeof maybe.userId !== "string") {
-    return false;
-  }
-
-  if (maybe.messageId !== undefined && typeof maybe.messageId !== "string") {
-    return false;
-  }
-
-  if (maybe.threadTs !== undefined && typeof maybe.threadTs !== "string") {
-    return false;
-  }
-
-  if (maybe.integrationProfileId !== undefined && typeof maybe.integrationProfileId !== "string") {
-    return false;
-  }
-
-  if (
-    maybe.channelType !== undefined &&
-    maybe.channelType !== "dm" &&
-    maybe.channelType !== "channel" &&
-    maybe.channelType !== "group" &&
-    maybe.channelType !== "mpim"
-  ) {
-    return false;
-  }
-
-  if (maybe.teamId !== undefined && typeof maybe.teamId !== "string") {
-    return false;
-  }
-
-  return true;
-}
-
-function isConversationAttachment(value: unknown): value is ConversationAttachment {
-  return (
-    isConversationImageAttachment(value) ||
-    isConversationTextAttachment(value) ||
-    isConversationBinaryAttachment(value)
-  );
-}
-
-function isConversationImageAttachment(value: unknown): value is ConversationImageAttachment {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const maybe = value as Partial<ConversationImageAttachment> & { type?: unknown };
-  if (maybe.type !== undefined && maybe.type !== "image") {
-    return false;
-  }
-
-  if (typeof maybe.mimeType !== "string" || !maybe.mimeType.startsWith("image/")) {
-    return false;
-  }
-
-  if (typeof maybe.data !== "string" || maybe.data.length === 0) {
-    return false;
-  }
-
-  if (maybe.fileName !== undefined && typeof maybe.fileName !== "string") {
-    return false;
-  }
-
-  if (maybe.filePath !== undefined && typeof maybe.filePath !== "string") {
-    return false;
-  }
-
-  return true;
-}
-
-function isConversationTextAttachment(value: unknown): value is ConversationTextAttachment {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const maybe = value as Partial<ConversationTextAttachment>;
-  if (maybe.type !== "text") {
-    return false;
-  }
-
-  if (typeof maybe.mimeType !== "string" || maybe.mimeType.trim().length === 0) {
-    return false;
-  }
-
-  if (typeof maybe.text !== "string" || maybe.text.trim().length === 0) {
-    return false;
-  }
-
-  if (maybe.fileName !== undefined && typeof maybe.fileName !== "string") {
-    return false;
-  }
-
-  if (maybe.filePath !== undefined && typeof maybe.filePath !== "string") {
-    return false;
-  }
-
-  return true;
-}
-
-function isConversationBinaryAttachment(value: unknown): value is ConversationBinaryAttachment {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const maybe = value as Partial<ConversationBinaryAttachment>;
-  if (maybe.type !== "binary") {
-    return false;
-  }
-
-  if (typeof maybe.mimeType !== "string" || maybe.mimeType.trim().length === 0) {
-    return false;
-  }
-
-  if (typeof maybe.data !== "string" || maybe.data.trim().length === 0) {
-    return false;
-  }
-
-  if (maybe.fileName !== undefined && typeof maybe.fileName !== "string") {
-    return false;
-  }
-
-  if (maybe.filePath !== undefined && typeof maybe.filePath !== "string") {
-    return false;
-  }
-
-  return true;
-}
-
-function isConversationLogEvent(value: unknown): value is ConversationLogEvent {
-  if (!value || typeof value !== "object") return false;
-
-  const maybe = value as Partial<ConversationLogEvent>;
-  if (maybe.type !== "conversation_log") return false;
-  if (typeof maybe.agentId !== "string" || maybe.agentId.length === 0) return false;
-  if (typeof maybe.timestamp !== "string") return false;
-  if (maybe.source !== "runtime_log") return false;
-
-  if (
-    maybe.kind !== "message_start" &&
-    maybe.kind !== "message_end" &&
-    maybe.kind !== "tool_execution_start" &&
-    maybe.kind !== "tool_execution_update" &&
-    maybe.kind !== "tool_execution_end"
-  ) {
-    return false;
-  }
-
-  if (maybe.role !== undefined && maybe.role !== "user" && maybe.role !== "assistant" && maybe.role !== "system") {
-    return false;
-  }
-
-  if (maybe.toolName !== undefined && typeof maybe.toolName !== "string") return false;
-  if (maybe.toolCallId !== undefined && typeof maybe.toolCallId !== "string") return false;
-  if (typeof maybe.text !== "string") return false;
-  if (maybe.isError !== undefined && typeof maybe.isError !== "boolean") return false;
-
-  return true;
-}
-
-function isAgentMessageEvent(value: unknown): value is AgentMessageEvent {
-  if (!value || typeof value !== "object") return false;
-
-  const maybe = value as Partial<AgentMessageEvent>;
-  if (maybe.type !== "agent_message") return false;
-  if (typeof maybe.agentId !== "string" || maybe.agentId.length === 0) return false;
-  if (typeof maybe.timestamp !== "string") return false;
-  if (maybe.source !== "user_to_agent" && maybe.source !== "agent_to_agent") return false;
-  if (maybe.fromAgentId !== undefined && typeof maybe.fromAgentId !== "string") return false;
-  if (typeof maybe.toAgentId !== "string" || maybe.toAgentId.length === 0) return false;
-  if (typeof maybe.text !== "string") return false;
-  if (maybe.sourceContext !== undefined && !isMessageSourceContext(maybe.sourceContext)) return false;
-  if (
-    maybe.requestedDelivery !== undefined &&
-    maybe.requestedDelivery !== "auto" &&
-    maybe.requestedDelivery !== "followUp" &&
-    maybe.requestedDelivery !== "steer"
-  ) {
-    return false;
-  }
-  if (
-    maybe.acceptedMode !== undefined &&
-    maybe.acceptedMode !== "prompt" &&
-    maybe.acceptedMode !== "followUp" &&
-    maybe.acceptedMode !== "steer"
-  ) {
-    return false;
-  }
-  if (
-    maybe.attachmentCount !== undefined &&
-    (typeof maybe.attachmentCount !== "number" ||
-      !Number.isFinite(maybe.attachmentCount) ||
-      maybe.attachmentCount < 0)
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-function isAgentToolCallEvent(value: unknown): value is AgentToolCallEvent {
-  if (!value || typeof value !== "object") return false;
-
-  const maybe = value as Partial<AgentToolCallEvent>;
-  if (maybe.type !== "agent_tool_call") return false;
-  if (typeof maybe.agentId !== "string" || maybe.agentId.length === 0) return false;
-  if (typeof maybe.actorAgentId !== "string" || maybe.actorAgentId.length === 0) return false;
-  if (typeof maybe.timestamp !== "string") return false;
-  if (
-    maybe.kind !== "tool_execution_start" &&
-    maybe.kind !== "tool_execution_update" &&
-    maybe.kind !== "tool_execution_end"
-  ) {
-    return false;
-  }
-  if (maybe.toolName !== undefined && typeof maybe.toolName !== "string") return false;
-  if (maybe.toolCallId !== undefined && typeof maybe.toolCallId !== "string") return false;
-  if (typeof maybe.text !== "string") return false;
-  if (maybe.isError !== undefined && typeof maybe.isError !== "boolean") return false;
-
-  return true;
 }
