@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
+import { normalizeManagerId } from "../../utils/normalize.js";
 import {
   createDefaultSlackConfig,
   loadSlackConfig,
@@ -353,13 +354,4 @@ function toErrorMessage(error: unknown): string {
   }
 
   return String(error);
-}
-
-function normalizeManagerId(value: string): string {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    throw new Error("managerId is required");
-  }
-
-  return trimmed;
 }
