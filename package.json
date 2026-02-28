@@ -22,6 +22,14 @@
     "prod:restart": "node scripts/prod-daemon-restart.mjs",
     "test": "pnpm --filter @middleman/backend test && pnpm --filter @middleman/ui test"
   },
+  "pnpm": {
+    "overrides": {
+      "zod": "^4.3.6",
+      "@tanstack/router-generator>zod": "3.25.76",
+      "@tanstack/router-plugin>zod": "3.25.76",
+      "@tanstack/start-plugin-core>zod": "3.25.76"
+    }
+  },
   "devDependencies": {
     "concurrently": "^9.2.1"
   }
