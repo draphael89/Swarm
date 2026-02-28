@@ -1332,7 +1332,7 @@ describe('SwarmManager', () => {
     expect(manager.runtimeByAgentId.has(worker.agentId)).toBe(true)
   })
 
-  it('restores streaming workers on restart without recreating idle runtimes', async () => {
+  it('normalizes persisted streaming workers to idle on restart without recreating runtimes', async () => {
     const config = await makeTempConfig()
 
     const seedAgents = {
@@ -1371,11 +1371,16 @@ describe('SwarmManager', () => {
 
     const agents = manager.listAgents()
     const worker = agents.find((agent) => agent.agentId === 'worker-a')
+    const persistedStore = JSON.parse(await readFile(config.paths.agentsStoreFile, 'utf8')) as {
+      agents: Array<{ agentId: string; status: AgentDescriptor['status'] }>
+    }
+    const persistedWorker = persistedStore.agents.find((agent) => agent.agentId === 'worker-a')
 
-    expect(worker?.status).toBe('streaming')
-    expect(manager.createdRuntimeIds).toEqual(['worker-a'])
+    expect(worker?.status).toBe('idle')
+    expect(persistedWorker?.status).toBe('idle')
+    expect(manager.createdRuntimeIds).toEqual([])
     expect(manager.runtimeByAgentId.get('manager')).toBeUndefined()
-    expect(manager.runtimeByAgentId.get('worker-a')).toBeDefined()
+    expect(manager.runtimeByAgentId.get('worker-a')).toBeUndefined()
   })
 
   it('lazily creates idle runtimes when a restored agent receives work', async () => {

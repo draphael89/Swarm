@@ -368,6 +368,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     for (const descriptor of loaded.agents) {
       this.descriptors.set(descriptor.agentId, descriptor);
     }
+    this.normalizeStreamingStatusesForBoot();
 
     await this.ensureMemoryFilesForBoot();
     await this.saveStore();
@@ -1596,6 +1597,25 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         managerId,
         message: error instanceof Error ? error.message : String(error)
       });
+    }
+  }
+
+  private normalizeStreamingStatusesForBoot(): void {
+    const normalizedAgentIds: string[] = [];
+
+    for (const descriptor of this.descriptors.values()) {
+      if (descriptor.status !== "streaming") {
+        continue;
+      }
+
+      descriptor.status = "idle";
+      descriptor.updatedAt = this.now();
+      this.descriptors.set(descriptor.agentId, descriptor);
+      normalizedAgentIds.push(descriptor.agentId);
+    }
+
+    if (normalizedAgentIds.length > 0) {
+      this.logDebug("boot:normalize_streaming_statuses", { normalizedAgentIds });
     }
   }
 
