@@ -12,6 +12,7 @@ import type {
   TelegramSettingsConfig,
 } from './settings-types'
 import type { SlackStatusEvent, TelegramStatusEvent } from '@middleman/protocol'
+import { resolveApiEndpoint } from '@/lib/api-endpoint'
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
@@ -41,23 +42,6 @@ export const DEFAULT_SETTINGS_AUTH_OAUTH_FLOW_STATE: SettingsAuthOAuthFlowState 
   status: 'idle',
   codeValue: '',
   isSubmittingCode: false,
-}
-
-/* ------------------------------------------------------------------ */
-/*  Utilities                                                         */
-/* ------------------------------------------------------------------ */
-
-export function resolveApiEndpoint(wsUrl: string, path: string): string {
-  try {
-    const parsed = new URL(wsUrl)
-    parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:'
-    parsed.pathname = path
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString()
-  } catch {
-    return path
-  }
 }
 
 export function toErrorMessage(error: unknown): string {

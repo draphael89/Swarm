@@ -30,6 +30,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { chooseFallbackAgentId } from '@/lib/agent-hierarchy'
 import type { ArtifactReference } from '@/lib/artifacts'
 import { collectArtifactsFromMessages } from '@/lib/collect-artifacts'
+import { resolveApiEndpoint } from '@/lib/api-endpoint'
+import { inferModelPreset } from '@/lib/model-preset'
 import { ManagerWsClient, type ManagerWsState } from '@/lib/ws-client'
 import {
   MANAGER_MODEL_PRESETS,
@@ -163,25 +165,6 @@ function resolveDefaultWsUrl(): string {
   const wsPort = uiPort <= 47188 ? 47187 : 47287
 
   return `${protocol}//${hostname}:${wsPort}`
-}
-
-function inferModelPreset(agent: AgentDescriptor): ManagerModelPreset | undefined {
-  const provider = agent.model.provider.trim().toLowerCase()
-  const modelId = agent.model.modelId.trim().toLowerCase()
-
-  if (provider === 'openai-codex' && modelId === 'gpt-5.3-codex') {
-    return 'pi-codex'
-  }
-
-  if (provider === 'anthropic' && modelId === 'claude-opus-4-6') {
-    return 'pi-opus'
-  }
-
-  if (provider === 'openai-codex-app-server' && modelId === 'default') {
-    return 'codex-app'
-  }
-
-  return undefined
 }
 
 function contextWindowForAgent(agent: AgentDescriptor | null): number | null {
@@ -1222,19 +1205,6 @@ function parseCompactSlashCommand(text: string): { customInstructions?: string }
   }
 
   return { customInstructions }
-}
-
-function resolveApiEndpoint(wsUrl: string, path: string): string {
-  try {
-    const parsed = new URL(wsUrl)
-    parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:'
-    parsed.pathname = path
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString()
-  } catch {
-    return path
-  }
 }
 
 function toErrorMessage(error: unknown): string {
