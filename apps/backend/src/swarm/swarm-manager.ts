@@ -41,6 +41,12 @@ import {
   parseSwarmModelPreset,
   resolveModelDescriptorFromPreset
 } from "./model-presets.js";
+import {
+  isNonRunningAgentStatus,
+  normalizeAgentStatus,
+  transitionAgentStatus,
+  type AgentStatusInput
+} from "./agent-state-machine.js";
 import type {
   RuntimeImageAttachment,
   RuntimeErrorEvent,
@@ -474,7 +480,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         continue;
       }
 
-      if (descriptor.status === "terminated" || descriptor.status === "stopped_on_restart") {
+      if (isNonRunningAgentStatus(descriptor.status)) {
         continue;
       }
 
@@ -482,7 +488,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       if (runtime) {
         await runtime.stopInFlight({ abort: true });
       } else {
-        descriptor.status = "idle";
+        descriptor.status = transitionAgentStatus(descriptor.status, "idle");
         descriptor.updatedAt = this.now();
         this.descriptors.set(descriptor.agentId, descriptor);
         this.emitStatus(descriptor.agentId, descriptor.status, 0, descriptor.contextUsage);
@@ -492,12 +498,12 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     }
 
     let managerStopped = false;
-    if (target.status !== "terminated" && target.status !== "stopped_on_restart") {
+    if (!isNonRunningAgentStatus(target.status)) {
       const managerRuntime = this.runtimes.get(target.agentId);
       if (managerRuntime) {
         await managerRuntime.stopInFlight({ abort: true });
       } else {
-        target.status = "idle";
+        target.status = transitionAgentStatus(target.status, "idle");
         target.updatedAt = this.now();
         this.descriptors.set(target.agentId, target);
         this.emitStatus(target.agentId, target.status, 0, target.contextUsage);
@@ -536,7 +542,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       if (!canBootstrap) {
         throw new Error("Only manager can create managers");
       }
-    } else if (callerDescriptor.status === "terminated" || callerDescriptor.status === "stopped_on_restart") {
+    } else if (isNonRunningAgentStatus(callerDescriptor.status)) {
       throw new Error(`Manager is not running: ${callerAgentId}`);
     }
 
@@ -698,15 +704,15 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     options?: { origin?: "user" | "internal"; attachments?: ConversationAttachment[] }
   ): Promise<SendMessageReceipt> {
     const sender = this.descriptors.get(fromAgentId);
-    if (!sender || sender.status === "terminated") {
-      throw new Error(`Unknown or terminated sender agent: ${fromAgentId}`);
+    if (!sender || isNonRunningAgentStatus(sender.status)) {
+      throw new Error(`Unknown or unavailable sender agent: ${fromAgentId}`);
     }
 
     const target = this.descriptors.get(targetAgentId);
     if (!target) {
       throw new Error(`Unknown target agent: ${targetAgentId}`);
     }
-    if (target.status === "terminated" || target.status === "stopped_on_restart") {
+    if (isNonRunningAgentStatus(target.status)) {
       throw new Error(`Target agent is not running: ${targetAgentId}`);
     }
 
@@ -928,7 +934,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error(`Unknown target agent: ${agentId}`);
     }
 
-    if (descriptor.status === "terminated" || descriptor.status === "stopped_on_restart") {
+    if (isNonRunningAgentStatus(descriptor.status)) {
       throw new Error(`Target agent is not running: ${agentId}`);
     }
 
@@ -1023,7 +1029,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     if (!target) {
       throw new Error(`Unknown target agent: ${targetAgentId}`);
     }
-    if (target.status === "terminated" || target.status === "stopped_on_restart") {
+    if (isNonRunningAgentStatus(target.status)) {
       throw new Error(`Target agent is not running: ${targetAgentId}`);
     }
 
@@ -1209,7 +1215,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     this.conversationProjector.resetConversationHistory(managerId);
     await this.deleteManagerSessionFile(managerDescriptor.sessionFile);
 
-    managerDescriptor.status = "idle";
+    managerDescriptor.status = transitionAgentStatus(managerDescriptor.status, "idle");
     managerDescriptor.contextUsage = undefined;
     managerDescriptor.updatedAt = this.now();
     this.descriptors.set(managerId, managerDescriptor);
@@ -1328,11 +1334,11 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       return false;
     }
 
-    if (descriptor.status === "terminated") {
+    if (descriptor.status === "terminated" || descriptor.status === "error") {
       return false;
     }
 
-    if (!includeStoppedOnRestart && descriptor.status === "stopped_on_restart") {
+    if (!includeStoppedOnRestart && descriptor.status === "stopped") {
       return false;
     }
 
@@ -1364,7 +1370,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       return;
     }
 
-    if (manager.status === "terminated" || manager.status === "stopped_on_restart") {
+    if (isNonRunningAgentStatus(manager.status)) {
       return;
     }
 
@@ -1393,7 +1399,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         continue;
       }
 
-      descriptor.status = "idle";
+      descriptor.status = transitionAgentStatus(descriptor.status, "idle");
       descriptor.updatedAt = this.now();
       this.descriptors.set(descriptor.agentId, descriptor);
       normalizedAgentIds.push(descriptor.agentId);
@@ -1424,7 +1430,10 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
           throw error;
         }
 
-        descriptor.status = "stopped_on_restart";
+        const idleStatus = descriptor.status === "streaming"
+          ? transitionAgentStatus(descriptor.status, "idle")
+          : descriptor.status;
+        descriptor.status = transitionAgentStatus(idleStatus, "stopped");
         descriptor.contextUsage = undefined;
         descriptor.updatedAt = this.now();
         this.descriptors.set(descriptor.agentId, descriptor);
@@ -1469,7 +1478,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
     const runtime = await this.createRuntimeForDescriptor(descriptor, this.resolveSystemPromptForDescriptor(descriptor));
 
     const latestDescriptor = this.descriptors.get(descriptor.agentId);
-    if (!latestDescriptor || latestDescriptor.status === "terminated" || latestDescriptor.status === "stopped_on_restart") {
+    if (!latestDescriptor || isNonRunningAgentStatus(latestDescriptor.status)) {
       await runtime.terminate({ abort: true });
       throw new Error(`Target agent is not running: ${descriptor.agentId}`);
     }
@@ -1640,7 +1649,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       throw new Error(`Only manager can ${action}`);
     }
 
-    if (descriptor.status === "terminated" || descriptor.status === "stopped_on_restart") {
+    if (isNonRunningAgentStatus(descriptor.status)) {
       throw new Error(`Manager is not running: ${agentId}`);
     }
 
@@ -1653,7 +1662,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
         continue;
       }
 
-      if (descriptor.status === "terminated" || descriptor.status === "stopped_on_restart") {
+      if (isNonRunningAgentStatus(descriptor.status)) {
         continue;
       }
 
@@ -1715,7 +1724,7 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       this.runtimes.delete(descriptor.agentId);
     }
 
-    descriptor.status = "terminated";
+    descriptor.status = transitionAgentStatus(descriptor.status, "terminated");
     descriptor.contextUsage = undefined;
     descriptor.updatedAt = this.now();
     this.descriptors.set(descriptor.agentId, descriptor);
@@ -1832,13 +1841,14 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
       descriptor.contextUsage = normalizedContextUsage;
     }
 
-    if (descriptor.status !== status) {
-      descriptor.status = status;
+    const nextStatus = transitionAgentStatus(descriptor.status, status);
+    if (descriptor.status !== nextStatus) {
+      descriptor.status = nextStatus;
       descriptor.updatedAt = this.now();
       shouldPersist = true;
     }
 
-    if ((status === "terminated" || status === "stopped_on_restart") && descriptor.contextUsage) {
+    if (isNonRunningAgentStatus(nextStatus) && descriptor.contextUsage) {
       descriptor.contextUsage = undefined;
       shouldPersist = true;
     }
@@ -2039,7 +2049,14 @@ export class SwarmManager extends EventEmitter implements SwarmToolHost {
 }
 
 const VALID_PERSISTED_AGENT_ROLES = new Set(["manager", "worker"]);
-const VALID_PERSISTED_AGENT_STATUSES = new Set(["idle", "streaming", "terminated", "stopped_on_restart"]);
+const VALID_PERSISTED_AGENT_STATUSES = new Set([
+  "idle",
+  "streaming",
+  "terminated",
+  "stopped",
+  "error",
+  "stopped_on_restart"
+]);
 
 function validateAgentDescriptor(value: unknown): AgentDescriptor | string {
   if (!isRecord(value)) {
@@ -2063,8 +2080,9 @@ function validateAgentDescriptor(value: unknown): AgentDescriptor | string {
   }
 
   if (!isNonEmptyString(value.status) || !VALID_PERSISTED_AGENT_STATUSES.has(value.status)) {
-    return "status must be one of idle|streaming|terminated|stopped_on_restart";
+    return "status must be one of idle|streaming|terminated|stopped|error|stopped_on_restart";
   }
+  const normalizedStatus = normalizeAgentStatus(value.status as AgentStatusInput);
 
   if (!isNonEmptyString(value.createdAt)) {
     return "createdAt must be a non-empty string";
@@ -2103,7 +2121,15 @@ function validateAgentDescriptor(value: unknown): AgentDescriptor | string {
     return "archetypeId must be a string when provided";
   }
 
-  return value as unknown as AgentDescriptor;
+  const descriptor = value as unknown as AgentDescriptor;
+  if (descriptor.status === normalizedStatus) {
+    return descriptor;
+  }
+
+  return {
+    ...descriptor,
+    status: normalizedStatus
+  };
 }
 
 function extractDescriptorAgentId(value: unknown): string | undefined {

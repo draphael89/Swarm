@@ -241,10 +241,7 @@ export function SettingsIntegrations({
   const managerOptions = useMemo(
     () =>
       managers.filter(
-        (agent) =>
-          agent.role === 'manager' &&
-          agent.status !== 'terminated' &&
-          agent.status !== 'stopped_on_restart',
+        (agent) => agent.role === 'manager' && (agent.status === 'idle' || agent.status === 'streaming'),
       ),
     [managers],
   )

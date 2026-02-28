@@ -1,4 +1,4 @@
-export type AgentStatus = 'idle' | 'streaming' | 'terminated' | 'stopped_on_restart'
+export type AgentStatus = 'idle' | 'streaming' | 'terminated' | 'stopped' | 'error'
 
 export const MANAGER_MODEL_PRESETS = ['pi-codex', 'pi-opus', 'codex-app'] as const
 export type ManagerModelPreset = (typeof MANAGER_MODEL_PRESETS)[number]

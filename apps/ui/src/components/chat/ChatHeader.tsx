@@ -48,8 +48,10 @@ function formatAgentStatus(status: AgentStatus | null): string {
       return 'Idle'
     case 'terminated':
       return 'Terminated'
-    case 'stopped_on_restart':
+    case 'stopped':
       return 'Stopped'
+    case 'error':
+      return 'Error'
   }
 }
 
