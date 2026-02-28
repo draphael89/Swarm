@@ -21,6 +21,10 @@ import {
   type ManagerModelPreset,
 } from '@middleman/protocol'
 
+const CREATE_MANAGER_MODEL_PRESETS = MANAGER_MODEL_PRESETS.filter(
+  (modelPreset) => modelPreset !== 'codex-app',
+)
+
 interface CreateManagerDialogProps {
   open: boolean
   isCreatingManager: boolean
@@ -123,7 +127,7 @@ export function CreateManagerDialog({
                 <SelectValue placeholder="Select model preset" />
               </SelectTrigger>
               <SelectContent>
-                {MANAGER_MODEL_PRESETS.map((modelPreset) => (
+                {CREATE_MANAGER_MODEL_PRESETS.map((modelPreset) => (
                   <SelectItem key={modelPreset} value={modelPreset}>
                     {modelPreset}
                   </SelectItem>

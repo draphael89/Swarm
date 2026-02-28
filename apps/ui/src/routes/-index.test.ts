@@ -8,6 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MANAGER_MODEL_PRESETS } from '@middleman/protocol'
 import { IndexPage } from './index'
 
+const CREATE_MANAGER_MODEL_PRESETS = MANAGER_MODEL_PRESETS.filter(
+  (modelPreset) => modelPreset !== 'codex-app',
+)
+
 type ListenerMap = Record<string, Array<(event?: any) => void>>
 
 class FakeWebSocket {
@@ -179,7 +183,7 @@ describe('IndexPage create manager model selection', () => {
     click(modelSelect as HTMLElement)
 
     const optionValues = getAllByRole(document.body, 'option').map((option) => option.textContent?.trim() ?? '')
-    expect(optionValues).toEqual([...MANAGER_MODEL_PRESETS])
+    expect(optionValues).toEqual([...CREATE_MANAGER_MODEL_PRESETS])
   })
 
   it('sends selected model in create_manager payload', async () => {
