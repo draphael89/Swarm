@@ -42,7 +42,7 @@ import {
   testTelegramConnection,
   toErrorMessage,
 } from './settings-api'
-import type { AgentDescriptor, SlackStatusEvent, TelegramStatusEvent } from '@/lib/ws-types'
+import type { AgentDescriptor, SlackStatusEvent, TelegramStatusEvent } from '@middleman/protocol'
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */

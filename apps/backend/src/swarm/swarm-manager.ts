@@ -13,7 +13,7 @@ import {
   type AgentSession,
   type AuthCredential
 } from "@mariozechner/pi-coding-agent";
-import type { ServerEvent } from "../protocol/ws-types.js";
+import type { ServerEvent } from "@middleman/protocol";
 import {
   loadArchetypePromptRegistry,
   normalizeArchetypeId,

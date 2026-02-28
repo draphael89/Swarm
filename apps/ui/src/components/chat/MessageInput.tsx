@@ -21,7 +21,7 @@ import {
 } from '@/lib/file-attachments'
 import { transcribeVoice } from '@/lib/voice-transcription-client'
 import { cn } from '@/lib/utils'
-import type { ConversationAttachment } from '@/lib/ws-types'
+import type { ConversationAttachment } from '@middleman/protocol'
 
 const TEXTAREA_MAX_HEIGHT = 186
 const ACTIVE_WAVEFORM_BAR_COUNT = 16

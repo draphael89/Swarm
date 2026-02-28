@@ -1,4 +1,4 @@
-import type { ServerEvent } from "../../protocol/ws-types.js";
+import type { ServerEvent } from "@middleman/protocol";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
 import { SlackWebApiClient } from "./slack-client.js";
 import { markdownToSlackMrkdwn } from "./slack-mrkdwn.js";

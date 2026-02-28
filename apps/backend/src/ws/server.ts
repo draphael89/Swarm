@@ -14,7 +14,7 @@ import type {
 import { AuthStorage, type AuthCredential } from "@mariozechner/pi-coding-agent";
 import { WebSocketServer, type RawData, WebSocket } from "ws";
 import type { IntegrationRegistryService } from "../integrations/registry.js";
-import type { ClientCommand, ServerEvent } from "../protocol/ws-types.js";
+import type { ClientCommand, ServerEvent } from "@middleman/protocol";
 import { getScheduleFilePath } from "../scheduler/schedule-storage.js";
 import {
   isPathWithinRoots,

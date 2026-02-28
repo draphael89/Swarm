@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { buildManagerTreeRows } from '@/lib/agent-hierarchy'
 import { cn } from '@/lib/utils'
-import type { AgentContextUsage, AgentDescriptor, AgentStatus, ManagerModelPreset } from '@/lib/ws-types'
+import type { AgentContextUsage, AgentDescriptor, AgentStatus, ManagerModelPreset } from '@middleman/protocol'
 
 interface AgentSidebarProps {
   connected: boolean

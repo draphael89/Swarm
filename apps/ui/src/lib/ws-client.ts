@@ -13,7 +13,7 @@ import {
   type ServerEvent,
   type SlackStatusEvent,
   type TelegramStatusEvent,
-} from './ws-types'
+} from '@middleman/protocol'
 
 const INITIAL_CONNECT_DELAY_MS = 50
 const RECONNECT_MS = 1200
